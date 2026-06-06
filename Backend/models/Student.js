@@ -14,7 +14,10 @@ const studentSchema = new mongoose.Schema({
   status: { type: String, required: true, default: 'Active' },
   admissionPaid: { type: mongoose.Schema.Types.Mixed, default: false }, // false or Year-Month string
   paidMonths: { type: Map, of: Boolean, default: {} }, // YYYY-MM -> true
-  performanceScore: { type: Number, default: 50 }
+  performanceScore: { type: Number, default: 50 },
+  customMonthlyRate: { type: Number, default: null }, // custom monthly rate override
+  appliedCoupon: { type: String, default: '' }, // applied coupon code
+  discountPercentage: { type: Number, default: 0 } // discount percentage
 }, { timestamps: true });
 
 export default mongoose.model('Student', studentSchema);

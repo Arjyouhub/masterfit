@@ -118,6 +118,14 @@ function App() {
       .catch(err => console.error("Error updating fee rates in DB:", err));
   };
 
+  // Fee Customization Modal States
+  const [isFeeEditModalOpen, setIsFeeEditModalOpen] = useState(false);
+  const [feeEditingStudent, setFeeEditingStudent] = useState(null);
+  const [customRateInput, setCustomRateInput] = useState('');
+  const [customStartMonth, setCustomStartMonth] = useState('');
+  const [couponInput, setCouponInput] = useState('');
+  const [couponMessage, setCouponMessage] = useState('');
+
   // Super Admin Forgot Password (OTP) States
   const [forgotStep, setForgotStep] = useState(1);
   const [forgotUsername, setForgotUsername] = useState('');
@@ -450,6 +458,16 @@ function App() {
     setNewStudent({ name: '', age: '', phone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: defaultBranch, photo: null });
   };
 
+  const formatMonthName = (monthStr) => {
+    if (!monthStr) return '';
+    const parts = monthStr.split('-');
+    if (parts.length !== 2) return monthStr;
+    const year = parts[0];
+    const monthIdx = parseInt(parts[1], 10) - 1;
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${monthNames[monthIdx] || parts[1]} '${year.slice(2)}`;
+  };
+
   const calculateStudentFees = (student, targetMonth = null) => {
     if (!student) return { monthlyDue: 0, admissionDue: 0, totalDue: 0, unpaidMonths: [], paidMonthsList: [] };
 
@@ -499,7 +517,13 @@ function App() {
       }
     }
 
-    const monthlyDue = unpaidMonths.length * monthlyFeeRate;
+    const rateToUse = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
+      ? student.customMonthlyRate 
+      : monthlyFeeRate;
+    const discountAmount = Math.round(rateToUse * (student.discountPercentage || 0) / 100);
+    const finalRate = Math.max(0, rateToUse - discountAmount);
+
+    const monthlyDue = unpaidMonths.length * finalRate;
     const totalDue = admissionDue + monthlyDue;
 
     return {
@@ -1124,114 +1148,37 @@ function App() {
   const renderFees = () => {
     const isPaid = (student) => student.paidMonths && student.paidMonths[feeMonth];
 
-    const renderBatchTable = (scheduleName) => {
-      const batchStudents = searchedStudents.filter(s => s.schedule === scheduleName);
-      if (batchStudents.length === 0) return null;
-      
-      const batchUnpaid = batchStudents.filter(s => !isPaid(s)).length;
-      const batchPaid = batchStudents.filter(s => isPaid(s)).length;
+    const feeStudents = searchedStudents;
+    const totalUnpaid = feeStudents.filter(s => !isPaid(s)).length;
+    const totalPaid = feeStudents.filter(s => isPaid(s)).length;
 
-      const batchMonthlyCollected = batchStudents.filter(s => isPaid(s)).length * monthlyFeeRate;
-      const batchAdmissionCollected = batchStudents.filter(s => s.admissionPaid === feeMonth).length * admissionFeeRate;
-      const batchTotalCollected = batchMonthlyCollected + batchAdmissionCollected;
-      
-      return (
-        <div className="panel" style={{ marginTop: '2rem' }}>
-          <div className="panel-header">
-            <h3 className="panel-title">{scheduleName} Batch ({feeMonth})</h3>
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <span className="badge badge-green">{batchPaid} Paid Monthly</span>
-              <span className="badge badge-orange">{batchUnpaid} Pending Monthly</span>
-            </div>
-          </div>
-
-          <div className="stats-grid" style={{ marginBottom: '1.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-            <div className="stat-card" style={{ borderLeft: '4px solid #E50914', padding: '1.5rem' }}>
-              <div className="stat-details">
-                <h3 style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem' }}>Monthly Fees</h3>
-                <p className="stat-value" style={{ fontSize: '1.5rem', color: '#E50914' }}>₹{batchMonthlyCollected}</p>
-              </div>
-            </div>
-            <div className="stat-card" style={{ borderLeft: '4px solid #FFD700', padding: '1.5rem' }}>
-              <div className="stat-details">
-                <h3 style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem' }}>Admission Fees</h3>
-                <p className="stat-value" style={{ fontSize: '1.5rem', color: '#FFD700' }}>₹{batchAdmissionCollected}</p>
-              </div>
-            </div>
-            <div className="stat-card" style={{ borderLeft: '4px solid #4CAF50', padding: '1.5rem' }}>
-              <div className="stat-details">
-                <h3 style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem' }}>Total Collected</h3>
-                <p className="stat-value" style={{ fontSize: '1.5rem', color: '#4CAF50' }}>₹{batchTotalCollected}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="table-responsive">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Student</th>
-                  <th>Batch Time</th>
-                  <th>Admission (₹{admissionFeeRate})</th>
-                  <th>Monthly (₹{monthlyFeeRate})</th>
-                  <th>Outstanding Dues</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {batchStudents.map(student => {
-                  const feeDetails = calculateStudentFees(student);
-                  return (
-                    <tr key={student.id}>
-                      <td>
-                        <div 
-                          style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}
-                          onClick={() => setSelectedStudent(student)}
-                        >
-                          {student.name}
-                        </div>
-                      </td>
-                      <td><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.batch}</span></td>
-                      <td>
-                        {student.admissionPaid ? <span className="badge badge-green">Paid</span> : <span className="badge badge-red">Pending</span>}
-                      </td>
-                      <td>
-                        {isPaid(student) ? <span className="badge badge-green">Paid</span> : <span className="badge badge-red">Pending</span>}
-                      </td>
-                      <td>
-                        <span style={{ fontWeight: 600, color: feeDetails.totalDue > 0 ? '#E50914' : '#4CAF50' }}>
-                          ₹{feeDetails.totalDue}
-                        </span>
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          {!student.admissionPaid ? (
-                            <button onClick={() => markFeePaid(student.id, 'admissionPaid')} className="btn-small">Pay Admission</button>
-                          ) : (
-                            <button onClick={() => unmarkFeePaid(student.id, 'admissionPaid')} className="btn-small btn-secondary">Undo Admission</button>
-                          )}
-                          {!isPaid(student) ? (
-                            <button onClick={() => markFeePaid(student.id, 'currentMonthPaid')} className="btn-small btn-primary">Pay Monthly</button>
-                          ) : (
-                            <button onClick={() => unmarkFeePaid(student.id, 'currentMonthPaid')} className="btn-small btn-secondary">Undo Monthly</button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      );
-    };
+    const monthlyCollected = feeStudents
+      .filter(s => isPaid(s))
+      .reduce((sum, s) => {
+        const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null
+          ? s.customMonthlyRate 
+          : monthlyFeeRate;
+        const discountAmount = Math.round(rateToUse * (s.discountPercentage || 0) / 100);
+        const finalRate = Math.max(0, rateToUse - discountAmount);
+        return sum + finalRate;
+      }, 0);
+    const admissionCollected = feeStudents.filter(s => s.admissionPaid === feeMonth).length * admissionFeeRate;
+    const totalCollected = monthlyCollected + admissionCollected;
 
     return (
       <div className="fees-container">
         {/* Month Selector Header */}
         <div className="panel panel-header-flex" style={{ marginBottom: '2rem' }}>
-          <h2 className="panel-title" style={{ margin: 0 }}>Fee Management</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <h2 className="panel-title" style={{ margin: 0 }}>Fee Management</h2>
+            <button className="btn-primary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }} onClick={() => {
+              const defaultBranch = isAdminUser(loggedInUser) ? 'Kuttiady' : (branches.find(b => b.toLowerCase() === (loggedInUser && loggedInUser.split('@')[1])) || 'Kuttiady');
+              setNewStudent(prev => ({ ...prev, branch: defaultBranch }));
+              setIsAddModalOpen(true);
+            }}>
+              <UserPlus size={14} /> Add Student
+            </button>
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <span style={{ color: 'var(--color-text-muted)' }}>Select Month:</span>
             <input 
@@ -1319,10 +1266,247 @@ function App() {
           </div>
         )}
 
-        {batchOptions.map(batchOption => {
-          const isOwnBatch = !loggedInUser || loggedInUser.toLowerCase().startsWith(batchOption.id.toLowerCase());
-          return isOwnBatch && renderBatchTable(batchOption.schedule);
-        })}
+        {/* Unified Fee Student List Panel */}
+        <div className="panel">
+          <div className="panel-header">
+            <h3 className="panel-title">Student Fee Roster ({formatMonthName(feeMonth)})</h3>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <span className="badge badge-green">{totalPaid} Paid Monthly</span>
+              <span className="badge badge-orange">{totalUnpaid} Pending Monthly</span>
+            </div>
+          </div>
+
+          <div className="stats-grid" style={{ marginBottom: '1.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+            <div className="stat-card" style={{ borderLeft: '4px solid #E50914', padding: '1.5rem' }}>
+              <div className="stat-details">
+                <h3 style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem' }}>Monthly Fees Collected</h3>
+                <p className="stat-value" style={{ fontSize: '1.5rem', color: '#E50914' }}>₹{monthlyCollected}</p>
+              </div>
+            </div>
+            <div className="stat-card" style={{ borderLeft: '4px solid #FFD700', padding: '1.5rem' }}>
+              <div className="stat-details">
+                <h3 style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem' }}>Admission Fees Collected</h3>
+                <p className="stat-value" style={{ fontSize: '1.5rem', color: '#FFD700' }}>₹{admissionCollected}</p>
+              </div>
+            </div>
+            <div className="stat-card" style={{ borderLeft: '4px solid #4CAF50', padding: '1.5rem' }}>
+              <div className="stat-details">
+                <h3 style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem' }}>Total Collected</h3>
+                <p className="stat-value" style={{ fontSize: '1.5rem', color: '#4CAF50' }}>₹{totalCollected}</p>
+              </div>
+            </div>
+          </div>
+
+          {feeStudents.length > 0 ? (
+            <div className="table-responsive">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Student</th>
+                    {isAdminUser(loggedInUser) && <th>Branch</th>}
+                    <th>Batch Time</th>
+                    <th style={{ textAlign: 'center' }}>Admission (₹{admissionFeeRate})</th>
+                    <th style={{ textAlign: 'center' }}>Monthly ({formatMonthName(feeMonth)})</th>
+                    <th>Monthly Details</th>
+                    <th style={{ textAlign: 'center' }}>Outstanding Dues</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {feeStudents.map(student => {
+                    const feeDetails = calculateStudentFees(student, feeMonth);
+                    return (
+                      <tr key={student.id}>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div 
+                              style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}
+                              onClick={() => setSelectedStudent(student)}
+                            >
+                              {student.name}
+                            </div>
+                            <button 
+                              onClick={() => {
+                                setFeeEditingStudent(student);
+                                setCustomRateInput(student.customMonthlyRate !== undefined && student.customMonthlyRate !== null ? student.customMonthlyRate : '');
+                                setCustomStartMonth(student.joinDate ? student.joinDate.slice(0, 7) : new Date().toISOString().slice(0, 7));
+                                setCouponInput(student.appliedCoupon || '');
+                                setCouponMessage(student.appliedCoupon ? `Active: ${student.appliedCoupon} (${student.discountPercentage}% Off)` : '');
+                                setIsFeeEditModalOpen(true);
+                              }}
+                              className="btn-icon"
+                              style={{ padding: '2px', background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)', transition: 'color 0.15s ease' }}
+                              onMouseEnter={(e) => e.currentTarget.style.color = '#FFD700'}
+                              onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255,255,255,0.4)'}
+                              title="Customize Fees & Coupon"
+                            >
+                              <Settings size={13} />
+                            </button>
+                          </div>
+                        </td>
+                        {isAdminUser(loggedInUser) && (
+                          <td>
+                            <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.branch}</span>
+                          </td>
+                        )}
+                        <td><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.batch}</span></td>
+                        <td style={{ textAlign: 'center' }}>
+                          <select 
+                            value={student.admissionPaid ? "paid" : "pending"} 
+                            onChange={(e) => {
+                              if (e.target.value === 'paid') {
+                                markFeePaid(student.id, 'admissionPaid');
+                              } else {
+                                unmarkFeePaid(student.id, 'admissionPaid');
+                              }
+                            }}
+                            className="form-control"
+                            style={{ 
+                              padding: '0.3rem 0.6rem', 
+                              fontSize: '0.8rem', 
+                              width: '95px', 
+                              background: student.admissionPaid ? 'rgba(76, 175, 80, 0.12)' : 'rgba(229, 9, 20, 0.12)', 
+                              color: student.admissionPaid ? '#51CF66' : '#FF6B6B', 
+                              border: `1px solid ${student.admissionPaid ? 'rgba(76, 175, 80, 0.3)' : 'rgba(229, 9, 20, 0.3)'}`,
+                              borderRadius: '20px',
+                              cursor: 'pointer',
+                              fontWeight: 600,
+                              textAlign: 'center',
+                              outline: 'none'
+                            }}
+                          >
+                            <option value="paid" style={{ background: '#181818', color: '#51CF66' }}>Paid</option>
+                            <option value="pending" style={{ background: '#181818', color: '#FF6B6B' }}>Pending</option>
+                          </select>
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <select 
+                            value={isPaid(student) ? "paid" : "pending"} 
+                            onChange={(e) => {
+                              if (e.target.value === 'paid') {
+                                markFeePaid(student.id, 'currentMonthPaid');
+                              } else {
+                                unmarkFeePaid(student.id, 'currentMonthPaid');
+                              }
+                            }}
+                            className="form-control"
+                            style={{ 
+                              padding: '0.3rem 0.6rem', 
+                              fontSize: '0.8rem', 
+                              width: '95px', 
+                              background: isPaid(student) ? 'rgba(76, 175, 80, 0.12)' : 'rgba(229, 9, 20, 0.12)', 
+                              color: isPaid(student) ? '#51CF66' : '#FF6B6B', 
+                              border: `1px solid ${isPaid(student) ? 'rgba(76, 175, 80, 0.3)' : 'rgba(229, 9, 20, 0.3)'}`,
+                              borderRadius: '20px',
+                              cursor: 'pointer',
+                              fontWeight: 600,
+                              textAlign: 'center',
+                              outline: 'none'
+                            }}
+                          >
+                            <option value="paid" style={{ background: '#181818', color: '#51CF66' }}>Paid</option>
+                            <option value="pending" style={{ background: '#181818', color: '#FF6B6B' }}>Pending</option>
+                          </select>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxWidth: '250px' }}>
+                            {feeDetails.unpaidMonths.map(m => (
+                              <button 
+                                key={m} 
+                                style={{ 
+                                  border: '1px solid rgba(229, 9, 20, 0.3)', 
+                                  background: 'rgba(229, 9, 20, 0.08)', 
+                                  color: '#FF8787', 
+                                  borderRadius: '12px', 
+                                  cursor: 'pointer', 
+                                  padding: '3px 8px', 
+                                  fontSize: '0.72rem', 
+                                  fontWeight: 600,
+                                  transition: 'all 0.15s ease'
+                                }} 
+                                onClick={() => markFeePaidCustomMonth(student.id, m)}
+                                title="Click to Pay"
+                              >
+                                • {formatMonthName(m)}
+                              </button>
+                            ))}
+                            {feeDetails.paidMonthsList.map(m => (
+                              <button 
+                                key={m} 
+                                style={{ 
+                                  border: '1px solid rgba(76, 175, 80, 0.3)', 
+                                  background: 'rgba(76, 175, 80, 0.08)', 
+                                  color: '#82C91E', 
+                                  borderRadius: '12px', 
+                                  cursor: 'pointer', 
+                                  padding: '3px 8px', 
+                                  fontSize: '0.72rem', 
+                                  fontWeight: 600,
+                                  transition: 'all 0.15s ease'
+                                }} 
+                                onClick={() => unmarkFeePaidCustomMonth(student.id, m)}
+                                title="Click to Undo"
+                              >
+                                ✓ {formatMonthName(m)}
+                              </button>
+                            ))}
+                            {feeDetails.unpaidMonths.length === 0 && feeDetails.paidMonthsList.length === 0 && (
+                              <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>No record</span>
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
+                            {feeDetails.totalDue > 0 ? (
+                              <>
+                                <span style={{ 
+                                  fontWeight: 600, 
+                                  color: '#FF6B6B', 
+                                  fontSize: '0.85rem', 
+                                  background: 'rgba(229, 9, 20, 0.12)', 
+                                  padding: '3px 9px', 
+                                  borderRadius: '20px', 
+                                  border: '1px solid rgba(229, 9, 20, 0.25)',
+                                  display: 'inline-block'
+                                }}>
+                                  ₹{feeDetails.totalDue}
+                                </span>
+                                <span style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginTop: '4px', whiteSpace: 'nowrap' }}>
+                                  Adm: ₹{feeDetails.admissionDue} | Mly: ₹{feeDetails.monthlyDue}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span style={{ 
+                                  fontWeight: 600, 
+                                  color: '#51CF66', 
+                                  fontSize: '0.85rem', 
+                                  background: 'rgba(76, 175, 80, 0.12)', 
+                                  padding: '3px 9px', 
+                                  borderRadius: '20px', 
+                                  border: '1px solid rgba(76, 175, 80, 0.25)',
+                                  display: 'inline-block'
+                                }}>
+                                  ₹0
+                                </span>
+                                <span style={{ fontSize: '0.68rem', color: 'rgba(76, 175, 80, 0.7)', marginTop: '4px' }}>
+                                  Settled
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>
+              No students found for this month and selection filters.
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -3372,6 +3556,146 @@ function App() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Fee Customization Modal */}
+      {isFeeEditModalOpen && feeEditingStudent && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '450px' }}>
+            <div className="panel-header">
+              <h2 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Wallet size={20} color="var(--color-primary)" /> Customize Fees: {feeEditingStudent.name}
+              </h2>
+              <button className="btn-icon" onClick={() => setIsFeeEditModalOpen(false)}><X size={24} /></button>
+            </div>
+            
+            <div style={{ padding: '1rem 0' }}>
+              {/* Billing Start Month */}
+              <div className="form-group">
+                <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', display: 'block' }}>Billing Start Month (Join Month)</label>
+                <input 
+                  type="month" 
+                  className="form-control" 
+                  value={customStartMonth}
+                  onChange={(e) => setCustomStartMonth(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              {/* Custom Fee Rate Override */}
+              <div className="form-group" style={{ marginTop: '1.25rem' }}>
+                <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', display: 'block' }}>Custom Monthly Rate (₹) [Leave blank to use default ₹{monthlyFeeRate}]</label>
+                <input 
+                  type="number" 
+                  className="form-control" 
+                  placeholder={`Default: ₹${monthlyFeeRate}`}
+                  value={customRateInput}
+                  onChange={(e) => setCustomRateInput(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              {/* Coupon Section */}
+              <div className="form-group" style={{ marginTop: '1.25rem' }}>
+                <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', display: 'block' }}>Apply Coupon Code</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input 
+                    type="text" 
+                    className="form-control" 
+                    placeholder="Enter coupon (e.g. FIT20)"
+                    value={couponInput}
+                    onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                    style={{ flex: 1 }}
+                  />
+                  <button 
+                    type="button" 
+                    className="btn-primary" 
+                    style={{ padding: '0 1rem', fontSize: '0.85rem', height: '38px' }}
+                    onClick={() => {
+                      const code = couponInput.trim().toUpperCase();
+                      if (!code) {
+                        setCouponMessage('Coupon cleared (0% Discount)');
+                        setFeeEditingStudent(prev => ({ ...prev, appliedCoupon: '', discountPercentage: 0 }));
+                        return;
+                      }
+                      
+                      let discount = 0;
+                      if (code === 'FIT10' || code === 'WELCOME10') {
+                        discount = 10;
+                      } else if (code === 'FIT20') {
+                        discount = 20;
+                      } else if (code === 'FIT50') {
+                        discount = 50;
+                      } else if (code === 'FREE') {
+                        discount = 100;
+                      } else {
+                        setCouponMessage('❌ Invalid Coupon Code');
+                        return;
+                      }
+                      
+                      setCouponMessage(`✓ Coupon Applied! ${discount}% Discount`);
+                      setFeeEditingStudent(prev => ({ ...prev, appliedCoupon: code, discountPercentage: discount }));
+                    }}
+                  >
+                    Apply
+                  </button>
+                </div>
+                {couponMessage && (
+                  <div style={{ 
+                    marginTop: '6px', 
+                    fontSize: '0.8rem', 
+                    color: couponMessage.includes('❌') ? '#FF6B6B' : '#51CF66',
+                    fontWeight: 500
+                  }}>
+                    {couponMessage}
+                  </div>
+                )}
+                <div style={{ marginTop: '8px', fontSize: '0.75rem', color: 'var(--color-text-muted)', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '4px' }}>
+                  <strong>Available Coupons:</strong> FIT10 (10% off), FIT20 (20% off), FIT50 (50% off), FREE (100% off)
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-actions" style={{ marginTop: '1.5rem', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button 
+                className="btn-secondary" 
+                onClick={() => setIsFeeEditModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn-primary" 
+                onClick={() => {
+                  const rate = customRateInput === '' ? null : parseInt(customRateInput, 10);
+                  const updatedStudent = {
+                    ...feeEditingStudent,
+                    joinDate: `${customStartMonth}-01`,
+                    customMonthlyRate: rate
+                  };
+
+                  setStudents(students.map(s => s.id === updatedStudent.id ? updatedStudent : s));
+                  if (selectedStudent && selectedStudent.id === updatedStudent.id) {
+                    setSelectedStudent(updatedStudent);
+                  }
+
+                  fetch(`${API_BASE_URL}/students/${updatedStudent.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updatedStudent)
+                  })
+                    .then(res => res.json())
+                    .then(() => {
+                      setIsFeeEditModalOpen(false);
+                      setFeeEditingStudent(null);
+                    })
+                    .catch(err => console.error("Error saving fee customizations:", err));
+                }}
+              >
+                Save Changes
+              </button>
+            </div>
           </div>
         </div>
       )}
