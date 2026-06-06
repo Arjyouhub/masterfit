@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { 
-  Users, CalendarDays, Wallet, Bell, Settings, LogOut, UserPlus, AlertTriangle, X, 
-  ChevronLeft, ChevronRight, CheckCircle, XCircle, MessageCircle, 
+import {
+  Users, CalendarDays, Wallet, Bell, Settings, LogOut, UserPlus, AlertTriangle, X,
+  ChevronLeft, ChevronRight, CheckCircle, XCircle, MessageCircle,
   Search, Phone, Trash2, ArrowRight, Activity, MapPin, TrendingUp, Award, Menu
 } from 'lucide-react';
 import './index.css';
@@ -16,7 +16,7 @@ const DEFAULT_BATCH_OPTIONS = [
 ];
 
 
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'https://masterfit-dfz7.onrender.com/api';
 
 function App() {
   // Bulletproof Cookie Parser
@@ -42,7 +42,7 @@ function App() {
         break;
       }
     }
-    
+
     if (hasSession) {
       return 'admin'; // Always restore admin dashboard if session exists!
     }
@@ -64,7 +64,7 @@ function App() {
   const [scrolled, setScrolled] = useState(false);
   const [loginData, setLoginData] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
-  
+
   const [loggedInUser, setLoggedInUser] = useState(() => {
     const cookies = document.cookie.split(';');
     for (let i = 0; i < cookies.length; i++) {
@@ -79,11 +79,11 @@ function App() {
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [selectedBranchLogin, setSelectedBranchLogin] = useState('Kuttiady');
   const [selectedBatchLogin, setSelectedBatchLogin] = useState('admin');
-  
+
   // Mobile drawer states
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  
+
   // Settings Form States
   const [settingsError, setSettingsError] = useState('');
   const [settingsSuccess, setSettingsSuccess] = useState('');
@@ -91,7 +91,7 @@ function App() {
   const [createAdminForm, setCreateAdminForm] = useState({ username: '', password: '', confirmPassword: '' });
   const [branchForm, setBranchForm] = useState({ branch: 'kuttiady', newUsername: '', newPassword: '', confirmPassword: '' });
   const [batchForm, setBatchForm] = useState({ branch: 'kuttiady', batch: 'batch1', newUsername: '', newPassword: '', confirmPassword: '' });
-  
+
   const [adminCredentials, setAdminCredentials] = useState({});
   const [branches, setBranches] = useState(DEFAULT_BRANCHES);
   const [customBranches, setCustomBranches] = useState([]);
@@ -109,7 +109,7 @@ function App() {
     fetch(`${API_BASE_URL}/credentials`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         monthlyFeeRate: monthlyRate,
         admissionFeeRate: admissionRate
       })
@@ -138,7 +138,7 @@ function App() {
     if (!user) return false;
     const usernameClean = user.toLowerCase().trim();
     if (usernameClean.includes('@')) return false;
-    
+
     // Fallback while adminCredentials are loading async
     const sessionUser = getCookieValue('umai_session_user');
     if (sessionUser && sessionUser.toLowerCase().trim() === usernameClean) {
@@ -154,10 +154,10 @@ function App() {
   const [attendanceTab, setAttendanceTab] = useState('monthly'); // 'monthly' or 'year2026'
   const [isEditingStudent, setIsEditingStudent] = useState(false);
   const [editingStudentData, setEditingStudentData] = useState(null);
-  
+
   // Persistent State
   const [students, setStudents] = useState([]);
-  
+
   const [attendanceRecords, setAttendanceRecords] = useState({});
 
   // Sync state with backend on mount
@@ -195,12 +195,12 @@ function App() {
           setAdminCredentials(data.adminCredentials || {});
           setBranchCredentials(data.branchCredentials || {});
           setBatchCredentials(data.batchCredentials || {});
-          
+
           const customBranchesList = data.customBranches || [];
           const customBatchesList = data.customBatches || [];
           setCustomBranches(customBranchesList);
           setCustomBatches(customBatchesList);
-          
+
           const dbBranches = Object.keys(data.branchCredentials || {}).map(b => b.charAt(0).toUpperCase() + b.slice(1));
           const uniqueBranches = Array.from(new Set([
             ...DEFAULT_BRANCHES,
@@ -208,7 +208,7 @@ function App() {
             ...customBranchesList.map(b => b.charAt(0).toUpperCase() + b.slice(1))
           ]));
           setBranches(uniqueBranches);
-          
+
           const uniqueBatches = [
             ...DEFAULT_BATCH_OPTIONS,
             ...customBatchesList
@@ -316,11 +316,11 @@ function App() {
       window.location.hash = '#/admin';
     }
   }, [appMode]);
-  
+
   // Calendar State
   const [currentDate, setCurrentDate] = useState(new Date(2026, 4, 1)); // May 2026
   const [feeMonth, setFeeMonth] = useState(new Date().toISOString().slice(0, 7)); // "YYYY-MM"
-  
+
   // Profile modal dues calculation month limit
   const [profileFeeMonth, setProfileFeeMonth] = useState(() => new Date().toISOString().slice(0, 7));
 
@@ -329,15 +329,15 @@ function App() {
       setProfileFeeMonth(feeMonth);
     }
   }, [selectedStudent, feeMonth]);
-  
+
   // Attendance Marking State
   const [markingDate, setMarkingDate] = useState(new Date().toISOString().split('T')[0]);
   const [attendanceBatchFilter, setAttendanceBatchFilter] = useState('All');
   const [attendanceScheduleFilter, setAttendanceScheduleFilter] = useState('All');
-  
+
   // Roster Filter State
   const [branchFilter, setBranchFilter] = useState('All');
-  
+
   // Form State
   const [newStudent, setNewStudent] = useState({
     name: '', age: '', phone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: 'Kuttiady', photo: null
@@ -348,7 +348,7 @@ function App() {
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setNewStudent({...newStudent, photo: reader.result});
+        setNewStudent({ ...newStudent, photo: reader.result });
       };
       reader.readAsDataURL(file);
     }
@@ -356,10 +356,10 @@ function App() {
 
   // Global Search State
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   const searchedStudents = students.filter(s => {
     const matchesSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase()) || s.phone.includes(searchQuery);
-    
+
     let activeBranch = 'All';
     if (isAdminUser(loggedInUser)) {
       activeBranch = branchFilter;
@@ -369,19 +369,19 @@ function App() {
       const branchPart = loggedInUser.split('@')[1];
       activeBranch = branches.find(b => b.toLowerCase() === branchPart) || 'All';
     }
-    
+
     const matchesBranch = activeBranch === 'All' || s.branch === activeBranch;
-    
+
     const activeBatch = batchOptions.find(b => loggedInUser && loggedInUser.toLowerCase().startsWith(b.id.toLowerCase()));
     if (activeBatch) {
       return matchesSearch && matchesBranch && s.schedule === activeBatch.schedule;
     }
-    
+
     return matchesSearch && matchesBranch;
   });
 
   const getBeltColorClass = (belt) => {
-    switch(belt.toLowerCase()) {
+    switch (belt.toLowerCase()) {
       case 'white': return 'badge-white';
       case 'yellow': return 'badge-yellow';
       case 'orange': return 'badge-orange';
@@ -411,7 +411,7 @@ function App() {
           if (!res.ok) throw new Error('Failed to delete on server');
         })
         .catch(err => console.error("Error deleting student:", err));
-      
+
       setStudentToDelete(null);
     }
   };
@@ -431,18 +431,18 @@ function App() {
     const student = {
       id: students.length > 0 ? Math.max(...students.map(s => s.id)) + 1 : 1,
       ...newStudent,
-      branch: (loggedInUser && loggedInUser.startsWith('batch')) 
-        ? defaultBranch 
+      branch: (loggedInUser && loggedInUser.startsWith('batch'))
+        ? defaultBranch
         : ((isAdminUser(loggedInUser) || appMode === 'login' || appMode === 'superadmin-login') ? newStudent.branch : defaultBranch),
       status: "Active",
       admissionPaid: false,
       paidMonths: {},
       performanceScore: 50
     };
-    
+
     setStudents([...students, student]);
     setIsAddModalOpen(false);
-    
+
     fetch(`${API_BASE_URL}/students`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -450,11 +450,11 @@ function App() {
     })
       .then(res => res.json())
       .catch(err => console.error("Error creating student:", err));
-    
+
     if (appMode === 'login' || appMode === 'superadmin-login') {
       alert(`Enrollment request for ${newStudent.name} submitted successfully!`);
     }
-    
+
     setNewStudent({ name: '', age: '', phone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: defaultBranch, photo: null });
   };
 
@@ -518,7 +518,7 @@ function App() {
     }
 
     const rateToUse = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
-      ? student.customMonthlyRate 
+      ? student.customMonthlyRate
       : monthlyFeeRate;
     const discountAmount = Math.round(rateToUse * (student.discountPercentage || 0) / 100);
     const finalRate = Math.max(0, rateToUse - discountAmount);
@@ -687,7 +687,7 @@ function App() {
   const renderPublic = () => (
     <div className="public-layout">
       <nav className={`public-nav ${scrolled ? 'scrolled' : ''}`}>
-        <div className="brand" style={{ cursor: 'pointer' }} onClick={() => { window.scrollTo(0,0); setIsMobileMenuOpen(false); }}>
+        <div className="brand" style={{ cursor: 'pointer' }} onClick={() => { window.scrollTo(0, 0); setIsMobileMenuOpen(false); }}>
           <span className="brand-accent">MASTER</span> FIT
         </div>
         <button className="mobile-menu-btn" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
@@ -815,7 +815,7 @@ function App() {
             </div>
           </div>
           <button className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Send Registration Request</button>
-          
+
           <div className="contact-info">
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted)' }}><Phone size={18} color="var(--color-primary)" /> 555-0199</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted)' }}><MapPin size={18} color="var(--color-primary)" /> 123 Dojo Street</div>
@@ -829,10 +829,10 @@ function App() {
   const renderYearCalendar = () => {
     const year = 2026;
     const monthNames = [
-      "January", "February", "March", "April", "May", "June", 
+      "January", "February", "March", "April", "May", "June",
       "July", "August", "September", "October", "November", "December"
     ];
-    
+
     return (
       <div className="year-calendar-container panel">
         <div className="panel-header" style={{ marginBottom: '2rem' }}>
@@ -847,28 +847,28 @@ function App() {
           {monthNames.map((monthName, m) => {
             const firstDay = new Date(year, m, 1).getDay();
             const daysInMonth = new Date(year, m + 1, 0).getDate();
-            
+
             const monthDays = [];
             // Empty slots for padding
             for (let i = 0; i < firstDay; i++) {
               monthDays.push(<div key={`empty-${m}-${i}`} className="mini-day empty" style={{ width: '32px', height: '32px' }}></div>);
             }
-            
+
             // Days of the month
             for (let d = 1; d <= daysInMonth; d++) {
               const dateStr = `${year}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
               const dayRecord = attendanceRecords[dateStr];
-              
+
               let presentCount = 0;
               let totalMarked = 0;
-              
+
               if (dayRecord) {
                 Object.values(dayRecord).forEach(status => {
                   totalMarked++;
                   if (status === 'present') presentCount++;
                 });
               }
-              
+
               let cellStyle = {
                 width: '32px',
                 height: '32px',
@@ -883,7 +883,7 @@ function App() {
                 transition: 'all 0.2s ease',
                 border: '1px solid transparent'
               };
-              
+
               if (totalMarked > 0) {
                 const ratio = presentCount / (students.length || 1);
                 if (ratio >= 0.7) {
@@ -896,15 +896,15 @@ function App() {
                   cellStyle.color = '#FF9800';
                 }
               }
-              
+
               if (dateStr === markingDate) {
                 cellStyle.borderColor = 'var(--color-primary)';
                 cellStyle.boxShadow = '0 0 8px rgba(229, 9, 20, 0.4)';
               }
-              
+
               monthDays.push(
-                <div 
-                  key={`day-${m}-${d}`} 
+                <div
+                  key={`day-${m}-${d}`}
                   className="mini-day"
                   style={cellStyle}
                   onClick={() => {
@@ -918,7 +918,7 @@ function App() {
                 </div>
               );
             }
-            
+
             return (
               <div key={monthName} className="mini-month-panel" style={{
                 background: 'rgba(255, 255, 255, 0.01)',
@@ -964,19 +964,19 @@ function App() {
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const firstDay = new Date(year, month, 1).getDay();
     const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-    
+
     const days = [];
     for (let i = 0; i < firstDay; i++) {
       days.push(<div key={`empty-${i}`} className="calendar-day empty"></div>);
     }
-    
+
     for (let i = 1; i <= daysInMonth; i++) {
       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
       const dayRecord = attendanceRecords[dateStr];
-      
+
       let presentCount = 0;
       let totalMarked = 0;
-      
+
       if (dayRecord) {
         Object.values(dayRecord).forEach(status => {
           totalMarked++;
@@ -991,13 +991,13 @@ function App() {
         <div key={i} className={`calendar-day ${dateStr === markingDate ? 'today' : ''}`} onClick={() => setMarkingDate(dateStr)} style={{ cursor: 'pointer' }}>
           <div className="day-number">{i}</div>
           <div className="day-content">
-             <div className="attendance-indicator">
-               {displayPresent >= (searchedStudents.length * 0.7) ? (
-                 <span className="text-success"><CheckCircle size={14}/> {displayPresent}</span>
-               ) : (
-                 <span className="text-warning"><XCircle size={14}/> {displayPresent}</span>
-               )}
-             </div>
+            <div className="attendance-indicator">
+              {displayPresent >= (searchedStudents.length * 0.7) ? (
+                <span className="text-success"><CheckCircle size={14} /> {displayPresent}</span>
+              ) : (
+                <span className="text-warning"><XCircle size={14} /> {displayPresent}</span>
+              )}
+            </div>
           </div>
         </div>
       );
@@ -1006,14 +1006,14 @@ function App() {
     return (
       <div className="attendance-view">
         <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
-          <button 
+          <button
             className={`btn-primary ${attendanceTab === 'monthly' ? '' : 'btn-secondary'}`}
             style={attendanceTab === 'monthly' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
             onClick={() => setAttendanceTab('monthly')}
           >
             Monthly Dashboard
           </button>
-          <button 
+          <button
             className={`btn-primary ${attendanceTab === 'year2026' ? '' : 'btn-secondary'}`}
             style={attendanceTab === 'year2026' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
             onClick={() => setAttendanceTab('year2026')}
@@ -1029,32 +1029,32 @@ function App() {
                 <h3 className="panel-title">Daily Attendance</h3>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span style={{ color: 'var(--color-text-muted)' }}>Date:</span>
-                  <input 
-                    type="date" 
-                    className="form-control" 
+                  <input
+                    type="date"
+                    className="form-control"
                     style={{ width: 'auto', padding: '0.4rem 0.75rem' }}
                     value={markingDate}
                     onChange={(e) => setMarkingDate(e.target.value)}
                   />
                 </div>
               </div>
-              
+
               <div className="filter-row" style={{ marginBottom: '0.5rem' }}>
-                <span style={{color: 'var(--color-text-muted)', width: '80px', fontSize: '0.85rem'}}>Time:</span>
+                <span style={{ color: 'var(--color-text-muted)', width: '80px', fontSize: '0.85rem' }}>Time:</span>
                 <button className={`btn-small ${attendanceBatchFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setAttendanceBatchFilter('All')}>All</button>
                 <button className={`btn-small ${attendanceBatchFilter === 'Morning' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setAttendanceBatchFilter('Morning')}>Morning</button>
                 <button className={`btn-small ${attendanceBatchFilter === 'Evening' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setAttendanceBatchFilter('Evening')}>Evening</button>
                 <button className={`btn-small ${attendanceBatchFilter === 'Night' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setAttendanceBatchFilter('Night')}>Night</button>
               </div>
-              
+
               {(!loggedInUser || !loggedInUser.startsWith('batch')) && (
                 <div className="filter-row" style={{ marginBottom: '1.5rem' }}>
-                  <span style={{color: 'var(--color-text-muted)', width: '80px', fontSize: '0.85rem'}}>Batch:</span>
+                  <span style={{ color: 'var(--color-text-muted)', width: '80px', fontSize: '0.85rem' }}>Batch:</span>
                   <button className={`btn-small ${attendanceScheduleFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setAttendanceScheduleFilter('All')}>All Batches</button>
                   {batchOptions.map(opt => (
-                    <button 
-                      key={opt.id} 
-                      className={`btn-small ${attendanceScheduleFilter === opt.schedule ? 'btn-primary' : 'btn-secondary'}`} 
+                    <button
+                      key={opt.id}
+                      className={`btn-small ${attendanceScheduleFilter === opt.schedule ? 'btn-primary' : 'btn-secondary'}`}
                       onClick={() => setAttendanceScheduleFilter(opt.schedule)}
                     >
                       {opt.name}
@@ -1062,7 +1062,7 @@ function App() {
                   ))}
                 </div>
               )}
-              
+
               <div className="table-responsive">
                 <table className="data-table">
                   <thead>
@@ -1082,7 +1082,7 @@ function App() {
                       const status = attendanceRecords[markingDate]?.[student.id];
                       return (
                         <tr key={student.id}>
-                          <td 
+                          <td
                             style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}
                             onClick={() => setSelectedStudent(student)}
                           >
@@ -1096,19 +1096,19 @@ function App() {
                           </td>
                           <td>
                             <div style={{ display: 'flex', gap: '8px' }}>
-                              <button 
+                              <button
                                 className={`btn-small ${status === 'present' ? 'btn-primary' : ''}`}
                                 style={status === 'present' ? { backgroundColor: '#4CAF50', borderColor: '#4CAF50' } : {}}
                                 onClick={() => markAttendance(student.id, 'present')}
                               >
-                                <CheckCircle size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }}/> Present
+                                <CheckCircle size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Present
                               </button>
-                              <button 
+                              <button
                                 className={`btn-small ${status === 'absent' ? 'btn-primary' : ''}`}
                                 style={status === 'absent' ? { backgroundColor: '#F44336', borderColor: '#F44336' } : {}}
                                 onClick={() => markAttendance(student.id, 'absent')}
                               >
-                                <XCircle size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }}/> Absent
+                                <XCircle size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Absent
                               </button>
                             </div>
                           </td>
@@ -1156,7 +1156,7 @@ function App() {
       .filter(s => isPaid(s))
       .reduce((sum, s) => {
         const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null
-          ? s.customMonthlyRate 
+          ? s.customMonthlyRate
           : monthlyFeeRate;
         const discountAmount = Math.round(rateToUse * (s.discountPercentage || 0) / 100);
         const finalRate = Math.max(0, rateToUse - discountAmount);
@@ -1181,9 +1181,9 @@ function App() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <span style={{ color: 'var(--color-text-muted)' }}>Select Month:</span>
-            <input 
-              type="month" 
-              className="form-control" 
+            <input
+              type="month"
+              className="form-control"
               style={{ width: 'auto', padding: '0.4rem 0.75rem' }}
               value={feeMonth}
               onChange={(e) => setFeeMonth(e.target.value)}
@@ -1204,9 +1204,9 @@ function App() {
                 <span style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)' }}>Admission Fee:</span>
                 <strong style={{ fontSize: '1rem', color: '#FFD700', minWidth: '60px', textAlign: 'center' }}>₹{admissionFeeRate}</strong>
                 <div style={{ display: 'flex', gap: '5px' }}>
-                  <button 
-                    type="button" 
-                    className="btn-small" 
+                  <button
+                    type="button"
+                    className="btn-small"
                     style={{ padding: '0.25rem 0.5rem', minWidth: '30px' }}
                     onClick={() => {
                       const newRate = Math.max(0, admissionFeeRate - 100);
@@ -1216,9 +1216,9 @@ function App() {
                   >
                     -
                   </button>
-                  <button 
-                    type="button" 
-                    className="btn-small" 
+                  <button
+                    type="button"
+                    className="btn-small"
                     style={{ padding: '0.25rem 0.5rem', minWidth: '30px' }}
                     onClick={() => {
                       const newRate = admissionFeeRate + 100;
@@ -1236,9 +1236,9 @@ function App() {
                 <span style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)' }}>Monthly Fee:</span>
                 <strong style={{ fontSize: '1rem', color: '#4CAF50', minWidth: '60px', textAlign: 'center' }}>₹{monthlyFeeRate}</strong>
                 <div style={{ display: 'flex', gap: '5px' }}>
-                  <button 
-                    type="button" 
-                    className="btn-small" 
+                  <button
+                    type="button"
+                    className="btn-small"
                     style={{ padding: '0.25rem 0.5rem', minWidth: '30px' }}
                     onClick={() => {
                       const newRate = Math.max(0, monthlyFeeRate - 100);
@@ -1248,9 +1248,9 @@ function App() {
                   >
                     -
                   </button>
-                  <button 
-                    type="button" 
-                    className="btn-small" 
+                  <button
+                    type="button"
+                    className="btn-small"
                     style={{ padding: '0.25rem 0.5rem', minWidth: '30px' }}
                     onClick={() => {
                       const newRate = monthlyFeeRate + 100;
@@ -1318,13 +1318,13 @@ function App() {
                       <tr key={student.id}>
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <div 
+                            <div
                               style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}
                               onClick={() => setSelectedStudent(student)}
                             >
                               {student.name}
                             </div>
-                            <button 
+                            <button
                               onClick={() => {
                                 setFeeEditingStudent(student);
                                 setCustomRateInput(student.customMonthlyRate !== undefined && student.customMonthlyRate !== null ? student.customMonthlyRate : '');
@@ -1350,8 +1350,8 @@ function App() {
                         )}
                         <td><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.batch}</span></td>
                         <td style={{ textAlign: 'center' }}>
-                          <select 
-                            value={student.admissionPaid ? "paid" : "pending"} 
+                          <select
+                            value={student.admissionPaid ? "paid" : "pending"}
                             onChange={(e) => {
                               if (e.target.value === 'paid') {
                                 markFeePaid(student.id, 'admissionPaid');
@@ -1360,12 +1360,12 @@ function App() {
                               }
                             }}
                             className="form-control"
-                            style={{ 
-                              padding: '0.3rem 0.6rem', 
-                              fontSize: '0.8rem', 
-                              width: '95px', 
-                              background: student.admissionPaid ? 'rgba(76, 175, 80, 0.12)' : 'rgba(229, 9, 20, 0.12)', 
-                              color: student.admissionPaid ? '#51CF66' : '#FF6B6B', 
+                            style={{
+                              padding: '0.3rem 0.6rem',
+                              fontSize: '0.8rem',
+                              width: '95px',
+                              background: student.admissionPaid ? 'rgba(76, 175, 80, 0.12)' : 'rgba(229, 9, 20, 0.12)',
+                              color: student.admissionPaid ? '#51CF66' : '#FF6B6B',
                               border: `1px solid ${student.admissionPaid ? 'rgba(76, 175, 80, 0.3)' : 'rgba(229, 9, 20, 0.3)'}`,
                               borderRadius: '20px',
                               cursor: 'pointer',
@@ -1379,8 +1379,8 @@ function App() {
                           </select>
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          <select 
-                            value={isPaid(student) ? "paid" : "pending"} 
+                          <select
+                            value={isPaid(student) ? "paid" : "pending"}
                             onChange={(e) => {
                               if (e.target.value === 'paid') {
                                 markFeePaid(student.id, 'currentMonthPaid');
@@ -1389,12 +1389,12 @@ function App() {
                               }
                             }}
                             className="form-control"
-                            style={{ 
-                              padding: '0.3rem 0.6rem', 
-                              fontSize: '0.8rem', 
-                              width: '95px', 
-                              background: isPaid(student) ? 'rgba(76, 175, 80, 0.12)' : 'rgba(229, 9, 20, 0.12)', 
-                              color: isPaid(student) ? '#51CF66' : '#FF6B6B', 
+                            style={{
+                              padding: '0.3rem 0.6rem',
+                              fontSize: '0.8rem',
+                              width: '95px',
+                              background: isPaid(student) ? 'rgba(76, 175, 80, 0.12)' : 'rgba(229, 9, 20, 0.12)',
+                              color: isPaid(student) ? '#51CF66' : '#FF6B6B',
                               border: `1px solid ${isPaid(student) ? 'rgba(76, 175, 80, 0.3)' : 'rgba(229, 9, 20, 0.3)'}`,
                               borderRadius: '20px',
                               cursor: 'pointer',
@@ -1410,19 +1410,19 @@ function App() {
                         <td>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxWidth: '250px' }}>
                             {feeDetails.unpaidMonths.map(m => (
-                              <button 
-                                key={m} 
-                                style={{ 
-                                  border: '1px solid rgba(229, 9, 20, 0.3)', 
-                                  background: 'rgba(229, 9, 20, 0.08)', 
-                                  color: '#FF8787', 
-                                  borderRadius: '12px', 
-                                  cursor: 'pointer', 
-                                  padding: '3px 8px', 
-                                  fontSize: '0.72rem', 
+                              <button
+                                key={m}
+                                style={{
+                                  border: '1px solid rgba(229, 9, 20, 0.3)',
+                                  background: 'rgba(229, 9, 20, 0.08)',
+                                  color: '#FF8787',
+                                  borderRadius: '12px',
+                                  cursor: 'pointer',
+                                  padding: '3px 8px',
+                                  fontSize: '0.72rem',
                                   fontWeight: 600,
                                   transition: 'all 0.15s ease'
-                                }} 
+                                }}
                                 onClick={() => markFeePaidCustomMonth(student.id, m)}
                                 title="Click to Pay"
                               >
@@ -1430,19 +1430,19 @@ function App() {
                               </button>
                             ))}
                             {feeDetails.paidMonthsList.map(m => (
-                              <button 
-                                key={m} 
-                                style={{ 
-                                  border: '1px solid rgba(76, 175, 80, 0.3)', 
-                                  background: 'rgba(76, 175, 80, 0.08)', 
-                                  color: '#82C91E', 
-                                  borderRadius: '12px', 
-                                  cursor: 'pointer', 
-                                  padding: '3px 8px', 
-                                  fontSize: '0.72rem', 
+                              <button
+                                key={m}
+                                style={{
+                                  border: '1px solid rgba(76, 175, 80, 0.3)',
+                                  background: 'rgba(76, 175, 80, 0.08)',
+                                  color: '#82C91E',
+                                  borderRadius: '12px',
+                                  cursor: 'pointer',
+                                  padding: '3px 8px',
+                                  fontSize: '0.72rem',
                                   fontWeight: 600,
                                   transition: 'all 0.15s ease'
-                                }} 
+                                }}
                                 onClick={() => unmarkFeePaidCustomMonth(student.id, m)}
                                 title="Click to Undo"
                               >
@@ -1458,13 +1458,13 @@ function App() {
                           <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
                             {feeDetails.totalDue > 0 ? (
                               <>
-                                <span style={{ 
-                                  fontWeight: 600, 
-                                  color: '#FF6B6B', 
-                                  fontSize: '0.85rem', 
-                                  background: 'rgba(229, 9, 20, 0.12)', 
-                                  padding: '3px 9px', 
-                                  borderRadius: '20px', 
+                                <span style={{
+                                  fontWeight: 600,
+                                  color: '#FF6B6B',
+                                  fontSize: '0.85rem',
+                                  background: 'rgba(229, 9, 20, 0.12)',
+                                  padding: '3px 9px',
+                                  borderRadius: '20px',
                                   border: '1px solid rgba(229, 9, 20, 0.25)',
                                   display: 'inline-block'
                                 }}>
@@ -1476,13 +1476,13 @@ function App() {
                               </>
                             ) : (
                               <>
-                                <span style={{ 
-                                  fontWeight: 600, 
-                                  color: '#51CF66', 
-                                  fontSize: '0.85rem', 
-                                  background: 'rgba(76, 175, 80, 0.12)', 
-                                  padding: '3px 9px', 
-                                  borderRadius: '20px', 
+                                <span style={{
+                                  fontWeight: 600,
+                                  color: '#51CF66',
+                                  fontSize: '0.85rem',
+                                  background: 'rgba(76, 175, 80, 0.12)',
+                                  padding: '3px 9px',
+                                  borderRadius: '20px',
                                   border: '1px solid rgba(76, 175, 80, 0.25)',
                                   display: 'inline-block'
                                 }}>
@@ -1534,7 +1534,7 @@ function App() {
           </div>
         </div>
       </div>
-      
+
       <div className="panel">
         <div className="panel-header">
           <h3 className="panel-title">Student Tracking</h3>
@@ -1669,36 +1669,36 @@ function App() {
       const newBrClean = newBranchForm.name.trim();
       const user = newBranchForm.username.trim();
       const pass = newBranchForm.password;
-      
+
       if (!newBrClean || !pass) {
         setSettingsError('Branch name and password are required');
         return;
       }
-      
+
       if (pass !== newBranchForm.confirmPassword) {
         setSettingsError('Passwords do not match');
         return;
       }
-      
+
       const newBrLower = newBrClean.toLowerCase();
       if (branches.some(b => b.toLowerCase() === newBrLower)) {
         setSettingsError('Branch already exists!');
         return;
       }
-      
+
       const defaultUser = `admin@${newBrLower}`;
       const finalUser = user || defaultUser;
-      
+
       const updatedCustomBranches = [...customBranches, newBrClean];
       const updatedBranchCreds = {
         ...branchCredentials,
         [newBrLower]: { username: finalUser, password: pass }
       };
-      
+
       fetch(`${API_BASE_URL}/credentials`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           customBranches: updatedCustomBranches,
           branchCredentials: updatedBranchCreds
         })
@@ -1707,11 +1707,11 @@ function App() {
         .then(data => {
           setCustomBranches(data.customBranches || []);
           setBranchCredentials(data.branchCredentials || {});
-          
+
           const dbBranches = Object.keys(data.branchCredentials || {}).map(b => b.charAt(0).toUpperCase() + b.slice(1));
           const uniqueBranches = Array.from(new Set([
-            ...DEFAULT_BRANCHES, 
-            ...dbBranches, 
+            ...DEFAULT_BRANCHES,
+            ...dbBranches,
             ...(data.customBranches || []).map(b => b.charAt(0).toUpperCase() + b.slice(1))
           ]));
           setBranches(uniqueBranches);
@@ -1731,9 +1731,9 @@ function App() {
       if (!window.confirm(`Are you sure you want to delete the branch "${branchToDelete}"?`)) {
         return;
       }
-      
+
       const updatedCustomBranches = customBranches.filter(b => b !== branchToDelete);
-      
+
       fetch(`${API_BASE_URL}/credentials`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1744,8 +1744,8 @@ function App() {
           setCustomBranches(data.customBranches || []);
           const dbBranches = Object.keys(data.branchCredentials || {}).map(b => b.charAt(0).toUpperCase() + b.slice(1));
           const uniqueBranches = Array.from(new Set([
-            ...DEFAULT_BRANCHES, 
-            ...dbBranches, 
+            ...DEFAULT_BRANCHES,
+            ...dbBranches,
             ...(data.customBranches || []).map(b => b.charAt(0).toUpperCase() + b.slice(1))
           ]));
           setBranches(uniqueBranches);
@@ -1763,17 +1763,17 @@ function App() {
       const br = newBatchForm.branch.toLowerCase();
       const user = newBatchForm.username.trim();
       const pass = newBatchForm.password;
-      
+
       if (!name || !schedule || !pass) {
         setSettingsError('Batch name, schedule pattern, and password are required');
         return;
       }
-      
+
       if (pass !== newBatchForm.confirmPassword) {
         setSettingsError('Passwords do not match');
         return;
       }
-      
+
       if (batchOptions.some(b => b.name.toLowerCase() === name.toLowerCase() || b.schedule.toLowerCase() === schedule.toLowerCase())) {
         setSettingsError('A batch with this name or schedule already exists!');
         return;
@@ -1781,21 +1781,21 @@ function App() {
 
       const id = 'batch_' + Date.now();
       const newBatchObj = { id, name, schedule };
-      
+
       const key = `${br}_${id}`;
       const defaultUser = `${id}@${br}`;
       const finalUser = user || defaultUser;
-      
+
       const updatedCustomBatches = [...customBatches, newBatchObj];
       const updatedBatchCreds = {
         ...batchCredentials,
         [key]: { username: finalUser, password: pass }
       };
-      
+
       fetch(`${API_BASE_URL}/credentials`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           customBatches: updatedCustomBatches,
           batchCredentials: updatedBatchCreds
         })
@@ -1821,9 +1821,9 @@ function App() {
       if (!window.confirm(`Are you sure you want to delete the batch "${batchName}"?`)) {
         return;
       }
-      
+
       const updatedCustomBatches = customBatches.filter(b => b.id !== batchIdToDelete);
-      
+
       fetch(`${API_BASE_URL}/credentials`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1849,7 +1849,7 @@ function App() {
       if (!window.confirm('Are you sure you want to terminate this user session? The user will be immediately logged out.')) {
         return;
       }
-      
+
       fetch(`${API_BASE_URL}/sessions/${tokenToTerminate}`, {
         method: 'DELETE'
       })
@@ -1875,16 +1875,16 @@ function App() {
       e.preventDefault();
       setSettingsError('');
       setSettingsSuccess('');
-      
+
       const acc = adminForm.account;
       const user = adminForm.newUsername.toLowerCase().trim() || acc;
       const pass = adminForm.newPassword;
-      
+
       if (pass !== adminForm.confirmPassword) {
         setSettingsError('Passwords do not match');
         return;
       }
-      
+
       const updatedAdminCreds = { ...adminCredentials };
       if (user !== acc) {
         delete updatedAdminCreds[acc];
@@ -1914,25 +1914,25 @@ function App() {
       e.preventDefault();
       setSettingsError('');
       setSettingsSuccess('');
-      
+
       const user = createAdminForm.username.toLowerCase().trim();
       const pass = createAdminForm.password;
-      
+
       if (!user) {
         setSettingsError('Username is required');
         return;
       }
-      
+
       if (adminCredentials[user]) {
         setSettingsError('Username already exists');
         return;
       }
-      
+
       if (pass !== createAdminForm.confirmPassword) {
         setSettingsError('Passwords do not match');
         return;
       }
-      
+
       const updatedAdminCreds = { ...adminCredentials, [user]: pass };
 
       fetch(`${API_BASE_URL}/credentials`, {
@@ -1970,7 +1970,7 @@ function App() {
       if (!window.confirm(`Are you sure you want to delete the admin account "${accountToDelete}"?`)) {
         return;
       }
-      
+
       const updatedAdminCreds = { ...adminCredentials };
       delete updatedAdminCreds[accountToDelete];
 
@@ -1997,16 +1997,16 @@ function App() {
       e.preventDefault();
       setSettingsError('');
       setSettingsSuccess('');
-      
+
       const br = branchForm.branch;
       const pass = branchForm.newPassword;
       const user = branchForm.newUsername.trim() || branchCredentials[br]?.username || `admin@${br}`;
-      
+
       if (pass !== branchForm.confirmPassword) {
         setSettingsError('Passwords do not match');
         return;
       }
-      
+
       const updatedBranchCreds = {
         ...branchCredentials,
         [br]: { username: user, password: pass }
@@ -2032,19 +2032,19 @@ function App() {
       e.preventDefault();
       setSettingsError('');
       setSettingsSuccess('');
-      
+
       const br = batchForm.branch;
       const bt = batchForm.batch;
       const key = `${br}_${bt}`;
       const pass = batchForm.newPassword;
       const defaultUser = `${bt}@${br}`;
       const user = batchForm.newUsername.trim() || batchCredentials[key]?.username || defaultUser;
-      
+
       if (pass !== batchForm.confirmPassword) {
         setSettingsError('Passwords do not match');
         return;
       }
-      
+
       const updatedBatchCreds = {
         ...batchCredentials,
         [key]: { username: user, password: pass }
@@ -2070,7 +2070,7 @@ function App() {
       <div className="settings-view" style={{ maxWidth: '800px', margin: '0 auto' }}>
         {settingsError && <div style={{ color: '#E50914', marginBottom: '1.5rem', background: 'rgba(229, 9, 20, 0.1)', padding: '1rem', borderRadius: '4px', border: '1px solid rgba(229, 9, 20, 0.3)', fontWeight: 500 }}>{settingsError}</div>}
         {settingsSuccess && <div style={{ color: '#4CAF50', marginBottom: '1.5rem', background: 'rgba(76, 175, 80, 0.1)', padding: '1rem', borderRadius: '4px', border: '1px solid rgba(76, 175, 80, 0.3)', fontWeight: 500 }}>{settingsSuccess}</div>}
-        
+
         {/* Admin Accounts Settings */}
         <div className="panel" style={{ marginBottom: '2rem' }}>
           <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
@@ -2104,9 +2104,9 @@ function App() {
             <div style={{ display: 'flex', gap: '1rem' }}>
               <button type="submit" className="btn-primary">Update Admin Account</button>
               {adminForm.account.toLowerCase().trim() !== loggedInUser.toLowerCase().trim() && adminForm.account.toLowerCase().trim() !== 'admin' && (
-                <button 
-                  type="button" 
-                  className="btn-primary" 
+                <button
+                  type="button"
+                  className="btn-primary"
                   style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
                   onClick={() => handleDeleteAdminAccount(adminForm.account)}
                 >
@@ -2126,36 +2126,36 @@ function App() {
             <div className="grid-2-col" style={{ marginBottom: '1.5rem' }}>
               <div className="form-group">
                 <label>Admin Username</label>
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  placeholder="Enter username" 
-                  required 
-                  value={createAdminForm.username} 
-                  onChange={(e) => setCreateAdminForm({ ...createAdminForm, username: e.target.value })} 
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Enter username"
+                  required
+                  value={createAdminForm.username}
+                  onChange={(e) => setCreateAdminForm({ ...createAdminForm, username: e.target.value })}
                 />
               </div>
               <div className="form-group">
                 <label>Admin Password</label>
-                <input 
-                  type="password" 
-                  className="form-control" 
-                  placeholder="Enter password" 
-                  required 
-                  value={createAdminForm.password} 
-                  onChange={(e) => setCreateAdminForm({ ...createAdminForm, password: e.target.value })} 
+                <input
+                  type="password"
+                  className="form-control"
+                  placeholder="Enter password"
+                  required
+                  value={createAdminForm.password}
+                  onChange={(e) => setCreateAdminForm({ ...createAdminForm, password: e.target.value })}
                 />
               </div>
             </div>
             <div className="form-group" style={{ marginBottom: '1.5rem' }}>
               <label>Confirm Password</label>
-              <input 
-                type="password" 
-                className="form-control" 
-                placeholder="Confirm password" 
-                required 
-                value={createAdminForm.confirmPassword} 
-                onChange={(e) => setCreateAdminForm({ ...createAdminForm, confirmPassword: e.target.value })} 
+              <input
+                type="password"
+                className="form-control"
+                placeholder="Confirm password"
+                required
+                value={createAdminForm.confirmPassword}
+                onChange={(e) => setCreateAdminForm({ ...createAdminForm, confirmPassword: e.target.value })}
               />
             </div>
             <button type="submit" className="btn-primary">Create Admin Account</button>
@@ -2191,9 +2191,9 @@ function App() {
                     </td>
                     <td>
                       {acc.toLowerCase().trim() !== loggedInUser.toLowerCase().trim() && acc.toLowerCase().trim() !== 'admin' ? (
-                        <button 
+                        <button
                           type="button"
-                          className="btn-small" 
+                          className="btn-small"
                           style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
                           onClick={() => handleDeleteAdminAccount(acc)}
                         >
@@ -2214,9 +2214,9 @@ function App() {
         <div className="panel" style={{ marginBottom: '2rem' }}>
           <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
             <h3 className="panel-title">Manage Active Sessions</h3>
-            <button 
-              type="button" 
-              className="btn-small btn-secondary" 
+            <button
+              type="button"
+              className="btn-small btn-secondary"
               onClick={() => {
                 fetch(`${API_BASE_URL}/sessions`)
                   .then(res => res.json())
@@ -2268,7 +2268,7 @@ function App() {
                       const match = ua.match(/(Opera|Chrome|Safari|Firefox|MSIE|Trident)\/?\s*(\d+)/i);
                       if (match) browserInfo = match[1];
                     }
-                    
+
                     return (
                       <tr key={session.token}>
                         <td style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>
@@ -2287,9 +2287,9 @@ function App() {
                           {isCurrent ? (
                             <span className="badge badge-green">Current Session</span>
                           ) : (
-                            <button 
-                              type="button" 
-                              className="btn-small" 
+                            <button
+                              type="button"
+                              className="btn-small"
                               style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
                               onClick={() => handleForceLogoutSession(session.token)}
                             >
@@ -2390,50 +2390,50 @@ function App() {
             <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
               <h3 className="panel-title">Add & Manage Branches</h3>
             </div>
-            
+
             <form onSubmit={handleAddBranch} style={{ marginBottom: '2rem' }}>
               <div className="form-group" style={{ marginBottom: '1rem' }}>
                 <label>Branch Name</label>
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  placeholder="e.g. Vatakara" 
-                  value={newBranchForm.name} 
-                  onChange={(e) => setNewBranchForm({ ...newBranchForm, name: e.target.value })} 
-                  required 
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. Vatakara"
+                  value={newBranchForm.name}
+                  onChange={(e) => setNewBranchForm({ ...newBranchForm, name: e.target.value })}
+                  required
                 />
               </div>
               <div className="form-group" style={{ marginBottom: '1rem' }}>
                 <label>Coordinator Username (Optional)</label>
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  placeholder="e.g. admin@vatakara (auto-default)" 
-                  value={newBranchForm.username} 
-                  onChange={(e) => setNewBranchForm({ ...newBranchForm, username: e.target.value })} 
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. admin@vatakara (auto-default)"
+                  value={newBranchForm.username}
+                  onChange={(e) => setNewBranchForm({ ...newBranchForm, username: e.target.value })}
                 />
               </div>
               <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
                 <div className="form-group">
                   <label>Coordinator Password</label>
-                  <input 
-                    type="password" 
-                    className="form-control" 
-                    placeholder="Enter password" 
-                    value={newBranchForm.password} 
-                    onChange={(e) => setNewBranchForm({ ...newBranchForm, password: e.target.value })} 
-                    required 
+                  <input
+                    type="password"
+                    className="form-control"
+                    placeholder="Enter password"
+                    value={newBranchForm.password}
+                    onChange={(e) => setNewBranchForm({ ...newBranchForm, password: e.target.value })}
+                    required
                   />
                 </div>
                 <div className="form-group">
                   <label>Confirm Password</label>
-                  <input 
-                    type="password" 
-                    className="form-control" 
-                    placeholder="Confirm password" 
-                    value={newBranchForm.confirmPassword} 
-                    onChange={(e) => setNewBranchForm({ ...newBranchForm, confirmPassword: e.target.value })} 
-                    required 
+                  <input
+                    type="password"
+                    className="form-control"
+                    placeholder="Confirm password"
+                    value={newBranchForm.confirmPassword}
+                    onChange={(e) => setNewBranchForm({ ...newBranchForm, confirmPassword: e.target.value })}
+                    required
                   />
                 </div>
               </div>
@@ -2457,10 +2457,10 @@ function App() {
                       <tr key={br}>
                         <td style={{ color: 'var(--color-text-light)' }}>{br}</td>
                         <td>
-                          <button 
-                            type="button" 
-                            className="btn-small" 
-                            style={{ backgroundColor: '#F44336', borderColor: '#F44336' }} 
+                          <button
+                            type="button"
+                            className="btn-small"
+                            style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
                             onClick={() => handleDeleteCustomBranch(br)}
                           >
                             Delete
@@ -2479,39 +2479,39 @@ function App() {
             <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
               <h3 className="panel-title">Add & Manage Batches</h3>
             </div>
-            
+
             <form onSubmit={handleAddBatch} style={{ marginBottom: '2rem' }}>
               <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
                 <div className="form-group">
                   <label>Batch Name</label>
-                  <input 
-                    type="text" 
-                    className="form-control" 
-                    placeholder="e.g. Batch 4 (Sat - Sun)" 
-                    value={newBatchForm.name} 
-                    onChange={(e) => setNewBatchForm({ ...newBatchForm, name: e.target.value })} 
-                    required 
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Batch 4 (Sat - Sun)"
+                    value={newBatchForm.name}
+                    onChange={(e) => setNewBatchForm({ ...newBatchForm, name: e.target.value })}
+                    required
                   />
                 </div>
                 <div className="form-group">
                   <label>Schedule Pattern</label>
-                  <input 
-                    type="text" 
-                    className="form-control" 
-                    placeholder="e.g. Sat-Sun" 
-                    value={newBatchForm.schedule} 
-                    onChange={(e) => setNewBatchForm({ ...newBatchForm, schedule: e.target.value })} 
-                    required 
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Sat-Sun"
+                    value={newBatchForm.schedule}
+                    onChange={(e) => setNewBatchForm({ ...newBatchForm, schedule: e.target.value })}
+                    required
                   />
                 </div>
               </div>
-              
+
               <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
                 <div className="form-group">
                   <label>Configure Credentials for Branch</label>
-                  <select 
-                    className="form-control" 
-                    value={newBatchForm.branch} 
+                  <select
+                    className="form-control"
+                    value={newBatchForm.branch}
                     onChange={(e) => setNewBatchForm({ ...newBatchForm, branch: e.target.value })}
                   >
                     {branches.map(br => (
@@ -2521,12 +2521,12 @@ function App() {
                 </div>
                 <div className="form-group">
                   <label>Coordinator Username (Optional)</label>
-                  <input 
-                    type="text" 
-                    className="form-control" 
-                    placeholder="e.g. batch_id@branch (auto)" 
-                    value={newBatchForm.username} 
-                    onChange={(e) => setNewBatchForm({ ...newBatchForm, username: e.target.value })} 
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. batch_id@branch (auto)"
+                    value={newBatchForm.username}
+                    onChange={(e) => setNewBatchForm({ ...newBatchForm, username: e.target.value })}
                   />
                 </div>
               </div>
@@ -2534,24 +2534,24 @@ function App() {
               <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
                 <div className="form-group">
                   <label>Coordinator Password</label>
-                  <input 
-                    type="password" 
-                    className="form-control" 
-                    placeholder="Enter password" 
-                    value={newBatchForm.password} 
-                    onChange={(e) => setNewBatchForm({ ...newBatchForm, password: e.target.value })} 
-                    required 
+                  <input
+                    type="password"
+                    className="form-control"
+                    placeholder="Enter password"
+                    value={newBatchForm.password}
+                    onChange={(e) => setNewBatchForm({ ...newBatchForm, password: e.target.value })}
+                    required
                   />
                 </div>
                 <div className="form-group">
                   <label>Confirm Password</label>
-                  <input 
-                    type="password" 
-                    className="form-control" 
-                    placeholder="Confirm password" 
-                    value={newBatchForm.confirmPassword} 
-                    onChange={(e) => setNewBatchForm({ ...newBatchForm, confirmPassword: e.target.value })} 
-                    required 
+                  <input
+                    type="password"
+                    className="form-control"
+                    placeholder="Confirm password"
+                    value={newBatchForm.confirmPassword}
+                    onChange={(e) => setNewBatchForm({ ...newBatchForm, confirmPassword: e.target.value })}
+                    required
                   />
                 </div>
               </div>
@@ -2578,10 +2578,10 @@ function App() {
                           <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Pattern: {bt.schedule}</div>
                         </td>
                         <td>
-                          <button 
-                            type="button" 
-                            className="btn-small" 
-                            style={{ backgroundColor: '#F44336', borderColor: '#F44336' }} 
+                          <button
+                            type="button"
+                            className="btn-small"
+                            style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
                             onClick={() => handleDeleteCustomBatch(bt.id, bt.name)}
                           >
                             Delete
@@ -2614,16 +2614,16 @@ function App() {
               <p style={{ color: 'var(--color-text-muted)', marginBottom: '1.5rem' }}>If you forgot your password, please contact the administrator via WhatsApp.</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 {(() => {
-                  const batchName = selectedBatchLogin === 'admin' 
-                    ? 'Branch Admin (All Batches)' 
+                  const batchName = selectedBatchLogin === 'admin'
+                    ? 'Branch Admin (All Batches)'
                     : (batchOptions.find(b => b.id === selectedBatchLogin)?.name || selectedBatchLogin);
                   const msgText = `Hi, I need to reset my password for the MASTER FIT dashboard. Branch: ${selectedBranchLogin}, Batch: ${batchName}.`;
                   return (
-                    <a 
-                      href={`https://wa.me/919567964340?text=${encodeURIComponent(msgText)}`} 
-                      target="_blank" 
-                      rel="noreferrer" 
-                      className="btn-primary" 
+                    <a
+                      href={`https://wa.me/919567964340?text=${encodeURIComponent(msgText)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn-primary"
                       style={{ width: '100%', justifyContent: 'center', background: '#25D366', color: 'white', textDecoration: 'none' }}
                     >
                       <MessageCircle size={18} style={{ marginRight: '8px' }} /> Contact via WhatsApp
@@ -2682,7 +2682,7 @@ function App() {
               }}>
                 <div className="form-group" style={{ textAlign: 'left' }}>
                   <label>Select Branch</label>
-                  <select 
+                  <select
                     className="form-control"
                     value={selectedBranchLogin}
                     onChange={(e) => setSelectedBranchLogin(e.target.value)}
@@ -2695,7 +2695,7 @@ function App() {
                 </div>
                 <div className="form-group" style={{ textAlign: 'left' }}>
                   <label>Select Batch</label>
-                  <select 
+                  <select
                     className="form-control"
                     value={selectedBatchLogin}
                     onChange={(e) => setSelectedBatchLogin(e.target.value)}
@@ -2709,14 +2709,14 @@ function App() {
                 </div>
                 <div className="form-group" style={{ textAlign: 'left' }}>
                   <label>Username</label>
-                  <input type="text" className="form-control" placeholder="Enter username" value={loginData.username} onChange={(e) => setLoginData({...loginData, username: e.target.value})} required />
+                  <input type="text" className="form-control" placeholder="Enter username" value={loginData.username} onChange={(e) => setLoginData({ ...loginData, username: e.target.value })} required />
                 </div>
                 <div className="form-group" style={{ textAlign: 'left' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <label style={{ margin: 0 }}>Password</label>
                     <a href="#" style={{ fontSize: '0.85rem', color: 'var(--color-primary)', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); setIsForgotPassword(true); setLoginError(''); }}>Forgot Password?</a>
                   </div>
-                  <input type="password" className="form-control" placeholder="Enter password" value={loginData.password} onChange={(e) => setLoginData({...loginData, password: e.target.value})} required />
+                  <input type="password" className="form-control" placeholder="Enter password" value={loginData.password} onChange={(e) => setLoginData({ ...loginData, password: e.target.value })} required />
                 </div>
                 <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }}>Login to Dashboard</button>
               </form>
@@ -2753,7 +2753,7 @@ function App() {
         {isForgotPassword ? (
           <div style={{ textAlign: 'left' }}>
             {loginError && <div style={{ color: '#E50914', marginBottom: '1rem', background: 'rgba(229, 9, 20, 0.1)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(229, 9, 20, 0.3)' }}>{loginError}</div>}
-            
+
             {forgotStep === 1 && (
               <form onSubmit={(e) => {
                 e.preventDefault();
@@ -2785,33 +2785,33 @@ function App() {
                 </p>
                 <div className="form-group">
                   <label>Admin Username</label>
-                  <input 
-                    type="text" 
-                    className="form-control" 
-                    placeholder="e.g. admin" 
-                    value={forgotUsername} 
-                    onChange={(e) => setForgotUsername(e.target.value)} 
-                    required 
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. admin"
+                    value={forgotUsername}
+                    onChange={(e) => setForgotUsername(e.target.value)}
+                    required
                   />
                 </div>
                 <div className="form-group">
                   <label>Registered Phone Number</label>
-                  <input 
-                    type="tel" 
-                    className="form-control" 
-                    placeholder="Enter registered phone number" 
-                    value={forgotPhone} 
-                    onChange={(e) => setForgotPhone(e.target.value)} 
-                    required 
+                  <input
+                    type="tel"
+                    className="form-control"
+                    placeholder="Enter registered phone number"
+                    value={forgotPhone}
+                    onChange={(e) => setForgotPhone(e.target.value)}
+                    required
                   />
                 </div>
                 <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }}>
                   Send OTP Code
                 </button>
-                <button 
-                  type="button" 
-                  className="btn-outline-primary" 
-                  style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', marginTop: '0.75rem' }} 
+                <button
+                  type="button"
+                  className="btn-outline-primary"
+                  style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', marginTop: '0.75rem' }}
                   onClick={() => {
                     setIsForgotPassword(false);
                     setForgotStep(1);
@@ -2857,24 +2857,24 @@ function App() {
 
                 <div className="form-group">
                   <label>6-Digit OTP</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     maxLength="6"
-                    className="form-control" 
-                    placeholder="Enter 6-digit code" 
-                    value={forgotOtp} 
-                    onChange={(e) => setForgotOtp(e.target.value)} 
-                    required 
+                    className="form-control"
+                    placeholder="Enter 6-digit code"
+                    value={forgotOtp}
+                    onChange={(e) => setForgotOtp(e.target.value)}
+                    required
                     style={{ letterSpacing: '0.5rem', textAlign: 'center', fontSize: '1.2rem', fontWeight: 'bold' }}
                   />
                 </div>
                 <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }}>
                   Verify OTP Code
                 </button>
-                <button 
-                  type="button" 
-                  className="btn-outline-primary" 
-                  style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', marginTop: '0.75rem' }} 
+                <button
+                  type="button"
+                  className="btn-outline-primary"
+                  style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', marginTop: '0.75rem' }}
                   onClick={() => {
                     setForgotStep(1);
                     setLoginError('');
@@ -2890,17 +2890,17 @@ function App() {
               <form onSubmit={(e) => {
                 e.preventDefault();
                 setLoginError('');
-                
+
                 if (forgotNewPassword !== forgotConfirmPassword) {
                   setLoginError('Passwords do not match');
                   return;
                 }
-                
+
                 fetch(`${API_BASE_URL}/superadmin/forgot-password/reset`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ 
-                    username: forgotUsername, 
+                  body: JSON.stringify({
+                    username: forgotUsername,
                     otp: forgotOtp,
                     newPassword: forgotNewPassword
                   })
@@ -2935,33 +2935,33 @@ function App() {
                 </p>
                 <div className="form-group">
                   <label>New Password</label>
-                  <input 
-                    type="password" 
-                    className="form-control" 
-                    placeholder="Enter new password" 
-                    value={forgotNewPassword} 
-                    onChange={(e) => setForgotNewPassword(e.target.value)} 
-                    required 
+                  <input
+                    type="password"
+                    className="form-control"
+                    placeholder="Enter new password"
+                    value={forgotNewPassword}
+                    onChange={(e) => setForgotNewPassword(e.target.value)}
+                    required
                   />
                 </div>
                 <div className="form-group">
                   <label>Confirm Password</label>
-                  <input 
-                    type="password" 
-                    className="form-control" 
-                    placeholder="Confirm new password" 
-                    value={forgotConfirmPassword} 
-                    onChange={(e) => setForgotConfirmPassword(e.target.value)} 
-                    required 
+                  <input
+                    type="password"
+                    className="form-control"
+                    placeholder="Confirm new password"
+                    value={forgotConfirmPassword}
+                    onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                    required
                   />
                 </div>
                 <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }}>
                   Reset Password
                 </button>
-                <button 
-                  type="button" 
-                  className="btn-outline-primary" 
-                  style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', marginTop: '0.75rem' }} 
+                <button
+                  type="button"
+                  className="btn-outline-primary"
+                  style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', marginTop: '0.75rem' }}
                   onClick={() => {
                     setIsForgotPassword(false);
                     setForgotStep(1);
@@ -3022,14 +3022,14 @@ function App() {
             }}>
               <div className="form-group" style={{ textAlign: 'left' }}>
                 <label>Admin Username</label>
-                <input type="text" className="form-control" placeholder="Enter admin username" value={loginData.username} onChange={(e) => setLoginData({...loginData, username: e.target.value})} required />
+                <input type="text" className="form-control" placeholder="Enter admin username" value={loginData.username} onChange={(e) => setLoginData({ ...loginData, username: e.target.value })} required />
               </div>
               <div className="form-group" style={{ textAlign: 'left' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <label style={{ margin: 0 }}>Password</label>
                   <a href="#" style={{ fontSize: '0.85rem', color: 'var(--color-primary)', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); setIsForgotPassword(true); setLoginError(''); }}>Forgot Password?</a>
                 </div>
-                <input type="password" className="form-control" placeholder="Enter password" value={loginData.password} onChange={(e) => setLoginData({...loginData, password: e.target.value})} required />
+                <input type="password" className="form-control" placeholder="Enter password" value={loginData.password} onChange={(e) => setLoginData({ ...loginData, password: e.target.value })} required />
               </div>
               <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }}>Access Dashboard</button>
             </form>
@@ -3066,7 +3066,7 @@ function App() {
     <div className="dashboard-container">
       {/* Sidebar drawer backdrop for mobile */}
       {isSidebarOpen && <div className="sidebar-backdrop" onClick={() => setIsSidebarOpen(false)}></div>}
-      
+
       <aside className={`sidebar ${isSidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
           <h2 className="brand" style={{ cursor: 'pointer' }} onClick={() => setAppMode('website')}>
@@ -3138,12 +3138,12 @@ function App() {
                 {currentView === 'settings' && 'Account Settings'}
               </h1>
             </div>
-            
+
             <div className="user-profile-mobile">
               <div className="avatar" title={`${loggedInUser} Panel`}>{loggedInUser.charAt(0).toUpperCase()}</div>
             </div>
           </div>
-          
+
           <div className="header-actions">
             {/* Branch Filter Selector */}
             <div style={{ position: 'relative' }}>
@@ -3166,9 +3166,9 @@ function App() {
             </div>
             <div style={{ position: 'relative' }}>
               <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
-              <input 
-                type="text" 
-                placeholder="Search students..." 
+              <input
+                type="text"
+                placeholder="Search students..."
                 className="form-control"
                 style={{ paddingLeft: '36px', width: '250px', height: '38px', paddingTop: 0, paddingBottom: 0 }}
                 value={searchQuery}
@@ -3304,14 +3304,14 @@ function App() {
                 setEditingStudentData(null);
               }}><X size={24} /></button>
             </div>
-            
+
             {isEditingStudent ? (
               <form onSubmit={(e) => {
                 e.preventDefault();
                 setStudents(students.map(s => s.id === editingStudentData.id ? editingStudentData : s));
                 setSelectedStudent(editingStudentData);
                 setIsEditingStudent(false);
-                
+
                 fetch(`${API_BASE_URL}/students/${editingStudentData.id}`, {
                   method: 'PUT',
                   headers: { 'Content-Type': 'application/json' },
@@ -3325,43 +3325,43 @@ function App() {
                 <div style={{ padding: '1rem 0' }}>
                   <div className="form-group">
                     <label>Full Name</label>
-                    <input 
-                      type="text" 
-                      className="form-control" 
-                      value={editingStudentData.name} 
-                      onChange={(e) => setEditingStudentData({...editingStudentData, name: e.target.value})} 
-                      required 
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={editingStudentData.name}
+                      onChange={(e) => setEditingStudentData({ ...editingStudentData, name: e.target.value })}
+                      required
                     />
                   </div>
                   <div className="grid-2-col">
                     <div className="form-group">
                       <label>Age</label>
-                      <input 
-                        type="number" 
-                        className="form-control" 
-                        value={editingStudentData.age} 
-                        onChange={(e) => setEditingStudentData({...editingStudentData, age: e.target.value})} 
-                        required 
+                      <input
+                        type="number"
+                        className="form-control"
+                        value={editingStudentData.age}
+                        onChange={(e) => setEditingStudentData({ ...editingStudentData, age: e.target.value })}
+                        required
                       />
                     </div>
                     <div className="form-group">
                       <label>Phone</label>
-                      <input 
-                        type="tel" 
-                        className="form-control" 
-                        value={editingStudentData.phone} 
-                        onChange={(e) => setEditingStudentData({...editingStudentData, phone: e.target.value})} 
-                        required 
+                      <input
+                        type="tel"
+                        className="form-control"
+                        value={editingStudentData.phone}
+                        onChange={(e) => setEditingStudentData({ ...editingStudentData, phone: e.target.value })}
+                        required
                       />
                     </div>
                   </div>
                   <div className="grid-2-col">
                     <div className="form-group">
                       <label>Batch Schedule</label>
-                      <select 
-                        className="form-control" 
-                        value={editingStudentData.schedule} 
-                        onChange={(e) => setEditingStudentData({...editingStudentData, schedule: e.target.value})}
+                      <select
+                        className="form-control"
+                        value={editingStudentData.schedule}
+                        onChange={(e) => setEditingStudentData({ ...editingStudentData, schedule: e.target.value })}
                       >
                         {batchOptions.map(opt => (
                           <option key={opt.id} value={opt.schedule}>{opt.name}</option>
@@ -3370,10 +3370,10 @@ function App() {
                     </div>
                     <div className="form-group">
                       <label>Time Slot</label>
-                      <select 
-                        className="form-control" 
-                        value={editingStudentData.batch} 
-                        onChange={(e) => setEditingStudentData({...editingStudentData, batch: e.target.value})}
+                      <select
+                        className="form-control"
+                        value={editingStudentData.batch}
+                        onChange={(e) => setEditingStudentData({ ...editingStudentData, batch: e.target.value })}
                       >
                         <option value="Morning">Morning</option>
                         <option value="Evening">Evening</option>
@@ -3384,10 +3384,10 @@ function App() {
                   <div className="grid-2-col">
                     <div className="form-group">
                       <label>Branch</label>
-                      <select 
-                        className="form-control" 
-                        value={editingStudentData.branch} 
-                        onChange={(e) => setEditingStudentData({...editingStudentData, branch: e.target.value})}
+                      <select
+                        className="form-control"
+                        value={editingStudentData.branch}
+                        onChange={(e) => setEditingStudentData({ ...editingStudentData, branch: e.target.value })}
                         disabled={!isAdminUser(loggedInUser)}
                       >
                         {isAdminUser(loggedInUser) ? (
@@ -3401,10 +3401,10 @@ function App() {
                     </div>
                     <div className="form-group">
                       <label>Belt Level</label>
-                      <select 
-                        className="form-control" 
-                        value={editingStudentData.belt} 
-                        onChange={(e) => setEditingStudentData({...editingStudentData, belt: e.target.value})}
+                      <select
+                        className="form-control"
+                        value={editingStudentData.belt}
+                        onChange={(e) => setEditingStudentData({ ...editingStudentData, belt: e.target.value })}
                       >
                         <option value="White">White Belt</option>
                         <option value="Yellow">Yellow Belt</option>
@@ -3443,7 +3443,7 @@ function App() {
                     </div>
                     <span className={`badge ${getBeltColorClass(selectedStudent.belt)}`}>{selectedStudent.belt}</span>
                   </div>
-                  
+
                   <div className="grid-2-col" style={{ marginBottom: '1.5rem', background: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--glass-border)', gap: '1rem' }}>
                     <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Age</span><div style={{ fontWeight: 600 }}>{selectedStudent.age} Years</div></div>
                     <div>
@@ -3475,16 +3475,16 @@ function App() {
                           <h4 style={{ margin: 0, color: 'var(--color-secondary)', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Financial Summary</h4>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>Calculate up to:</span>
-                            <input 
-                              type="month" 
-                              className="form-control" 
+                            <input
+                              type="month"
+                              className="form-control"
                               style={{ width: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.85rem', height: '30px', background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
                               value={profileFeeMonth}
                               onChange={(e) => setProfileFeeMonth(e.target.value)}
                             />
                           </div>
                         </div>
-                        
+
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
                           <span>Admission Fee (₹{admissionFeeRate}):</span>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -3570,14 +3570,14 @@ function App() {
               </h2>
               <button className="btn-icon" onClick={() => setIsFeeEditModalOpen(false)}><X size={24} /></button>
             </div>
-            
+
             <div style={{ padding: '1rem 0' }}>
               {/* Billing Start Month */}
               <div className="form-group">
                 <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', display: 'block' }}>Billing Start Month (Join Month)</label>
-                <input 
-                  type="month" 
-                  className="form-control" 
+                <input
+                  type="month"
+                  className="form-control"
                   value={customStartMonth}
                   onChange={(e) => setCustomStartMonth(e.target.value)}
                   style={{ width: '100%' }}
@@ -3587,9 +3587,9 @@ function App() {
               {/* Custom Fee Rate Override */}
               <div className="form-group" style={{ marginTop: '1.25rem' }}>
                 <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', display: 'block' }}>Custom Monthly Rate (₹) [Leave blank to use default ₹{monthlyFeeRate}]</label>
-                <input 
-                  type="number" 
-                  className="form-control" 
+                <input
+                  type="number"
+                  className="form-control"
                   placeholder={`Default: ₹${monthlyFeeRate}`}
                   value={customRateInput}
                   onChange={(e) => setCustomRateInput(e.target.value)}
@@ -3601,17 +3601,17 @@ function App() {
               <div className="form-group" style={{ marginTop: '1.25rem' }}>
                 <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', display: 'block' }}>Apply Coupon Code</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  <input 
-                    type="text" 
-                    className="form-control" 
+                  <input
+                    type="text"
+                    className="form-control"
                     placeholder="Enter coupon (e.g. FIT20)"
                     value={couponInput}
                     onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
                     style={{ flex: 1 }}
                   />
-                  <button 
-                    type="button" 
-                    className="btn-primary" 
+                  <button
+                    type="button"
+                    className="btn-primary"
                     style={{ padding: '0 1rem', fontSize: '0.85rem', height: '38px' }}
                     onClick={() => {
                       const code = couponInput.trim().toUpperCase();
@@ -3620,7 +3620,7 @@ function App() {
                         setFeeEditingStudent(prev => ({ ...prev, appliedCoupon: '', discountPercentage: 0 }));
                         return;
                       }
-                      
+
                       let discount = 0;
                       if (code === 'FIT10' || code === 'WELCOME10') {
                         discount = 10;
@@ -3634,7 +3634,7 @@ function App() {
                         setCouponMessage('❌ Invalid Coupon Code');
                         return;
                       }
-                      
+
                       setCouponMessage(`✓ Coupon Applied! ${discount}% Discount`);
                       setFeeEditingStudent(prev => ({ ...prev, appliedCoupon: code, discountPercentage: discount }));
                     }}
@@ -3643,9 +3643,9 @@ function App() {
                   </button>
                 </div>
                 {couponMessage && (
-                  <div style={{ 
-                    marginTop: '6px', 
-                    fontSize: '0.8rem', 
+                  <div style={{
+                    marginTop: '6px',
+                    fontSize: '0.8rem',
                     color: couponMessage.includes('❌') ? '#FF6B6B' : '#51CF66',
                     fontWeight: 500
                   }}>
@@ -3659,14 +3659,14 @@ function App() {
             </div>
 
             <div className="modal-actions" style={{ marginTop: '1.5rem', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button 
-                className="btn-secondary" 
+              <button
+                className="btn-secondary"
                 onClick={() => setIsFeeEditModalOpen(false)}
               >
                 Cancel
               </button>
-              <button 
-                className="btn-primary" 
+              <button
+                className="btn-primary"
                 onClick={() => {
                   const rate = customRateInput === '' ? null : parseInt(customRateInput, 10);
                   const updatedStudent = {
@@ -3724,22 +3724,22 @@ function App() {
               </div>
               <div className="form-group">
                 <label>Full Name</label>
-                <input type="text" className="form-control" required value={newStudent.name} onChange={(e) => setNewStudent({...newStudent, name: e.target.value})} placeholder="Enter name"/>
+                <input type="text" className="form-control" required value={newStudent.name} onChange={(e) => setNewStudent({ ...newStudent, name: e.target.value })} placeholder="Enter name" />
               </div>
               <div className="grid-2-col">
                 <div className="form-group">
                   <label>Age</label>
-                  <input type="number" className="form-control" required value={newStudent.age} onChange={(e) => setNewStudent({...newStudent, age: e.target.value})} placeholder="21"/>
+                  <input type="number" className="form-control" required value={newStudent.age} onChange={(e) => setNewStudent({ ...newStudent, age: e.target.value })} placeholder="21" />
                 </div>
                 <div className="form-group">
                   <label>Phone</label>
-                  <input type="tel" className="form-control" required value={newStudent.phone} onChange={(e) => setNewStudent({...newStudent, phone: e.target.value})} placeholder="Phone number"/>
+                  <input type="tel" className="form-control" required value={newStudent.phone} onChange={(e) => setNewStudent({ ...newStudent, phone: e.target.value })} placeholder="Phone number" />
                 </div>
               </div>
               <div className="grid-2-col">
                 <div className="form-group">
                   <label>Batch Schedule</label>
-                  <select className="form-control" value={newStudent.schedule} onChange={(e) => setNewStudent({...newStudent, schedule: e.target.value})}>
+                  <select className="form-control" value={newStudent.schedule} onChange={(e) => setNewStudent({ ...newStudent, schedule: e.target.value })}>
                     {batchOptions.map(opt => (
                       <option key={opt.id} value={opt.schedule}>{opt.name}</option>
                     ))}
@@ -3747,7 +3747,7 @@ function App() {
                 </div>
                 <div className="form-group">
                   <label>Time Slot</label>
-                  <select className="form-control" value={newStudent.batch} onChange={(e) => setNewStudent({...newStudent, batch: e.target.value})}>
+                  <select className="form-control" value={newStudent.batch} onChange={(e) => setNewStudent({ ...newStudent, batch: e.target.value })}>
                     <option value="Morning">Morning</option>
                     <option value="Evening">Evening</option>
                     <option value="Night">Night</option>
@@ -3757,12 +3757,12 @@ function App() {
               <div className="grid-2-col">
                 <div className="form-group">
                   <label>Branch</label>
-                  <select 
-                    className="form-control" 
-                    value={newStudent.branch} 
-                    onChange={(e) => setNewStudent({...newStudent, branch: e.target.value})}
+                  <select
+                    className="form-control"
+                    value={newStudent.branch}
+                    onChange={(e) => setNewStudent({ ...newStudent, branch: e.target.value })}
                     disabled={
-                      (!isAdminUser(loggedInUser) && appMode !== 'superadmin-login') || 
+                      (!isAdminUser(loggedInUser) && appMode !== 'superadmin-login') ||
                       appMode === 'login'
                     }
                   >
@@ -3772,13 +3772,13 @@ function App() {
                       ))
                     ) : (
                       <option value={
-                        appMode === 'login' 
-                          ? selectedBranchLogin 
+                        appMode === 'login'
+                          ? selectedBranchLogin
                           : (branches.find(b => b.toLowerCase() === (loggedInUser && loggedInUser.split('@')[1])) || 'Kuttiady')
                       }>
                         {
-                          appMode === 'login' 
-                            ? selectedBranchLogin 
+                          appMode === 'login'
+                            ? selectedBranchLogin
                             : (branches.find(b => b.toLowerCase() === (loggedInUser && loggedInUser.split('@')[1])) || 'Kuttiady')
                         }
                       </option>
@@ -3786,22 +3786,22 @@ function App() {
                   </select>
                 </div>
                 <div className="form-group">
-                   <label>Initial Belt</label>
-                   <select className="form-control" value={newStudent.belt} onChange={(e) => setNewStudent({...newStudent, belt: e.target.value})}>
-                     <option value="White">White Belt</option>
-                     <option value="Yellow">Yellow Belt</option>
-                     <option value="Orange">Orange Belt</option>
-                     <option value="Green">Green Belt</option>
-                     <option value="Blue">Blue Belt</option>
-                     <option value="Purple">Purple Belt</option>
-                     <option value="Brown">Brown Belt</option>
-                     <option value="Black">Black Belt</option>
-                   </select>
+                  <label>Initial Belt</label>
+                  <select className="form-control" value={newStudent.belt} onChange={(e) => setNewStudent({ ...newStudent, belt: e.target.value })}>
+                    <option value="White">White Belt</option>
+                    <option value="Yellow">Yellow Belt</option>
+                    <option value="Orange">Orange Belt</option>
+                    <option value="Green">Green Belt</option>
+                    <option value="Blue">Blue Belt</option>
+                    <option value="Purple">Purple Belt</option>
+                    <option value="Brown">Brown Belt</option>
+                    <option value="Black">Black Belt</option>
+                  </select>
                 </div>
               </div>
               <div className="form-group">
                 <label>Joining Date</label>
-                <input type="date" className="form-control" required value={newStudent.joinDate} onChange={(e) => setNewStudent({...newStudent, joinDate: e.target.value})}/>
+                <input type="date" className="form-control" required value={newStudent.joinDate} onChange={(e) => setNewStudent({ ...newStudent, joinDate: e.target.value })} />
               </div>
               <div className="modal-actions" style={{ marginTop: '1rem' }}>
                 <button type="button" className="btn-secondary" onClick={() => setIsAddModalOpen(false)}>Cancel</button>
