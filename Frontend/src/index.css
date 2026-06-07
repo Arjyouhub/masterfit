@@ -236,6 +236,76 @@ body {
   padding-bottom: 0.5rem;
 }
 
+/* Disciplines / Programs Section */
+.disciplines-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.discipline-card {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  height: 400px;
+  transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.3s ease;
+  cursor: pointer;
+}
+
+.discipline-card:hover {
+  transform: translateY(-10px);
+  box-shadow: 0 12px 40px rgba(229, 9, 20, 0.3);
+}
+
+.discipline-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.5s ease;
+}
+
+.discipline-card:hover .discipline-img {
+  transform: scale(1.05);
+}
+
+.discipline-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(to top, rgba(5, 5, 5, 0.95) 0%, rgba(5, 5, 5, 0.4) 50%, rgba(5, 5, 5, 0.1) 100%);
+  z-index: 1;
+}
+
+.discipline-info {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  padding: 2.5rem 2rem;
+  box-sizing: border-box;
+  z-index: 2;
+}
+
+.discipline-title {
+  font-family: var(--font-heading);
+  font-size: 1.8rem;
+  font-weight: 800;
+  margin: 0 0 0.5rem 0;
+  text-transform: uppercase;
+  color: var(--color-text-light);
+  letter-spacing: 1px;
+}
+
+.discipline-desc {
+  font-size: 0.95rem;
+  color: var(--color-text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
 /* Instructors */
 .instructor-grid {
   display: grid;
@@ -890,7 +960,7 @@ body {
 
 /* Responsive */
 @media (max-width: 1024px) {
-  .schedule-grid, .gallery-grid, .instructor-grid {
+  .disciplines-grid, .schedule-grid, .gallery-grid, .instructor-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 }
@@ -909,7 +979,7 @@ body {
   }
 
   /* Public Website */
-  .schedule-grid, .gallery-grid, .instructor-grid { grid-template-columns: 1fr; }
+  .disciplines-grid, .schedule-grid, .gallery-grid, .instructor-grid { grid-template-columns: 1fr; }
   .hero-section { padding: 0 1.5rem; }
   .hero-title { font-size: 2.5rem; }
   .hero-desc { font-size: 1rem; }
@@ -1084,13 +1154,14 @@ body {
   }
 
   .main-content { 
-    height: calc(100vh - 80px); /* Adjust height for scrolling content */
+    flex: 1;
+    min-height: 0;
+    height: auto;
     overflow-y: auto; 
-    flex: 1; 
   }
   
   .content-area { 
-    padding: 1.5rem; 
+    padding: 0.75rem; 
   }
   
   .panel { 
@@ -1114,8 +1185,43 @@ body {
   .nav-links { gap: 0.5rem; }
   .nav-link { font-size: 0.75rem; }
   .brand { font-size: 1.2rem; }
-  .page-title { font-size: 1.2rem; }
+  .page-title { font-size: 1.1rem; }
   .login-layout .glass-panel { padding: 1.5rem !important; }
+  
+  .content-area {
+    padding: 0.5rem;
+  }
+  .panel {
+    padding: 0.85rem;
+    border-radius: 12px;
+  }
+  .data-table td {
+    padding: 0.6rem 0.4rem;
+    font-size: 0.8rem;
+  }
+  .data-table th {
+    padding: 0.4rem;
+    font-size: 0.72rem;
+  }
+  .stats-grid {
+    gap: 0.75rem;
+  }
+  .stat-card {
+    padding: 0.85rem;
+    gap: 1rem;
+  }
+  .stat-icon-wrapper {
+    width: 45px;
+    height: 45px;
+    border-radius: 10px;
+  }
+  .stat-icon {
+    width: 22px;
+    height: 22px;
+  }
+  .stat-details .stat-value {
+    font-size: 1.5rem;
+  }
 }
 
 /* Year Calendar mini-day Hover Effects */
@@ -1300,4 +1406,225 @@ body {
 .modal-content .panel-header > button {
   width: auto !important;
   display: inline-flex !important;
+}
+
+/* --- Premium Login Portal Styles & Animations --- */
+
+/* Aurora Floating Backgrounds */
+.login-bg-glows {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.login-glow-1, .login-glow-2, .login-glow-3 {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.18;
+  mix-blend-mode: screen;
+  animation: floatGlow 18s infinite alternate ease-in-out;
+}
+
+.login-glow-1 {
+  width: 450px;
+  height: 450px;
+  background: var(--color-primary);
+  top: -10%;
+  left: -5%;
+  animation-duration: 20s;
+}
+
+.login-glow-2 {
+  width: 550px;
+  height: 550px;
+  background: var(--color-secondary);
+  bottom: -15%;
+  right: -5%;
+  animation-duration: 25s;
+  animation-delay: -5s;
+}
+
+.login-glow-3 {
+  width: 350px;
+  height: 350px;
+  background: #ff3366;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  opacity: 0.08;
+  animation: pulseGlow 10s infinite alternate ease-in-out;
+}
+
+@keyframes floatGlow {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(60px, 90px) scale(1.15);
+  }
+  100% {
+    transform: translate(-40px, 50px) scale(0.9);
+  }
+}
+
+@keyframes pulseGlow {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.05;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.3);
+    opacity: 0.12;
+  }
+}
+
+/* Animated Grid Pattern Overlay */
+.login-grid-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 50px 50px;
+  background-position: center center;
+  z-index: 0;
+  opacity: 0.8;
+  mask-image: radial-gradient(circle at center, black 40%, transparent 90%);
+  -webkit-mask-image: radial-gradient(circle at center, black 40%, transparent 90%);
+  pointer-events: none;
+}
+
+/* Premium Login Cards */
+.login-card-animated {
+  position: relative;
+  overflow: hidden;
+  z-index: 10;
+  border: 1px solid rgba(255, 255, 255, 0.07) !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.03) !important;
+  animation: loginCardEntrance 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: border-color 0.4s ease, box-shadow 0.4s ease, transform 0.4s ease !important;
+}
+
+.login-card-animated:hover {
+  border-color: rgba(229, 9, 20, 0.3) !important;
+  box-shadow: 0 25px 55px rgba(0, 0, 0, 0.75), 0 0 30px rgba(229, 9, 20, 0.15) !important;
+}
+
+.login-card-animated.submitting {
+  border-color: rgba(255, 215, 0, 0.35) !important;
+  box-shadow: 0 25px 55px rgba(0, 0, 0, 0.75), 0 0 35px rgba(255, 215, 0, 0.2) !important;
+  animation: loginCardPulse 2s infinite ease-in-out;
+}
+
+@keyframes loginCardEntrance {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes loginCardPulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.006);
+  }
+}
+
+/* Staggered Item Slide-in Sequence */
+.animate-item-1 { animation: loginItemSlideIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both; }
+.animate-item-2 { animation: loginItemSlideIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.22s both; }
+.animate-item-3 { animation: loginItemSlideIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.29s both; }
+.animate-item-4 { animation: loginItemSlideIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.36s both; }
+.animate-item-5 { animation: loginItemSlideIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.43s both; }
+.animate-item-6 { animation: loginItemSlideIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.50s both; }
+.animate-item-7 { animation: loginItemSlideIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.57s both; }
+
+@keyframes loginItemSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Premium Form Control Animations */
+.form-control-animated {
+  background: rgba(0, 0, 0, 0.45) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  transition: border-color 0.35s cubic-bezier(0.4, 0, 0.2, 1), 
+              box-shadow 0.35s cubic-bezier(0.4, 0, 0.2, 1), 
+              background-color 0.35s ease, 
+              transform 0.35s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.form-control-animated:focus {
+  border-color: var(--color-primary) !important;
+  background-color: rgba(229, 9, 20, 0.04) !important;
+  box-shadow: 0 0 14px rgba(229, 9, 20, 0.28), inset 0 1px 2px rgba(0,0,0,0.5) !important;
+  transform: translateY(-2px);
+}
+
+.form-control-animated:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* Loading Spinner Details */
+.btn-loading-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.spinner-dots {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.spinner-dot {
+  width: 6px;
+  height: 6px;
+  background-color: #ffffff;
+  border-radius: 50%;
+  animation: spinnerDotBounce 1.4s infinite ease-in-out both;
+}
+
+.spinner-dot:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.spinner-dot:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes spinnerDotBounce {
+  0%, 80%, 100% {
+    transform: scale(0.3);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
 }

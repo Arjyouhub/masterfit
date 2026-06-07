@@ -64,6 +64,9 @@ function App() {
   const [scrolled, setScrolled] = useState(false);
   const [loginData, setLoginData] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [coupons, setCoupons] = useState({});
+  const [newCouponForm, setNewCouponForm] = useState({ code: '', type: 'percentage', value: '' });
 
   const [loggedInUser, setLoggedInUser] = useState(() => {
     const cookies = document.cookie.split(';');
@@ -147,6 +150,63 @@ function App() {
     return Object.keys(adminCredentials).includes(usernameClean);
   };
 
+  const isBranchAdmin = (user) => {
+    if (!user) return false;
+    const usernameClean = user.toLowerCase().trim();
+    return usernameClean.startsWith('admin@');
+  };
+
+  const hasSettingsAccess = (user) => {
+    return isAdminUser(user) || isBranchAdmin(user);
+  };
+
+  const resolveCouponCode = (code) => {
+    if (!code) return null;
+    const uppercaseCode = code.toUpperCase().trim();
+
+    // Check custom coupons loaded in state
+    if (coupons && coupons[uppercaseCode] !== undefined) {
+      const c = coupons[uppercaseCode];
+      if (typeof c === 'number') {
+        return { type: 'percentage', value: c };
+      }
+      return { type: c.type || 'percentage', value: c.value || 0 };
+    }
+
+    // Hardcoded default coupons
+    if (uppercaseCode === 'FIT10' || uppercaseCode === 'WELCOME10') {
+      return { type: 'percentage', value: 10 };
+    }
+    if (uppercaseCode === 'FIT20') {
+      return { type: 'percentage', value: 20 };
+    }
+    if (uppercaseCode === 'FIT50') {
+      return { type: 'percentage', value: 50 };
+    }
+    if (uppercaseCode === 'FREE') {
+      return { type: 'percentage', value: 100 };
+    }
+
+    return null;
+  };
+
+  const getStudentDiscount = (s, rateToUse) => {
+    const coupon = resolveCouponCode(s.appliedCoupon);
+    if (coupon) {
+      if (coupon.type === 'percentage') {
+        return Math.round(rateToUse * coupon.value / 100);
+      }
+      return coupon.value;
+    }
+    // Legacy fallback
+    const type = s.couponType || 'percentage';
+    const val = s.couponValue !== undefined ? s.couponValue : (s.discountPercentage || 0);
+    if (type === 'percentage') {
+      return Math.round(rateToUse * val / 100);
+    }
+    return val;
+  };
+
   const [branchCredentials, setBranchCredentials] = useState({});
 
   const [batchCredentials, setBatchCredentials] = useState({});
@@ -216,6 +276,7 @@ function App() {
           setBatchOptions(uniqueBatches);
           setMonthlyFeeRate(data.monthlyFeeRate !== undefined ? data.monthlyFeeRate : 1000);
           setAdmissionFeeRate(data.admissionFeeRate !== undefined ? data.admissionFeeRate : 2000);
+          setCoupons(data.coupons || {});
         }
       })
       .catch(err => console.error('Error fetching credentials:', err));
@@ -520,7 +581,7 @@ function App() {
     const rateToUse = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
       ? student.customMonthlyRate
       : monthlyFeeRate;
-    const discountAmount = Math.round(rateToUse * (student.discountPercentage || 0) / 100);
+    const discountAmount = getStudentDiscount(student, rateToUse);
     const finalRate = Math.max(0, rateToUse - discountAmount);
 
     const monthlyDue = unpaidMonths.length * finalRate;
@@ -694,7 +755,7 @@ function App() {
           {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
         </button>
         <div className={`nav-links ${isMobileMenuOpen ? 'open' : ''}`}>
-          <a href="#schedule" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Schedule</a>
+          <a href="#disciplines" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Disciplines</a>
           <a href="#instructors" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Instructors</a>
           <a href="#gallery" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Gallery</a>
           <a href="#contact" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Contact</a>
@@ -713,7 +774,7 @@ function App() {
           <span className="hero-subtitle">Master Your Mind & Body</span>
           <h1 className="hero-title">MASTER FIT <span>Academy</span></h1>
           <p className="hero-desc">
-            Train with elite instructors in a premium facility. Choose from flexible batch timings and embark on your journey from white to black belt.
+            Train with elite instructors in a premium facility. Master Kung Fu, Karate, and Wushu, and embark on your journey from white to black belt.
           </p>
           <button className="btn-primary" style={{ padding: '1rem 2rem', fontSize: '1.1rem' }} onClick={() => document.getElementById('contact').scrollIntoView({ behavior: 'smooth' })}>
             Start Your Journey <ArrowRight size={20} />
@@ -721,38 +782,41 @@ function App() {
         </div>
       </section>
 
-      <section id="schedule" className="section" style={{ background: '#050505' }}>
+      <section id="disciplines" className="section" style={{ background: '#050505' }}>
         <div className="section-header">
-          <span className="section-subtitle">Training Hours</span>
-          <h2 className="section-title">Class Batches</h2>
+          <span className="section-subtitle">Our Specializations</span>
+          <h2 className="section-title">Training Programs</h2>
         </div>
-        <div className="schedule-grid">
-          <div className="schedule-card glass-panel">
-            <div className="batch-name">Batch 1</div>
-            <div className="batch-days">Mon - Thu</div>
-            <ul className="batch-details">
-              <li><span>Morning</span> <span>06:00 AM - 08:00 AM</span></li>
-              <li><span>Evening</span> <span>05:00 PM - 07:00 PM</span></li>
-              <li><span>Night</span> <span>08:00 PM - 10:00 PM</span></li>
-            </ul>
+        <div className="disciplines-grid">
+          <div className="discipline-card">
+            <img src="/kungfu.png" alt="Kung Fu" className="discipline-img" />
+            <div className="discipline-overlay"></div>
+            <div className="discipline-info">
+              <h3 className="discipline-title">Kung Fu</h3>
+              <p className="discipline-desc">
+                Develop exceptional agility, focus, and traditional forms. Master the flow of energy and strike with precision.
+              </p>
+            </div>
           </div>
-          <div className="schedule-card glass-panel">
-            <div className="batch-name">Batch 2</div>
-            <div className="batch-days">Tue - Fri</div>
-            <ul className="batch-details">
-              <li><span>Morning</span> <span>06:30 AM - 08:30 AM</span></li>
-              <li><span>Evening</span> <span>05:30 PM - 07:30 PM</span></li>
-              <li><span>Night</span> <span>08:30 PM - 10:30 PM</span></li>
-            </ul>
+          <div className="discipline-card">
+            <img src="/karate.png" alt="Karate" className="discipline-img" />
+            <div className="discipline-overlay"></div>
+            <div className="discipline-info">
+              <h3 className="discipline-title">Karate</h3>
+              <p className="discipline-desc">
+                Build self-discipline, speed, and raw power. Learn effective striking techniques, blocks, and core defensive patterns.
+              </p>
+            </div>
           </div>
-          <div className="schedule-card glass-panel">
-            <div className="batch-name">Batch 3</div>
-            <div className="batch-days">Wed - Sat</div>
-            <ul className="batch-details">
-              <li><span>Morning</span> <span>07:00 AM - 09:00 AM</span></li>
-              <li><span>Evening</span> <span>04:00 PM - 06:00 PM</span></li>
-              <li><span>Night</span> <span>07:00 PM - 09:00 PM</span></li>
-            </ul>
+          <div className="discipline-card">
+            <img src="/wushu.png" alt="Wushu" className="discipline-img" />
+            <div className="discipline-overlay"></div>
+            <div className="discipline-info">
+              <h3 className="discipline-title">Wushu</h3>
+              <p className="discipline-desc">
+                Combine acrobatics and martial arts. Learn high-flying jumps, fluid weapon routines, and dynamic performance elements.
+              </p>
+            </div>
           </div>
         </div>
       </section>
@@ -1158,7 +1222,7 @@ function App() {
         const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null
           ? s.customMonthlyRate
           : monthlyFeeRate;
-        const discountAmount = Math.round(rateToUse * (s.discountPercentage || 0) / 100);
+        const discountAmount = getStudentDiscount(s, rateToUse);
         const finalRate = Math.max(0, rateToUse - discountAmount);
         return sum + finalRate;
       }, 0);
@@ -1330,7 +1394,20 @@ function App() {
                                 setCustomRateInput(student.customMonthlyRate !== undefined && student.customMonthlyRate !== null ? student.customMonthlyRate : '');
                                 setCustomStartMonth(student.joinDate ? student.joinDate.slice(0, 7) : new Date().toISOString().slice(0, 7));
                                 setCouponInput(student.appliedCoupon || '');
-                                setCouponMessage(student.appliedCoupon ? `Active: ${student.appliedCoupon} (${student.discountPercentage}% Off)` : '');
+                                let activeMsg = '';
+                                if (student.appliedCoupon) {
+                                  const resolved = resolveCouponCode(student.appliedCoupon);
+                                  if (resolved) {
+                                    const display = resolved.type === 'amount' ? `₹${resolved.value}` : `${resolved.value}%`;
+                                    activeMsg = `Active: ${student.appliedCoupon} (${display} Off)`;
+                                  } else {
+                                    const type = student.couponType || 'percentage';
+                                    const val = student.couponValue !== undefined ? student.couponValue : (student.discountPercentage || 0);
+                                    const display = type === 'amount' ? `₹${val}` : `${val}%`;
+                                    activeMsg = `Active: ${student.appliedCoupon} (${display} Off)`;
+                                  }
+                                }
+                                setCouponMessage(activeMsg);
                                 setIsFeeEditModalOpen(true);
                               }}
                               className="btn-icon"
@@ -1653,13 +1730,15 @@ function App() {
   };
 
   const renderSettings = () => {
-    const isAdmin = isAdminUser(loggedInUser);
+    const isSuper = isAdminUser(loggedInUser);
+    const isBranchAdm = isBranchAdmin(loggedInUser);
+    const hasAccess = isSuper || isBranchAdm;
 
-    if (!isAdmin) {
+    if (!hasAccess) {
       return (
         <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
           <h3 className="panel-title" style={{ color: '#E50914' }}>Access Denied</h3>
-          <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Only the Super Admin can view or modify account settings.</p>
+          <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Only administrators can view or modify settings.</p>
         </div>
       );
     }
@@ -1871,6 +1950,75 @@ function App() {
         });
     };
 
+    const handleCreateCoupon = (e) => {
+      e.preventDefault();
+      setSettingsError('');
+      setSettingsSuccess('');
+
+      const code = newCouponForm.code.toUpperCase().trim();
+      const type = newCouponForm.type || 'percentage';
+      const value = parseInt(newCouponForm.value, 10);
+
+      if (!code) {
+        setSettingsError('Please provide a valid coupon code.');
+        return;
+      }
+      if (isNaN(value) || value < 1) {
+        setSettingsError('Please provide a valid discount value (minimum 1).');
+        return;
+      }
+      if (type === 'percentage' && value > 100) {
+        setSettingsError('Percentage discount cannot exceed 100%.');
+        return;
+      }
+
+      const updatedCoupons = {
+        ...coupons,
+        [code]: { type, value }
+      };
+
+      fetch(`${API_BASE_URL}/credentials`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coupons: updatedCoupons })
+      })
+        .then(res => res.json())
+        .then(data => {
+          setCoupons(data.coupons || {});
+          setNewCouponForm({ code: '', type: 'percentage', value: '' });
+          setSettingsSuccess(`Coupon "${code}" (${type === 'percentage' ? `${value}%` : `₹${value}`} off) created successfully!`);
+        })
+        .catch(err => {
+          setSettingsError('Error creating coupon: ' + err.message);
+        });
+    };
+
+    const handleDeleteCoupon = (codeToDelete) => {
+      setSettingsError('');
+      setSettingsSuccess('');
+
+      if (!window.confirm(`Are you sure you want to delete the coupon "${codeToDelete}"?`)) {
+        return;
+      }
+
+      const updatedCoupons = { ...coupons };
+      delete updatedCoupons[codeToDelete];
+
+      fetch(`${API_BASE_URL}/credentials`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coupons: updatedCoupons })
+      })
+        .then(res => res.json())
+        .then(data => {
+          setCoupons(data.coupons || {});
+          setSettingsSuccess(`Coupon "${codeToDelete}" deleted successfully!`);
+        })
+        .catch(err => {
+          setSettingsError('Error deleting coupon: ' + err.message);
+        });
+    };
+
     const handleUpdateAdmin = (e) => {
       e.preventDefault();
       setSettingsError('');
@@ -2071,530 +2219,626 @@ function App() {
         {settingsError && <div style={{ color: '#E50914', marginBottom: '1.5rem', background: 'rgba(229, 9, 20, 0.1)', padding: '1rem', borderRadius: '4px', border: '1px solid rgba(229, 9, 20, 0.3)', fontWeight: 500 }}>{settingsError}</div>}
         {settingsSuccess && <div style={{ color: '#4CAF50', marginBottom: '1.5rem', background: 'rgba(76, 175, 80, 0.1)', padding: '1rem', borderRadius: '4px', border: '1px solid rgba(76, 175, 80, 0.3)', fontWeight: 500 }}>{settingsSuccess}</div>}
 
-        {/* Admin Accounts Settings */}
-        <div className="panel" style={{ marginBottom: '2rem' }}>
-          <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-            <h3 className="panel-title">Update Admin Accounts</h3>
-          </div>
-          <form onSubmit={handleUpdateAdmin}>
-            <div className="grid-2-col" style={{ marginBottom: '1.5rem' }}>
-              <div className="form-group">
-                <label>Select Admin Account</label>
-                <select className="form-control" value={adminForm.account} onChange={(e) => setAdminForm({ ...adminForm, account: e.target.value, newUsername: e.target.value })}>
-                  {Object.keys(adminCredentials).map(acc => (
-                    <option key={acc} value={acc}>{acc}</option>
-                  ))}
-                </select>
+        {isSuper && (
+          <>
+            {/* Admin Accounts Settings */}
+            <div className="panel" style={{ marginBottom: '2rem' }}>
+              <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+                <h3 className="panel-title">Update Admin Accounts</h3>
               </div>
-              <div className="form-group">
-                <label>New Username (Optional)</label>
-                <input type="text" className="form-control" placeholder="Enter new username" value={adminForm.newUsername} onChange={(e) => setAdminForm({ ...adminForm, newUsername: e.target.value })} />
-              </div>
+              <form onSubmit={handleUpdateAdmin}>
+                <div className="grid-2-col" style={{ marginBottom: '1.5rem' }}>
+                  <div className="form-group">
+                    <label>Select Admin Account</label>
+                    <select className="form-control" value={adminForm.account} onChange={(e) => setAdminForm({ ...adminForm, account: e.target.value, newUsername: e.target.value })}>
+                      {Object.keys(adminCredentials).map(acc => (
+                        <option key={acc} value={acc}>{acc}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>New Username (Optional)</label>
+                    <input type="text" className="form-control" placeholder="Enter new username" value={adminForm.newUsername} onChange={(e) => setAdminForm({ ...adminForm, newUsername: e.target.value })} />
+                  </div>
+                </div>
+                <div className="grid-2-col" style={{ marginBottom: '1.5rem' }}>
+                  <div className="form-group">
+                    <label>New Password</label>
+                    <input type="password" className="form-control" placeholder="Enter new password" required value={adminForm.newPassword} onChange={(e) => setAdminForm({ ...adminForm, newPassword: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>Confirm Password</label>
+                    <input type="password" className="form-control" placeholder="Confirm new password" required value={adminForm.confirmPassword} onChange={(e) => setAdminForm({ ...adminForm, confirmPassword: e.target.value })} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                  <button type="submit" className="btn-primary">Update Admin Account</button>
+                  {adminForm.account.toLowerCase().trim() !== loggedInUser.toLowerCase().trim() && adminForm.account.toLowerCase().trim() !== 'admin' && (
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
+                      onClick={() => handleDeleteAdminAccount(adminForm.account)}
+                    >
+                      Delete Selected Account
+                    </button>
+                  )}
+                </div>
+              </form>
             </div>
-            <div className="grid-2-col" style={{ marginBottom: '1.5rem' }}>
-              <div className="form-group">
-                <label>New Password</label>
-                <input type="password" className="form-control" placeholder="Enter new password" required value={adminForm.newPassword} onChange={(e) => setAdminForm({ ...adminForm, newPassword: e.target.value })} />
-              </div>
-              <div className="form-group">
-                <label>Confirm Password</label>
-                <input type="password" className="form-control" placeholder="Confirm new password" required value={adminForm.confirmPassword} onChange={(e) => setAdminForm({ ...adminForm, confirmPassword: e.target.value })} />
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <button type="submit" className="btn-primary">Update Admin Account</button>
-              {adminForm.account.toLowerCase().trim() !== loggedInUser.toLowerCase().trim() && adminForm.account.toLowerCase().trim() !== 'admin' && (
-                <button
-                  type="button"
-                  className="btn-primary"
-                  style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
-                  onClick={() => handleDeleteAdminAccount(adminForm.account)}
-                >
-                  Delete Selected Account
-                </button>
-              )}
-            </div>
-          </form>
-        </div>
 
-        {/* Create New Admin Account */}
-        <div className="panel" style={{ marginBottom: '2rem' }}>
-          <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-            <h3 className="panel-title">Create New Admin Account</h3>
-          </div>
-          <form onSubmit={handleCreateAdmin}>
-            <div className="grid-2-col" style={{ marginBottom: '1.5rem' }}>
-              <div className="form-group">
-                <label>Admin Username</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Enter username"
-                  required
-                  value={createAdminForm.username}
-                  onChange={(e) => setCreateAdminForm({ ...createAdminForm, username: e.target.value })}
-                />
+            {/* Create New Admin Account */}
+            <div className="panel" style={{ marginBottom: '2rem' }}>
+              <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+                <h3 className="panel-title">Create New Admin Account</h3>
               </div>
-              <div className="form-group">
-                <label>Admin Password</label>
-                <input
-                  type="password"
-                  className="form-control"
-                  placeholder="Enter password"
-                  required
-                  value={createAdminForm.password}
-                  onChange={(e) => setCreateAdminForm({ ...createAdminForm, password: e.target.value })}
-                />
+              <form onSubmit={handleCreateAdmin}>
+                <div className="grid-2-col" style={{ marginBottom: '1.5rem' }}>
+                  <div className="form-group">
+                    <label>Admin Username</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Enter username"
+                      required
+                      value={createAdminForm.username}
+                      onChange={(e) => setCreateAdminForm({ ...createAdminForm, username: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Admin Password</label>
+                    <input
+                      type="password"
+                      className="form-control"
+                      placeholder="Enter password"
+                      required
+                      value={createAdminForm.password}
+                      onChange={(e) => setCreateAdminForm({ ...createAdminForm, password: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                  <label>Confirm Password</label>
+                  <input
+                    type="password"
+                    className="form-control"
+                    placeholder="Confirm password"
+                    required
+                    value={createAdminForm.confirmPassword}
+                    onChange={(e) => setCreateAdminForm({ ...createAdminForm, confirmPassword: e.target.value })}
+                  />
+                </div>
+                <button type="submit" className="btn-primary">Create Admin Account</button>
+              </form>
+            </div>
+
+            {/* Admin Accounts List & Management */}
+            <div className="panel" style={{ marginBottom: '2rem' }}>
+              <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+                <h3 className="panel-title">Admin User Accounts List</h3>
               </div>
-            </div>
-            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-              <label>Confirm Password</label>
-              <input
-                type="password"
-                className="form-control"
-                placeholder="Confirm password"
-                required
-                value={createAdminForm.confirmPassword}
-                onChange={(e) => setCreateAdminForm({ ...createAdminForm, confirmPassword: e.target.value })}
-              />
-            </div>
-            <button type="submit" className="btn-primary">Create Admin Account</button>
-          </form>
-        </div>
-
-        {/* Admin Accounts List & Management */}
-        <div className="panel" style={{ marginBottom: '2rem' }}>
-          <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-            <h3 className="panel-title">Admin User Accounts List</h3>
-          </div>
-          <div className="table-responsive">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Username</th>
-                  <th>Status</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.keys(adminCredentials).map(acc => (
-                  <tr key={acc}>
-                    <td style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>{acc}</td>
-                    <td>
-                      {acc === 'admin' ? (
-                        <span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>Default Superadmin</span>
-                      ) : acc === loggedInUser ? (
-                        <span className="badge badge-green">Logged In</span>
-                      ) : (
-                        <span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>Admin</span>
-                      )}
-                    </td>
-                    <td>
-                      {acc.toLowerCase().trim() !== loggedInUser.toLowerCase().trim() && acc.toLowerCase().trim() !== 'admin' ? (
-                        <button
-                          type="button"
-                          className="btn-small"
-                          style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
-                          onClick={() => handleDeleteAdminAccount(acc)}
-                        >
-                          Delete Account
-                        </button>
-                      ) : (
-                        <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Non-deletable</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Manage Active Sessions */}
-        <div className="panel" style={{ marginBottom: '2rem' }}>
-          <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-            <h3 className="panel-title">Manage Active Sessions</h3>
-            <button
-              type="button"
-              className="btn-small btn-secondary"
-              onClick={() => {
-                fetch(`${API_BASE_URL}/sessions`)
-                  .then(res => res.json())
-                  .then(data => {
-                    setActiveSessions(data || []);
-                    setSettingsSuccess('Sessions list refreshed!');
-                  })
-                  .catch(err => setSettingsError('Error refreshing sessions: ' + err.message));
-              }}
-            >
-              Refresh
-            </button>
-          </div>
-          <div className="table-responsive">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Username</th>
-                  <th>Login Time</th>
-                  <th>IP Address</th>
-                  <th>Client Details</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {activeSessions.length === 0 ? (
-                  <tr>
-                    <td colSpan="5" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '2rem' }}>
-                      No active sessions found.
-                    </td>
-                  </tr>
-                ) : (
-                  activeSessions.map(session => {
-                    const isCurrent = session.token === getCookieValue('umai_session_token');
-                    const loginDateFormatted = new Date(session.loginTime).toLocaleString();
-                    let browserInfo = 'Unknown Browser';
-                    const ua = session.userAgent || '';
-                    if (ua.includes('Firefox/')) {
-                      browserInfo = 'Firefox';
-                    } else if (ua.includes('Chrome/') && !ua.includes('Chromium/') && !ua.includes('Edg/')) {
-                      browserInfo = 'Chrome';
-                    } else if (ua.includes('Safari/') && !ua.includes('Chrome/')) {
-                      browserInfo = 'Safari';
-                    } else if (ua.includes('Edg/')) {
-                      browserInfo = 'Edge';
-                    } else if (ua.includes('PostmanRuntime')) {
-                      browserInfo = 'Postman';
-                    } else {
-                      const match = ua.match(/(Opera|Chrome|Safari|Firefox|MSIE|Trident)\/?\s*(\d+)/i);
-                      if (match) browserInfo = match[1];
-                    }
-
-                    return (
-                      <tr key={session.token}>
-                        <td style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>
-                          {session.username}
-                        </td>
-                        <td style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
-                          {loginDateFormatted}
-                        </td>
-                        <td style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
-                          {session.ipAddress || 'Unknown'}
-                        </td>
-                        <td style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }} title={session.userAgent}>
-                          {browserInfo}
+              <div className="table-responsive">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Username</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.keys(adminCredentials).map(acc => (
+                      <tr key={acc}>
+                        <td style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>{acc}</td>
+                        <td>
+                          {acc === 'admin' ? (
+                            <span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>Default Superadmin</span>
+                          ) : acc === loggedInUser ? (
+                            <span className="badge badge-green">Logged In</span>
+                          ) : (
+                            <span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>Admin</span>
+                          )}
                         </td>
                         <td>
-                          {isCurrent ? (
-                            <span className="badge badge-green">Current Session</span>
-                          ) : (
+                          {acc.toLowerCase().trim() !== loggedInUser.toLowerCase().trim() && acc.toLowerCase().trim() !== 'admin' ? (
                             <button
                               type="button"
                               className="btn-small"
                               style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
-                              onClick={() => handleForceLogoutSession(session.token)}
+                              onClick={() => handleDeleteAdminAccount(acc)}
                             >
-                              Force Logout
+                              Delete Account
                             </button>
+                          ) : (
+                            <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Non-deletable</span>
                           )}
                         </td>
                       </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Coordinator Passwords Management */}
-        <div className="grid-2-col" style={{ gap: '2rem' }}>
-          {/* Branch Passwords */}
-          <div className="panel">
-            <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-              <h3 className="panel-title">Manage Branch Credentials</h3>
-            </div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
-              Current Username: <strong style={{ color: 'var(--color-text-light)' }}>{branchCredentials[branchForm.branch]?.username || `admin@${branchForm.branch}`}</strong>
-            </div>
-            <form onSubmit={handleUpdateBranchPassword}>
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label>Select Branch</label>
-                <select className="form-control" value={branchForm.branch} onChange={(e) => setBranchForm({ branch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
-                  {branches.map(br => (
-                    <option key={br} value={br.toLowerCase()}>{br}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label>New Username (Optional)</label>
-                <input type="text" className="form-control" placeholder="Enter new username" value={branchForm.newUsername} onChange={(e) => setBranchForm({ ...branchForm, newUsername: e.target.value })} />
-              </div>
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label>New Password</label>
-                <input type="password" className="form-control" placeholder="Enter new password" required value={branchForm.newPassword} onChange={(e) => setBranchForm({ ...branchForm, newPassword: e.target.value })} />
-              </div>
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label>Confirm Password</label>
-                <input type="password" className="form-control" placeholder="Confirm new password" required value={branchForm.confirmPassword} onChange={(e) => setBranchForm({ ...branchForm, confirmPassword: e.target.value })} />
-              </div>
-              <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Save Branch Credentials</button>
-            </form>
-          </div>
-
-          {/* Batch Passwords */}
-          <div className="panel">
-            <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-              <h3 className="panel-title">Manage Batch Credentials</h3>
-            </div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
-              Current Username: <strong style={{ color: 'var(--color-text-light)' }}>{batchCredentials[`${batchForm.branch}_${batchForm.batch}`]?.username || `${batchForm.batch}@${batchForm.branch}`}</strong>
-            </div>
-            <form onSubmit={handleUpdateBatchPassword}>
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label>Select Branch</label>
-                <select className="form-control" value={batchForm.branch} onChange={(e) => setBatchForm({ ...batchForm, branch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
-                  {branches.map(br => (
-                    <option key={br} value={br.toLowerCase()}>{br}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label>Select Batch</label>
-                <select className="form-control" value={batchForm.batch} onChange={(e) => setBatchForm({ ...batchForm, batch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
-                  {batchOptions.map(opt => (
-                    <option key={opt.id} value={opt.id}>{opt.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label>New Username (Optional)</label>
-                <input type="text" className="form-control" placeholder="Enter new username" value={batchForm.newUsername} onChange={(e) => setBatchForm({ ...batchForm, newUsername: e.target.value })} />
-              </div>
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label>New Password</label>
-                <input type="password" className="form-control" placeholder="Enter new password" required value={batchForm.newPassword} onChange={(e) => setBatchForm({ ...batchForm, newPassword: e.target.value })} />
-              </div>
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label>Confirm Password</label>
-                <input type="password" className="form-control" placeholder="Confirm new password" required value={batchForm.confirmPassword} onChange={(e) => setBatchForm({ ...batchForm, confirmPassword: e.target.value })} />
-              </div>
-              <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Save Batch Credentials</button>
-            </form>
-          </div>
-        </div>
-
-        {/* Manage Branches & Batches Options */}
-        <div className="grid-2-col" style={{ gap: '2rem', marginTop: '2rem' }}>
-          {/* Branch List and Add Form */}
-          <div className="panel">
-            <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-              <h3 className="panel-title">Add & Manage Branches</h3>
-            </div>
-
-            <form onSubmit={handleAddBranch} style={{ marginBottom: '2rem' }}>
-              <div className="form-group" style={{ marginBottom: '1rem' }}>
-                <label>Branch Name</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="e.g. Vatakara"
-                  value={newBranchForm.name}
-                  onChange={(e) => setNewBranchForm({ ...newBranchForm, name: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="form-group" style={{ marginBottom: '1rem' }}>
-                <label>Coordinator Username (Optional)</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="e.g. admin@vatakara (auto-default)"
-                  value={newBranchForm.username}
-                  onChange={(e) => setNewBranchForm({ ...newBranchForm, username: e.target.value })}
-                />
-              </div>
-              <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
-                <div className="form-group">
-                  <label>Coordinator Password</label>
-                  <input
-                    type="password"
-                    className="form-control"
-                    placeholder="Enter password"
-                    value={newBranchForm.password}
-                    onChange={(e) => setNewBranchForm({ ...newBranchForm, password: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Confirm Password</label>
-                  <input
-                    type="password"
-                    className="form-control"
-                    placeholder="Confirm password"
-                    value={newBranchForm.confirmPassword}
-                    onChange={(e) => setNewBranchForm({ ...newBranchForm, confirmPassword: e.target.value })}
-                    required
-                  />
-                </div>
-              </div>
-              <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Branch & Credentials</button>
-            </form>
-
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Custom Branches List</label>
-            {customBranches.length === 0 ? (
-              <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No custom branches added yet.</p>
-            ) : (
-              <div className="table-responsive">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Branch Name</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {customBranches.map(br => (
-                      <tr key={br}>
-                        <td style={{ color: 'var(--color-text-light)' }}>{br}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn-small"
-                            style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
-                            onClick={() => handleDeleteCustomBranch(br)}
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            )}
-          </div>
-
-          {/* Batch List and Add Form */}
-          <div className="panel">
-            <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-              <h3 className="panel-title">Add & Manage Batches</h3>
             </div>
 
-            <form onSubmit={handleAddBatch} style={{ marginBottom: '2rem' }}>
-              <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
-                <div className="form-group">
-                  <label>Batch Name</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g. Batch 4 (Sat - Sun)"
-                    value={newBatchForm.name}
-                    onChange={(e) => setNewBatchForm({ ...newBatchForm, name: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Schedule Pattern</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g. Sat-Sun"
-                    value={newBatchForm.schedule}
-                    onChange={(e) => setNewBatchForm({ ...newBatchForm, schedule: e.target.value })}
-                    required
-                  />
-                </div>
+            {/* Manage Active Sessions */}
+            <div className="panel" style={{ marginBottom: '2rem' }}>
+              <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+                <h3 className="panel-title">Manage Active Sessions</h3>
+                <button
+                  type="button"
+                  className="btn-small btn-secondary"
+                  onClick={() => {
+                    fetch(`${API_BASE_URL}/sessions`)
+                      .then(res => res.json())
+                      .then(data => {
+                        setActiveSessions(data || []);
+                        setSettingsSuccess('Sessions list refreshed!');
+                      })
+                      .catch(err => setSettingsError('Error refreshing sessions: ' + err.message));
+                  }}
+                >
+                  Refresh
+                </button>
               </div>
+              <div className="table-responsive">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Username</th>
+                      <th>Login Time</th>
+                      <th>IP Address</th>
+                      <th>Client Details</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeSessions.length === 0 ? (
+                      <tr>
+                        <td colSpan="5" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '2rem' }}>
+                          No active sessions found.
+                        </td>
+                      </tr>
+                    ) : (
+                      activeSessions.map(session => {
+                        const isCurrent = session.token === getCookieValue('umai_session_token');
+                        const loginDateFormatted = new Date(session.loginTime).toLocaleString();
+                        let browserInfo = 'Unknown Browser';
+                        const ua = session.userAgent || '';
+                        if (ua.includes('Firefox/')) {
+                          browserInfo = 'Firefox';
+                        } else if (ua.includes('Chrome/') && !ua.includes('Chromium/') && !ua.includes('Edg/')) {
+                          browserInfo = 'Chrome';
+                        } else if (ua.includes('Safari/') && !ua.includes('Chrome/')) {
+                          browserInfo = 'Safari';
+                        } else if (ua.includes('Edg/')) {
+                          browserInfo = 'Edge';
+                        } else if (ua.includes('PostmanRuntime')) {
+                          browserInfo = 'Postman';
+                        } else {
+                          const match = ua.match(/(Opera|Chrome|Safari|Firefox|MSIE|Trident)\/?\s*(\d+)/i);
+                          if (match) browserInfo = match[1];
+                        }
 
-              <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
+                        return (
+                          <tr key={session.token}>
+                            <td style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>
+                              {session.username}
+                            </td>
+                            <td style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                              {loginDateFormatted}
+                            </td>
+                            <td style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                              {session.ipAddress || 'Unknown'}
+                            </td>
+                            <td style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }} title={session.userAgent}>
+                              {browserInfo}
+                            </td>
+                            <td>
+                              {isCurrent ? (
+                                <span className="badge badge-green">Current Session</span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn-small"
+                                  style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
+                                  onClick={() => handleForceLogoutSession(session.token)}
+                                >
+                                  Force Logout
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Manage Coupons Panel */}
+        <div className="panel" style={{ marginBottom: '2rem' }}>
+          <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+            <h3 className="panel-title">Manage Coupons</h3>
+          </div>
+          <form onSubmit={handleCreateCoupon} style={{ marginBottom: '2rem' }}>
+            <div className="grid-2-col" style={{ marginBottom: '1.5rem' }}>
+              <div className="form-group">
+                <label>Coupon Code (e.g., FIT25)</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Enter code"
+                  required
+                  value={newCouponForm.code || ''}
+                  onChange={(e) => setNewCouponForm({ ...newCouponForm, code: e.target.value.toUpperCase().trim() })}
+                />
+              </div>
+              <div className="grid-2-col" style={{ gap: '12px' }}>
                 <div className="form-group">
-                  <label>Configure Credentials for Branch</label>
+                  <label>Discount Type</label>
                   <select
                     className="form-control"
-                    value={newBatchForm.branch}
-                    onChange={(e) => setNewBatchForm({ ...newBatchForm, branch: e.target.value })}
+                    value={newCouponForm.type || 'percentage'}
+                    onChange={(e) => setNewCouponForm({ ...newCouponForm, type: e.target.value })}
                   >
-                    {branches.map(br => (
-                      <option key={br} value={br.toLowerCase()}>{br}</option>
-                    ))}
+                    <option value="percentage">Percentage (%)</option>
+                    <option value="amount">Fixed Amount (₹)</option>
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Coordinator Username (Optional)</label>
+                  <label>{newCouponForm.type === 'amount' ? 'Discount Amount (₹)' : 'Discount Percentage (1-100)'}</label>
                   <input
-                    type="text"
+                    type="number"
+                    min="1"
+                    max={newCouponForm.type === 'percentage' ? 100 : undefined}
                     className="form-control"
-                    placeholder="e.g. batch_id@branch (auto)"
-                    value={newBatchForm.username}
-                    onChange={(e) => setNewBatchForm({ ...newBatchForm, username: e.target.value })}
+                    placeholder={newCouponForm.type === 'amount' ? "e.g. 200" : "e.g. 25"}
+                    required
+                    value={newCouponForm.value || ''}
+                    onChange={(e) => setNewCouponForm({ ...newCouponForm, value: parseInt(e.target.value, 10) || '' })}
                   />
                 </div>
               </div>
+            </div>
+            <button type="submit" className="btn-primary">Create Coupon</button>
+          </form>
 
-              <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
-                <div className="form-group">
-                  <label>Coordinator Password</label>
-                  <input
-                    type="password"
-                    className="form-control"
-                    placeholder="Enter password"
-                    value={newBatchForm.password}
-                    onChange={(e) => setNewBatchForm({ ...newBatchForm, password: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Confirm Password</label>
-                  <input
-                    type="password"
-                    className="form-control"
-                    placeholder="Confirm password"
-                    value={newBatchForm.confirmPassword}
-                    onChange={(e) => setNewBatchForm({ ...newBatchForm, confirmPassword: e.target.value })}
-                    required
-                  />
-                </div>
-              </div>
-              <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Batch & Credentials</button>
-            </form>
-
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Custom Batches List</label>
-            {customBatches.length === 0 ? (
-              <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No custom batches added yet.</p>
-            ) : (
-              <div className="table-responsive">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Batch Details</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {customBatches.map(bt => (
-                      <tr key={bt.id}>
-                        <td>
-                          <div style={{ color: 'var(--color-text-light)' }}>{bt.name}</div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Pattern: {bt.schedule}</div>
-                        </td>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Active Coupons List</label>
+          {Object.keys(coupons).length === 0 ? (
+            <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No custom coupons created yet.</p>
+          ) : (
+            <div className="table-responsive">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Coupon Code</th>
+                    <th>Discount</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(coupons).map(([code, couponData]) => {
+                    const coupon = typeof couponData === 'number' ? { type: 'percentage', value: couponData } : couponData;
+                    const displayValue = coupon.type === 'amount' ? `₹${coupon.value}` : `${coupon.value}%`;
+                    return (
+                      <tr key={code}>
+                        <td style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>{code}</td>
+                        <td><span className="badge badge-green">{displayValue} Off</span></td>
                         <td>
                           <button
                             type="button"
                             className="btn-small"
                             style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
-                            onClick={() => handleDeleteCustomBatch(bt.id, bt.name)}
+                            onClick={() => handleDeleteCoupon(code)}
                           >
                             Delete
                           </button>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
+
+        {isSuper && (
+          <>
+            {/* Coordinator Passwords Management */}
+            <div className="grid-2-col" style={{ gap: '2rem' }}>
+              {/* Branch Passwords */}
+              <div className="panel">
+                <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+                  <h3 className="panel-title">Manage Branch Credentials</h3>
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
+                  Current Username: <strong style={{ color: 'var(--color-text-light)' }}>{branchCredentials[branchForm.branch]?.username || `admin@${branchForm.branch}`}</strong>
+                </div>
+                <form onSubmit={handleUpdateBranchPassword}>
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label>Select Branch</label>
+                    <select className="form-control" value={branchForm.branch} onChange={(e) => setBranchForm({ branch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
+                      {branches.map(br => (
+                        <option key={br} value={br.toLowerCase()}>{br}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label>New Username (Optional)</label>
+                    <input type="text" className="form-control" placeholder="Enter new username" value={branchForm.newUsername} onChange={(e) => setBranchForm({ ...branchForm, newUsername: e.target.value })} />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label>New Password</label>
+                    <input type="password" className="form-control" placeholder="Enter new password" required value={branchForm.newPassword} onChange={(e) => setBranchForm({ ...branchForm, newPassword: e.target.value })} />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label>Confirm Password</label>
+                    <input type="password" className="form-control" placeholder="Confirm new password" required value={branchForm.confirmPassword} onChange={(e) => setBranchForm({ ...branchForm, confirmPassword: e.target.value })} />
+                  </div>
+                  <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Save Branch Credentials</button>
+                </form>
+              </div>
+
+              {/* Batch Passwords */}
+              <div className="panel">
+                <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+                  <h3 className="panel-title">Manage Batch Credentials</h3>
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
+                  Current Username: <strong style={{ color: 'var(--color-text-light)' }}>{batchCredentials[`${batchForm.branch}_${batchForm.batch}`]?.username || `${batchForm.batch}@${batchForm.branch}`}</strong>
+                </div>
+                <form onSubmit={handleUpdateBatchPassword}>
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label>Select Branch</label>
+                    <select className="form-control" value={batchForm.branch} onChange={(e) => setBatchForm({ ...batchForm, branch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
+                      {branches.map(br => (
+                        <option key={br} value={br.toLowerCase()}>{br}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label>Select Batch</label>
+                    <select className="form-control" value={batchForm.batch} onChange={(e) => setBatchForm({ ...batchForm, batch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
+                      {batchOptions.map(opt => (
+                        <option key={opt.id} value={opt.id}>{opt.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label>New Username (Optional)</label>
+                    <input type="text" className="form-control" placeholder="Enter new username" value={batchForm.newUsername} onChange={(e) => setBatchForm({ ...batchForm, newUsername: e.target.value })} />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label>New Password</label>
+                    <input type="password" className="form-control" placeholder="Enter new password" required value={batchForm.newPassword} onChange={(e) => setBatchForm({ ...batchForm, newPassword: e.target.value })} />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label>Confirm Password</label>
+                    <input type="password" className="form-control" placeholder="Confirm new password" required value={batchForm.confirmPassword} onChange={(e) => setBatchForm({ ...batchForm, confirmPassword: e.target.value })} />
+                  </div>
+                  <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Save Batch Credentials</button>
+                </form>
+              </div>
+            </div>
+
+            {/* Manage Branches & Batches Options */}
+            <div className="grid-2-col" style={{ gap: '2rem', marginTop: '2rem' }}>
+              {/* Branch List and Add Form */}
+              <div className="panel">
+                <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+                  <h3 className="panel-title">Add & Manage Branches</h3>
+                </div>
+
+                <form onSubmit={handleAddBranch} style={{ marginBottom: '2rem' }}>
+                  <div className="form-group" style={{ marginBottom: '1rem' }}>
+                    <label>Branch Name</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. Vatakara"
+                      value={newBranchForm.name}
+                      onChange={(e) => setNewBranchForm({ ...newBranchForm, name: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: '1rem' }}>
+                    <label>Coordinator Username (Optional)</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. admin@vatakara (auto-default)"
+                      value={newBranchForm.username}
+                      onChange={(e) => setNewBranchForm({ ...newBranchForm, username: e.target.value })}
+                    />
+                  </div>
+                  <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
+                    <div className="form-group">
+                      <label>Coordinator Password</label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        placeholder="Enter password"
+                        value={newBranchForm.password}
+                        onChange={(e) => setNewBranchForm({ ...newBranchForm, password: e.target.value })}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Confirm Password</label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        placeholder="Confirm password"
+                        value={newBranchForm.confirmPassword}
+                        onChange={(e) => setNewBranchForm({ ...newBranchForm, confirmPassword: e.target.value })}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Branch & Credentials</button>
+                </form>
+
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Custom Branches List</label>
+                {customBranches.length === 0 ? (
+                  <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No custom branches added yet.</p>
+                ) : (
+                  <div className="table-responsive">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Branch Name</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {customBranches.map(br => (
+                          <tr key={br}>
+                            <td style={{ color: 'var(--color-text-light)' }}>{br}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="btn-small"
+                                style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
+                                onClick={() => handleDeleteCustomBranch(br)}
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Batch List and Add Form */}
+              <div className="panel">
+                <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+                  <h3 className="panel-title">Add & Manage Batches</h3>
+                </div>
+
+                <form onSubmit={handleAddBatch} style={{ marginBottom: '2rem' }}>
+                  <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
+                    <div className="form-group">
+                      <label>Batch Name</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. Batch 4 (Sat - Sun)"
+                        value={newBatchForm.name}
+                        onChange={(e) => setNewBatchForm({ ...newBatchForm, name: e.target.value })}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Schedule Pattern</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. Sat-Sun"
+                        value={newBatchForm.schedule}
+                        onChange={(e) => setNewBatchForm({ ...newBatchForm, schedule: e.target.value })}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
+                    <div className="form-group">
+                      <label>Configure Credentials for Branch</label>
+                      <select
+                        className="form-control"
+                        value={newBatchForm.branch}
+                        onChange={(e) => setNewBatchForm({ ...newBatchForm, branch: e.target.value })}
+                      >
+                        {branches.map(br => (
+                          <option key={br} value={br.toLowerCase()}>{br}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label>Coordinator Username (Optional)</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. batch_id@branch (auto)"
+                        value={newBatchForm.username}
+                        onChange={(e) => setNewBatchForm({ ...newBatchForm, username: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
+                    <div className="form-group">
+                      <label>Coordinator Password</label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        placeholder="Enter password"
+                        value={newBatchForm.password}
+                        onChange={(e) => setNewBatchForm({ ...newBatchForm, password: e.target.value })}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Confirm Password</label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        placeholder="Confirm password"
+                        value={newBatchForm.confirmPassword}
+                        onChange={(e) => setNewBatchForm({ ...newBatchForm, confirmPassword: e.target.value })}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Batch & Credentials</button>
+                </form>
+
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Custom Batches List</label>
+                {customBatches.length === 0 ? (
+                  <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No custom batches added yet.</p>
+                ) : (
+                  <div className="table-responsive">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Batch Details</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {customBatches.map(bt => (
+                          <tr key={bt.id}>
+                            <td>
+                              <div style={{ color: 'var(--color-text-light)' }}>{bt.name}</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Pattern: {bt.schedule}</div>
+                            </td>
+                            <td>
+                              <button
+                                type="button"
+                                className="btn-small"
+                                style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
+                                onClick={() => handleDeleteCustomBatch(bt.id, bt.name)}
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     );
   };
@@ -2602,16 +2846,22 @@ function App() {
   // --- Admin Login View ---
   const renderLogin = () => {
     return (
-      <div className="login-layout" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative' }}>
+      <div className="login-layout" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', overflow: 'hidden' }}>
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(5,5,5,0.85)' }}></div>
-        <div className="glass-panel" style={{ zIndex: 1, padding: '3rem', width: '100%', maxWidth: '400px', textAlign: 'center' }}>
-          <h2 className="brand" style={{ justifyContent: 'center', marginBottom: '0.5rem' }}>
+        <div className="login-grid-overlay"></div>
+        <div className="login-bg-glows">
+          <div className="login-glow-1"></div>
+          <div className="login-glow-2"></div>
+          <div className="login-glow-3"></div>
+        </div>
+        <div className={`glass-panel login-card-animated ${isLoggingIn ? 'submitting' : ''}`} style={{ zIndex: 1, padding: '3rem', width: '100%', maxWidth: '400px', textAlign: 'center' }}>
+          <h2 className="brand animate-item-1" style={{ justifyContent: 'center', marginBottom: '0.5rem' }}>
             <span className="brand-accent">MASTER</span> FIT Login
           </h2>
-          <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', marginBottom: '2rem', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase' }}>Branch & Batch Portal</p>
+          <p className="animate-item-2" style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', marginBottom: '2rem', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase' }}>Branch & Batch Portal</p>
           {isForgotPassword ? (
             <>
-              <p style={{ color: 'var(--color-text-muted)', marginBottom: '1.5rem' }}>If you forgot your password, please contact the administrator via WhatsApp.</p>
+              <p className="animate-item-3" style={{ color: 'var(--color-text-muted)', marginBottom: '1.5rem' }}>If you forgot your password, please contact the administrator via WhatsApp.</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 {(() => {
                   const batchName = selectedBatchLogin === 'admin'
@@ -2623,21 +2873,22 @@ function App() {
                       href={`https://wa.me/919567964340?text=${encodeURIComponent(msgText)}`}
                       target="_blank"
                       rel="noreferrer"
-                      className="btn-primary"
+                      className="btn-primary animate-item-4"
                       style={{ width: '100%', justifyContent: 'center', background: '#25D366', color: 'white', textDecoration: 'none' }}
                     >
                       <MessageCircle size={18} style={{ marginRight: '8px' }} /> Contact via WhatsApp
                     </a>
                   );
                 })()}
-                <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent' }} onClick={() => setIsForgotPassword(false)}>Back to Login</button>
+                <button type="button" className="btn-outline-primary animate-item-5" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent' }} onClick={() => setIsForgotPassword(false)}>Back to Login</button>
               </div>
             </>
           ) : (
             <>
-              {loginError && <div style={{ color: '#E50914', marginBottom: '1rem', background: 'rgba(229, 9, 20, 0.1)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(229, 9, 20, 0.3)' }}>{loginError}</div>}
+              {loginError && <div style={{ color: '#E50914', marginBottom: '1rem', background: 'rgba(229, 9, 20, 0.1)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(229, 9, 20, 0.3)' }} className="animate-item-3">{loginError}</div>}
               <form onSubmit={(e) => {
                 e.preventDefault();
+                setIsLoggingIn(true);
                 const branchKey = selectedBranchLogin.toLowerCase();
                 const batchKey = selectedBatchLogin;
                 const enteredUser = loginData.username.toLowerCase().trim();
@@ -2663,6 +2914,7 @@ function App() {
                     return res.json();
                   })
                   .then(data => {
+                    setIsLoggingIn(false);
                     if (data.success) {
                       setLoginError('');
                       setLoggedInUser(data.username);
@@ -2677,14 +2929,16 @@ function App() {
                     }
                   })
                   .catch(err => {
+                    setIsLoggingIn(false);
                     setLoginError(err.message);
                   });
               }}>
-                <div className="form-group" style={{ textAlign: 'left' }}>
+                <div className="form-group animate-item-3" style={{ textAlign: 'left' }}>
                   <label>Select Branch</label>
                   <select
-                    className="form-control"
+                    className="form-control form-control-animated"
                     value={selectedBranchLogin}
+                    disabled={isLoggingIn}
                     onChange={(e) => setSelectedBranchLogin(e.target.value)}
                     style={{ background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
                   >
@@ -2693,11 +2947,12 @@ function App() {
                     ))}
                   </select>
                 </div>
-                <div className="form-group" style={{ textAlign: 'left' }}>
+                <div className="form-group animate-item-4" style={{ textAlign: 'left' }}>
                   <label>Select Batch</label>
                   <select
-                    className="form-control"
+                    className="form-control form-control-animated"
                     value={selectedBatchLogin}
+                    disabled={isLoggingIn}
                     onChange={(e) => setSelectedBatchLogin(e.target.value)}
                     style={{ background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
                   >
@@ -2707,30 +2962,43 @@ function App() {
                     ))}
                   </select>
                 </div>
-                <div className="form-group" style={{ textAlign: 'left' }}>
+                <div className="form-group animate-item-5" style={{ textAlign: 'left' }}>
                   <label>Username</label>
-                  <input type="text" className="form-control" placeholder="Enter username" value={loginData.username} onChange={(e) => setLoginData({ ...loginData, username: e.target.value })} required />
+                  <input type="text" className="form-control form-control-animated" placeholder="Enter username" value={loginData.username} onChange={(e) => setLoginData({ ...loginData, username: e.target.value })} disabled={isLoggingIn} required />
                 </div>
-                <div className="form-group" style={{ textAlign: 'left' }}>
+                <div className="form-group animate-item-6" style={{ textAlign: 'left' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <label style={{ margin: 0 }}>Password</label>
-                    <a href="#" style={{ fontSize: '0.85rem', color: 'var(--color-primary)', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); setIsForgotPassword(true); setLoginError(''); }}>Forgot Password?</a>
+                    <a href="#" style={{ fontSize: '0.85rem', color: 'var(--color-primary)', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); if (!isLoggingIn) { setIsForgotPassword(true); setLoginError(''); } }}>Forgot Password?</a>
                   </div>
-                  <input type="password" className="form-control" placeholder="Enter password" value={loginData.password} onChange={(e) => setLoginData({ ...loginData, password: e.target.value })} required />
+                  <input type="password" className="form-control form-control-animated" placeholder="Enter password" value={loginData.password} onChange={(e) => setLoginData({ ...loginData, password: e.target.value })} disabled={isLoggingIn} required />
                 </div>
-                <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }}>Login to Dashboard</button>
+                <button type="submit" className="btn-primary animate-item-7" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }} disabled={isLoggingIn}>
+                  {isLoggingIn ? (
+                    <div className="btn-loading-spinner">
+                      <span className="spinner-dots">
+                        <span className="spinner-dot"></span>
+                        <span className="spinner-dot"></span>
+                        <span className="spinner-dot"></span>
+                      </span>
+                      <span>Logging in...</span>
+                    </div>
+                  ) : (
+                    "Login to Dashboard"
+                  )}
+                </button>
               </form>
-              <button type="button" className="btn-secondary" style={{ width: '100%', justifyContent: 'center', marginTop: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '8px' }} onClick={() => {
+              <button type="button" className="btn-secondary animate-item-7" style={{ width: '100%', justifyContent: 'center', marginTop: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '8px' }} disabled={isLoggingIn} onClick={() => {
                 setNewStudent({ name: '', age: '', phone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: selectedBranchLogin, photo: null });
                 setIsAddModalOpen(true);
               }}>
                 <UserPlus size={16} /> Enroll New Student
               </button>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1.5rem' }}>
-                <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent' }} onClick={() => { setLoginError(''); setAppMode('superadmin-login'); }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1.5rem' }} className="animate-item-7">
+                <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('superadmin-login'); }}>
                   Switch to Admin Login
                 </button>
-                <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent' }} onClick={() => { setLoginError(''); setAppMode('website'); }}>
+                <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('website'); }}>
                   Back to Website
                 </button>
               </div>
@@ -2743,21 +3011,28 @@ function App() {
 
   // --- Admin Login View ---
   const renderSuperAdminLogin = () => (
-    <div className="login-layout" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative' }}>
+    <div className="login-layout" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(5,5,5,0.85)' }}></div>
-      <div className="glass-panel" style={{ zIndex: 1, padding: '3rem', width: '100%', maxWidth: '400px', textAlign: 'center' }}>
-        <h2 className="brand" style={{ justifyContent: 'center', marginBottom: '0.5rem' }}>
+      <div className="login-grid-overlay"></div>
+      <div className="login-bg-glows">
+        <div className="login-glow-1"></div>
+        <div className="login-glow-2"></div>
+        <div className="login-glow-3"></div>
+      </div>
+      <div className={`glass-panel login-card-animated ${isLoggingIn ? 'submitting' : ''}`} style={{ zIndex: 1, padding: '3rem', width: '100%', maxWidth: '400px', textAlign: 'center' }}>
+        <h2 className="brand animate-item-1" style={{ justifyContent: 'center', marginBottom: '0.5rem' }}>
           <span className="brand-accent">MASTER</span> FIT Admin
         </h2>
-        <p style={{ color: 'var(--color-secondary)', fontSize: '0.85rem', marginBottom: '2rem', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase' }}>Admin Portal</p>
+        <p className="animate-item-2" style={{ color: 'var(--color-secondary)', fontSize: '0.85rem', marginBottom: '2rem', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase' }}>Admin Portal</p>
         {isForgotPassword ? (
           <div style={{ textAlign: 'left' }}>
-            {loginError && <div style={{ color: '#E50914', marginBottom: '1rem', background: 'rgba(229, 9, 20, 0.1)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(229, 9, 20, 0.3)' }}>{loginError}</div>}
+            {loginError && <div style={{ color: '#E50914', marginBottom: '1rem', background: 'rgba(229, 9, 20, 0.1)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(229, 9, 20, 0.3)' }} className="animate-item-3">{loginError}</div>}
 
             {forgotStep === 1 && (
               <form onSubmit={(e) => {
                 e.preventDefault();
                 setLoginError('');
+                setIsLoggingIn(true);
                 fetch(`${API_BASE_URL}/superadmin/forgot-password/send-otp`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -2772,46 +3047,64 @@ function App() {
                     return res.json();
                   })
                   .then(data => {
+                    setIsLoggingIn(false);
                     if (data.success) {
                       setForgotStep(2);
                     } else {
                       setLoginError(data.error || 'Failed to send OTP');
                     }
                   })
-                  .catch(err => setLoginError(err.message));
+                  .catch(err => {
+                    setIsLoggingIn(false);
+                    setLoginError(err.message);
+                  });
               }}>
-                <p style={{ color: 'var(--color-text-muted)', marginBottom: '1.5rem', fontSize: '0.9rem', textAlign: 'center' }}>
+                <p className="animate-item-3" style={{ color: 'var(--color-text-muted)', marginBottom: '1.5rem', fontSize: '0.9rem', textAlign: 'center' }}>
                   Enter your admin username and registered phone number to receive a 6-digit OTP code.
                 </p>
-                <div className="form-group">
+                <div className="form-group animate-item-4">
                   <label>Admin Username</label>
                   <input
                     type="text"
-                    className="form-control"
+                    className="form-control form-control-animated"
                     placeholder="e.g. admin"
                     value={forgotUsername}
+                    disabled={isLoggingIn}
                     onChange={(e) => setForgotUsername(e.target.value)}
                     required
                   />
                 </div>
-                <div className="form-group">
+                <div className="form-group animate-item-5">
                   <label>Registered Phone Number</label>
                   <input
                     type="tel"
-                    className="form-control"
+                    className="form-control form-control-animated"
                     placeholder="Enter registered phone number"
                     value={forgotPhone}
+                    disabled={isLoggingIn}
                     onChange={(e) => setForgotPhone(e.target.value)}
                     required
                   />
                 </div>
-                <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }}>
-                  Send OTP Code
+                <button type="submit" className="btn-primary animate-item-6" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }} disabled={isLoggingIn}>
+                  {isLoggingIn ? (
+                    <div className="btn-loading-spinner">
+                      <span className="spinner-dots">
+                        <span className="spinner-dot"></span>
+                        <span className="spinner-dot"></span>
+                        <span className="spinner-dot"></span>
+                      </span>
+                      <span>Sending OTP...</span>
+                    </div>
+                  ) : (
+                    "Send OTP Code"
+                  )}
                 </button>
                 <button
                   type="button"
-                  className="btn-outline-primary"
+                  className="btn-outline-primary animate-item-7"
                   style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', marginTop: '0.75rem' }}
+                  disabled={isLoggingIn}
                   onClick={() => {
                     setIsForgotPassword(false);
                     setForgotStep(1);
@@ -2829,6 +3122,7 @@ function App() {
               <form onSubmit={(e) => {
                 e.preventDefault();
                 setLoginError('');
+                setIsLoggingIn(true);
                 fetch(`${API_BASE_URL}/superadmin/forgot-password/verify-otp`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -2843,38 +3137,55 @@ function App() {
                     return res.json();
                   })
                   .then(data => {
+                    setIsLoggingIn(false);
                     if (data.success) {
                       setForgotStep(3);
                     } else {
                       setLoginError(data.error || 'Invalid OTP code');
                     }
                   })
-                  .catch(err => setLoginError(err.message));
+                  .catch(err => {
+                    setIsLoggingIn(false);
+                    setLoginError(err.message);
+                  });
               }}>
-                <p style={{ color: 'var(--color-text-muted)', marginBottom: '1.5rem', fontSize: '0.9rem', textAlign: 'center' }}>
+                <p className="animate-item-3" style={{ color: 'var(--color-text-muted)', marginBottom: '1.5rem', fontSize: '0.9rem', textAlign: 'center' }}>
                   Enter the 6-digit OTP code sent to {forgotPhone}.
                 </p>
 
-                <div className="form-group">
+                <div className="form-group animate-item-4">
                   <label>6-Digit OTP</label>
                   <input
                     type="text"
                     maxLength="6"
-                    className="form-control"
+                    className="form-control form-control-animated"
                     placeholder="Enter 6-digit code"
                     value={forgotOtp}
+                    disabled={isLoggingIn}
                     onChange={(e) => setForgotOtp(e.target.value)}
                     required
                     style={{ letterSpacing: '0.5rem', textAlign: 'center', fontSize: '1.2rem', fontWeight: 'bold' }}
                   />
                 </div>
-                <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }}>
-                  Verify OTP Code
+                <button type="submit" className="btn-primary animate-item-5" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }} disabled={isLoggingIn}>
+                  {isLoggingIn ? (
+                    <div className="btn-loading-spinner">
+                      <span className="spinner-dots">
+                        <span className="spinner-dot"></span>
+                        <span className="spinner-dot"></span>
+                        <span className="spinner-dot"></span>
+                      </span>
+                      <span>Verifying...</span>
+                    </div>
+                  ) : (
+                    "Verify OTP Code"
+                  )}
                 </button>
                 <button
                   type="button"
-                  className="btn-outline-primary"
+                  className="btn-outline-primary animate-item-6"
                   style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', marginTop: '0.75rem' }}
+                  disabled={isLoggingIn}
                   onClick={() => {
                     setForgotStep(1);
                     setLoginError('');
@@ -2896,6 +3207,7 @@ function App() {
                   return;
                 }
 
+                setIsLoggingIn(true);
                 fetch(`${API_BASE_URL}/superadmin/forgot-password/reset`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -2914,6 +3226,7 @@ function App() {
                     return res.json();
                   })
                   .then(data => {
+                    setIsLoggingIn(false);
                     if (data.success) {
                       alert('Password reset successfully! You can now log in with your new password.');
                       setIsForgotPassword(false);
@@ -2928,40 +3241,57 @@ function App() {
                       setLoginError(data.error || 'Failed to reset password');
                     }
                   })
-                  .catch(err => setLoginError(err.message));
+                  .catch(err => {
+                    setIsLoggingIn(false);
+                    setLoginError(err.message);
+                  });
               }}>
-                <p style={{ color: 'var(--color-text-muted)', marginBottom: '1.5rem', fontSize: '0.9rem', textAlign: 'center' }}>
+                <p className="animate-item-3" style={{ color: 'var(--color-text-muted)', marginBottom: '1.5rem', fontSize: '0.9rem', textAlign: 'center' }}>
                   Enter your new secure password.
                 </p>
-                <div className="form-group">
+                <div className="form-group animate-item-4">
                   <label>New Password</label>
                   <input
                     type="password"
-                    className="form-control"
+                    className="form-control form-control-animated"
                     placeholder="Enter new password"
                     value={forgotNewPassword}
+                    disabled={isLoggingIn}
                     onChange={(e) => setForgotNewPassword(e.target.value)}
                     required
                   />
                 </div>
-                <div className="form-group">
+                <div className="form-group animate-item-5">
                   <label>Confirm Password</label>
                   <input
                     type="password"
-                    className="form-control"
+                    className="form-control form-control-animated"
                     placeholder="Confirm new password"
                     value={forgotConfirmPassword}
+                    disabled={isLoggingIn}
                     onChange={(e) => setForgotConfirmPassword(e.target.value)}
                     required
                   />
                 </div>
-                <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }}>
-                  Reset Password
+                <button type="submit" className="btn-primary animate-item-6" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }} disabled={isLoggingIn}>
+                  {isLoggingIn ? (
+                    <div className="btn-loading-spinner">
+                      <span className="spinner-dots">
+                        <span className="spinner-dot"></span>
+                        <span className="spinner-dot"></span>
+                        <span className="spinner-dot"></span>
+                      </span>
+                      <span>Resetting Password...</span>
+                    </div>
+                  ) : (
+                    "Reset Password"
+                  )}
                 </button>
                 <button
                   type="button"
-                  className="btn-outline-primary"
+                  className="btn-outline-primary animate-item-7"
                   style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', marginTop: '0.75rem' }}
+                  disabled={isLoggingIn}
                   onClick={() => {
                     setIsForgotPassword(false);
                     setForgotStep(1);
@@ -2980,9 +3310,10 @@ function App() {
           </div>
         ) : (
           <>
-            {loginError && <div style={{ color: '#E50914', marginBottom: '1rem', background: 'rgba(229, 9, 20, 0.1)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(229, 9, 20, 0.3)' }}>{loginError}</div>}
+            {loginError && <div style={{ color: '#E50914', marginBottom: '1rem', background: 'rgba(229, 9, 20, 0.1)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(229, 9, 20, 0.3)' }} className="animate-item-3">{loginError}</div>}
             <form onSubmit={(e) => {
               e.preventDefault();
+              setIsLoggingIn(true);
               const usernameLower = loginData.username.toLowerCase().trim();
               const enteredPassword = loginData.password;
 
@@ -3004,6 +3335,7 @@ function App() {
                   return res.json();
                 })
                 .then(data => {
+                  setIsLoggingIn(false);
                   if (data.success) {
                     setLoginError('');
                     setLoggedInUser(data.username);
@@ -3017,27 +3349,41 @@ function App() {
                   }
                 })
                 .catch(err => {
+                  setIsLoggingIn(false);
                   setLoginError(err.message);
                 });
             }}>
-              <div className="form-group" style={{ textAlign: 'left' }}>
+              <div className="form-group animate-item-3" style={{ textAlign: 'left' }}>
                 <label>Admin Username</label>
-                <input type="text" className="form-control" placeholder="Enter admin username" value={loginData.username} onChange={(e) => setLoginData({ ...loginData, username: e.target.value })} required />
+                <input type="text" className="form-control form-control-animated" placeholder="Enter admin username" value={loginData.username} onChange={(e) => setLoginData({ ...loginData, username: e.target.value })} disabled={isLoggingIn} required />
               </div>
-              <div className="form-group" style={{ textAlign: 'left' }}>
+              <div className="form-group animate-item-4" style={{ textAlign: 'left' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <label style={{ margin: 0 }}>Password</label>
-                  <a href="#" style={{ fontSize: '0.85rem', color: 'var(--color-primary)', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); setIsForgotPassword(true); setLoginError(''); }}>Forgot Password?</a>
+                  <a href="#" style={{ fontSize: '0.85rem', color: 'var(--color-primary)', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); if (!isLoggingIn) { setIsForgotPassword(true); setLoginError(''); } }}>Forgot Password?</a>
                 </div>
-                <input type="password" className="form-control" placeholder="Enter password" value={loginData.password} onChange={(e) => setLoginData({ ...loginData, password: e.target.value })} required />
+                <input type="password" className="form-control form-control-animated" placeholder="Enter password" value={loginData.password} onChange={(e) => setLoginData({ ...loginData, password: e.target.value })} disabled={isLoggingIn} required />
               </div>
-              <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }}>Access Dashboard</button>
+              <button type="submit" className="btn-primary animate-item-5" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }} disabled={isLoggingIn}>
+                {isLoggingIn ? (
+                  <div className="btn-loading-spinner">
+                    <span className="spinner-dots">
+                      <span className="spinner-dot"></span>
+                      <span className="spinner-dot"></span>
+                      <span className="spinner-dot"></span>
+                    </span>
+                    <span>Accessing Dashboard...</span>
+                  </div>
+                ) : (
+                  "Access Dashboard"
+                )}
+              </button>
             </form>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1.5rem' }}>
-              <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent' }} onClick={() => { setLoginError(''); setAppMode('login'); }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1.5rem' }} className="animate-item-6">
+              <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('login'); }}>
                 Switch to Coordinator Login
               </button>
-              <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent' }} onClick={() => { setLoginError(''); setAppMode('website'); }}>
+              <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('website'); }}>
                 Back to Website
               </button>
             </div>
@@ -3093,7 +3439,7 @@ function App() {
             <TrendingUp className="nav-icon" /> <span>Performance</span>
           </a>
           <div style={{ flex: 1 }}></div>
-          {isAdminUser(loggedInUser) && (
+          {hasSettingsAccess(loggedInUser) && (
             <a className={`nav-item ${currentView === 'settings' ? 'active' : ''}`} onClick={() => setCurrentView('settings')}>
               <Settings className="nav-icon" /> <span>Settings</span>
             </a>
@@ -3418,6 +3764,45 @@ function App() {
                       </select>
                     </div>
                   </div>
+                  <div className="form-group" style={{ marginTop: '1rem' }}>
+                    <label>Coupon Code (Optional)</label>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Enter coupon code (e.g. FIT20)"
+                        value={editingStudentData.appliedCoupon || ''}
+                        onChange={(e) => {
+                          const code = e.target.value.toUpperCase().trim();
+                          const coupon = resolveCouponCode(code);
+                          setEditingStudentData({
+                            ...editingStudentData,
+                            appliedCoupon: code,
+                            couponType: coupon ? coupon.type : 'percentage',
+                            couponValue: coupon ? coupon.value : 0,
+                            discountPercentage: (coupon && coupon.type === 'percentage') ? coupon.value : 0
+                          });
+                        }}
+                      />
+                      {editingStudentData.appliedCoupon && (() => {
+                        const coupon = resolveCouponCode(editingStudentData.appliedCoupon);
+                        if (coupon) {
+                          const display = coupon.type === 'amount' ? `₹${coupon.value}` : `${coupon.value}%`;
+                          return (
+                            <div style={{ alignSelf: 'center', whiteSpace: 'nowrap', fontSize: '0.85rem', color: '#51CF66', fontWeight: 600 }}>
+                              ✓ {display} Off
+                            </div>
+                          );
+                        } else {
+                          return (
+                            <div style={{ alignSelf: 'center', whiteSpace: 'nowrap', fontSize: '0.85rem', color: '#FF6B6B', fontWeight: 600 }}>
+                              ❌ Invalid
+                            </div>
+                          );
+                        }
+                      })()}
+                    </div>
+                  </div>
                 </div>
                 <div className="modal-actions">
                   <button type="button" className="btn-secondary" onClick={() => {
@@ -3617,26 +4002,31 @@ function App() {
                       const code = couponInput.trim().toUpperCase();
                       if (!code) {
                         setCouponMessage('Coupon cleared (0% Discount)');
-                        setFeeEditingStudent(prev => ({ ...prev, appliedCoupon: '', discountPercentage: 0 }));
+                        setFeeEditingStudent(prev => ({
+                          ...prev,
+                          appliedCoupon: '',
+                          couponType: 'percentage',
+                          couponValue: 0,
+                          discountPercentage: 0
+                        }));
                         return;
                       }
 
-                      let discount = 0;
-                      if (code === 'FIT10' || code === 'WELCOME10') {
-                        discount = 10;
-                      } else if (code === 'FIT20') {
-                        discount = 20;
-                      } else if (code === 'FIT50') {
-                        discount = 50;
-                      } else if (code === 'FREE') {
-                        discount = 100;
-                      } else {
+                      const coupon = resolveCouponCode(code);
+                      if (!coupon) {
                         setCouponMessage('❌ Invalid Coupon Code');
                         return;
                       }
 
-                      setCouponMessage(`✓ Coupon Applied! ${discount}% Discount`);
-                      setFeeEditingStudent(prev => ({ ...prev, appliedCoupon: code, discountPercentage: discount }));
+                      const display = coupon.type === 'amount' ? `₹${coupon.value}` : `${coupon.value}%`;
+                      setCouponMessage(`✓ Coupon Applied! ${display} Discount`);
+                      setFeeEditingStudent(prev => ({
+                        ...prev,
+                        appliedCoupon: code,
+                        couponType: coupon.type,
+                        couponValue: coupon.value,
+                        discountPercentage: coupon.type === 'percentage' ? coupon.value : 0
+                      }));
                     }}
                   >
                     Apply
@@ -3802,6 +4192,45 @@ function App() {
               <div className="form-group">
                 <label>Joining Date</label>
                 <input type="date" className="form-control" required value={newStudent.joinDate} onChange={(e) => setNewStudent({ ...newStudent, joinDate: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Coupon Code (Optional)</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="Enter coupon code (e.g. FIT20)"
+                    value={newStudent.appliedCoupon || ''}
+                    onChange={(e) => {
+                      const code = e.target.value.toUpperCase().trim();
+                      const coupon = resolveCouponCode(code);
+                      setNewStudent({
+                        ...newStudent,
+                        appliedCoupon: code,
+                        couponType: coupon ? coupon.type : 'percentage',
+                        couponValue: coupon ? coupon.value : 0,
+                        discountPercentage: (coupon && coupon.type === 'percentage') ? coupon.value : 0
+                      });
+                    }}
+                  />
+                  {newStudent.appliedCoupon && (() => {
+                    const coupon = resolveCouponCode(newStudent.appliedCoupon);
+                    if (coupon) {
+                      const display = coupon.type === 'amount' ? `₹${coupon.value}` : `${coupon.value}%`;
+                      return (
+                        <div style={{ alignSelf: 'center', whiteSpace: 'nowrap', fontSize: '0.85rem', color: '#51CF66', fontWeight: 600 }}>
+                          ✓ {display} Off
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div style={{ alignSelf: 'center', whiteSpace: 'nowrap', fontSize: '0.85rem', color: '#FF6B6B', fontWeight: 600 }}>
+                          ❌ Invalid
+                        </div>
+                      );
+                    }
+                  })()}
+                </div>
               </div>
               <div className="modal-actions" style={{ marginTop: '1rem' }}>
                 <button type="button" className="btn-secondary" onClick={() => setIsAddModalOpen(false)}>Cancel</button>
