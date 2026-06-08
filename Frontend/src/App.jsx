@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import {
   Users, CalendarDays, Wallet, Bell, Settings, LogOut, UserPlus, AlertTriangle, X,
   ChevronLeft, ChevronRight, CheckCircle, XCircle, MessageCircle,
-  Search, Phone, Trash2, ArrowRight, Activity, MapPin, TrendingUp, Award, Menu
+  Search, Phone, Trash2, ArrowRight, Activity, MapPin, TrendingUp, Award, Menu,
+  Shield, Lock, Unlock, FileDown, FileUp
 } from 'lucide-react';
 import './index.css';
 
@@ -16,7 +17,9 @@ const DEFAULT_BATCH_OPTIONS = [
 ];
 
 
-const API_BASE_URL = 'https://masterfit-dfz7.onrender.com/api';
+const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? 'http://localhost:5000/api'
+  : 'https://masterfit-dfz7.onrender.com/api';
 
 function App() {
   // Bulletproof Cookie Parser
@@ -137,6 +140,7 @@ function App() {
   const [forgotNewPassword, setForgotNewPassword] = useState('');
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
 
+
   const isAdminUser = (user) => {
     if (!user) return false;
     const usernameClean = user.toLowerCase().trim();
@@ -220,8 +224,7 @@ function App() {
 
   const [attendanceRecords, setAttendanceRecords] = useState({});
 
-  // Sync state with backend on mount
-  useEffect(() => {
+  const reloadAllAppData = () => {
     // 1. Fetch Students
     fetch(`${API_BASE_URL}/students`)
       .then(res => {
@@ -280,6 +283,11 @@ function App() {
         }
       })
       .catch(err => console.error('Error fetching credentials:', err));
+  };
+
+  // Sync state with backend on mount
+  useEffect(() => {
+    reloadAllAppData();
   }, []);
 
   // Verify session validity on mount
@@ -398,10 +406,11 @@ function App() {
 
   // Roster Filter State
   const [branchFilter, setBranchFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('Active');
 
   // Form State
   const [newStudent, setNewStudent] = useState({
-    name: '', age: '', phone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: 'Kuttiady', photo: null
+    name: '', age: '', phone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: 'Kuttiady', photo: null, status: 'Active'
   });
 
   const handlePhotoUpload = (e) => {
@@ -433,12 +442,17 @@ function App() {
 
     const matchesBranch = activeBranch === 'All' || s.branch === activeBranch;
 
+    // Filter by student status: Active, Inactive, or All
+    const matchesStatus = statusFilter === 'All' 
+      ? true 
+      : (s.status || 'Active') === statusFilter;
+
     const activeBatch = batchOptions.find(b => loggedInUser && loggedInUser.toLowerCase().startsWith(b.id.toLowerCase()));
     if (activeBatch) {
-      return matchesSearch && matchesBranch && s.schedule === activeBatch.schedule;
+      return matchesSearch && matchesBranch && matchesStatus && s.schedule === activeBatch.schedule;
     }
 
-    return matchesSearch && matchesBranch;
+    return matchesSearch && matchesBranch && matchesStatus;
   });
 
   const getBeltColorClass = (belt) => {
@@ -1139,6 +1153,8 @@ function App() {
                   </thead>
                   <tbody>
                     {searchedStudents.filter(s => {
+                      const isInactive = (s.status || 'Active') === 'Inactive';
+                      if (isInactive) return false;
                       const matchBatch = attendanceBatchFilter === 'All' || s.batch === attendanceBatchFilter;
                       const matchSchedule = attendanceScheduleFilter === 'All' || s.schedule === attendanceScheduleFilter;
                       return matchBatch && matchSchedule;
@@ -1212,7 +1228,7 @@ function App() {
   const renderFees = () => {
     const isPaid = (student) => student.paidMonths && student.paidMonths[feeMonth];
 
-    const feeStudents = searchedStudents;
+    const feeStudents = searchedStudents.filter(s => (s.status || 'Active') !== 'Inactive');
     const totalUnpaid = feeStudents.filter(s => !isPaid(s)).length;
     const totalPaid = feeStudents.filter(s => isPaid(s)).length;
 
@@ -1811,16 +1827,41 @@ function App() {
         return;
       }
 
-      const updatedCustomBranches = customBranches.filter(b => b !== branchToDelete);
+      const branchKey = branchToDelete.toLowerCase().trim();
+      const updatedCustomBranches = customBranches.filter(b => b.toLowerCase().trim() !== branchKey);
+
+      // Also delete from branchCredentials map
+      const updatedBranchCreds = { ...branchCredentials };
+      delete updatedBranchCreds[branchKey];
+
+      // Optimistically update
+      setCustomBranches(updatedCustomBranches);
+      setBranchCredentials(updatedBranchCreds);
+      
+      const dbBranches = Object.keys(updatedBranchCreds).map(b => b.charAt(0).toUpperCase() + b.slice(1));
+      const uniqueBranches = Array.from(new Set([
+        ...DEFAULT_BRANCHES,
+        ...dbBranches,
+        ...updatedCustomBranches.map(b => b.charAt(0).toUpperCase() + b.slice(1))
+      ]));
+      setBranches(uniqueBranches);
 
       fetch(`${API_BASE_URL}/credentials`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customBranches: updatedCustomBranches })
+        body: JSON.stringify({ 
+          customBranches: updatedCustomBranches,
+          branchCredentials: updatedBranchCreds
+        })
       })
-        .then(res => res.json())
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to delete branch on server');
+          return res.json();
+        })
         .then(data => {
           setCustomBranches(data.customBranches || []);
+          setBranchCredentials(data.branchCredentials || {});
+          
           const dbBranches = Object.keys(data.branchCredentials || {}).map(b => b.charAt(0).toUpperCase() + b.slice(1));
           const uniqueBranches = Array.from(new Set([
             ...DEFAULT_BRANCHES,
@@ -1832,6 +1873,7 @@ function App() {
         })
         .catch(err => {
           setSettingsError('Error deleting branch: ' + err.message);
+          reloadAllAppData();
         });
     };
 
@@ -1902,20 +1944,41 @@ function App() {
       }
 
       const updatedCustomBatches = customBatches.filter(b => b.id !== batchIdToDelete);
+      
+      // Also delete from batchCredentials map
+      const updatedBatchCreds = { ...batchCredentials };
+      for (const key of Object.keys(updatedBatchCreds)) {
+        if (key.endsWith(`_${batchIdToDelete}`) || key === batchIdToDelete) {
+          delete updatedBatchCreds[key];
+        }
+      }
+
+      // Optimistically update
+      setCustomBatches(updatedCustomBatches);
+      setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...updatedCustomBatches]);
+      setBatchCredentials(updatedBatchCreds);
 
       fetch(`${API_BASE_URL}/credentials`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customBatches: updatedCustomBatches })
+        body: JSON.stringify({ 
+          customBatches: updatedCustomBatches,
+          batchCredentials: updatedBatchCreds
+        })
       })
-        .then(res => res.json())
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to delete batch on server');
+          return res.json();
+        })
         .then(data => {
           setCustomBatches(data.customBatches || []);
           setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...(data.customBatches || [])]);
+          setBatchCredentials(data.batchCredentials || {});
           setSettingsSuccess(`Batch "${batchName}" deleted successfully!`);
         })
         .catch(err => {
           setSettingsError('Error deleting batch: ' + err.message);
+          reloadAllAppData();
         });
     };
 
@@ -2001,20 +2064,29 @@ function App() {
         return;
       }
 
+      const originalCoupons = { ...coupons };
       const updatedCoupons = { ...coupons };
       delete updatedCoupons[codeToDelete];
+
+      // Optimistically update the UI
+      setCoupons(updatedCoupons);
 
       fetch(`${API_BASE_URL}/credentials`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ coupons: updatedCoupons })
       })
-        .then(res => res.json())
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to delete coupon on server');
+          return res.json();
+        })
         .then(data => {
           setCoupons(data.coupons || {});
           setSettingsSuccess(`Coupon "${codeToDelete}" deleted successfully!`);
         })
         .catch(err => {
+          // Revert to original if failed
+          setCoupons(originalCoupons);
           setSettingsError('Error deleting coupon: ' + err.message);
         });
     };
@@ -2109,10 +2181,6 @@ function App() {
       }
       if (accountToDelete.toLowerCase().trim() === loggedInUser.toLowerCase().trim()) {
         setSettingsError('You cannot delete the account you are currently logged in with.');
-        return;
-      }
-      if (accountToDelete.toLowerCase().trim() === 'admin') {
-        setSettingsError('You cannot delete the default superadmin account.');
         return;
       }
       if (!window.confirm(`Are you sure you want to delete the admin account "${accountToDelete}"?`)) {
@@ -2221,6 +2289,7 @@ function App() {
 
         {isSuper && (
           <>
+
             {/* Admin Accounts Settings */}
             <div className="panel" style={{ marginBottom: '2rem' }}>
               <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
@@ -2253,7 +2322,7 @@ function App() {
                 </div>
                 <div style={{ display: 'flex', gap: '1rem' }}>
                   <button type="submit" className="btn-primary">Update Admin Account</button>
-                  {adminForm.account.toLowerCase().trim() !== loggedInUser.toLowerCase().trim() && adminForm.account.toLowerCase().trim() !== 'admin' && (
+                  {adminForm.account.toLowerCase().trim() !== loggedInUser.toLowerCase().trim() && (
                     <button
                       type="button"
                       className="btn-primary"
@@ -3049,6 +3118,11 @@ function App() {
                   .then(data => {
                     setIsLoggingIn(false);
                     if (data.success) {
+                      if (data.debugOtp) {
+                        alert(`[TEST MODE] OTP is ${data.debugOtp}\n(For real SMS/WhatsApp, configure FAST2SMS_API_KEY or CALLMEBOT_API_KEY in backend .env)`);
+                      } else {
+                        alert(data.message || 'OTP sent successfully!');
+                      }
                       setForgotStep(2);
                     } else {
                       setLoginError(data.error || 'Failed to send OTP');
@@ -3510,6 +3584,21 @@ function App() {
                 )}
               </select>
             </div>
+            {/* Status Filter Selector */}
+            {(currentView === 'dashboard' || currentView === 'performance') && (
+              <div style={{ position: 'relative' }}>
+                <select
+                  className="form-control"
+                  style={{ padding: '0.5rem 1rem', paddingRight: '2rem', width: '150px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                >
+                  <option value="Active">Active Only</option>
+                  <option value="Inactive">Inactive Only</option>
+                  <option value="All">All Students</option>
+                </select>
+              </div>
+            )}
             <div style={{ position: 'relative' }}>
               <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
               <input
@@ -3596,7 +3685,18 @@ function App() {
                                     {student.name.charAt(0)}
                                   </div>
                                 )}
-                                <span style={{ fontWeight: 500, color: '#E50914', textDecoration: 'underline' }}>{student.name}</span>
+                                <span style={{ 
+                                  fontWeight: 500, 
+                                  color: student.status === 'Inactive' ? 'var(--color-text-muted)' : '#E50914', 
+                                  textDecoration: 'underline' 
+                                }}>
+                                  {student.name}
+                                </span>
+                                {student.status === 'Inactive' && (
+                                  <span className="badge" style={{ background: 'rgba(244, 67, 54, 0.15)', color: '#F44336', border: '1px solid rgba(244, 67, 54, 0.3)', marginLeft: '8px' }}>
+                                    Inactive
+                                  </span>
+                                )}
                               </div>
                             </td>
                             <td>
@@ -3764,43 +3864,56 @@ function App() {
                       </select>
                     </div>
                   </div>
-                  <div className="form-group" style={{ marginTop: '1rem' }}>
-                    <label>Coupon Code (Optional)</label>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <input
-                        type="text"
+                  <div className="grid-2-col" style={{ marginTop: '1rem' }}>
+                    <div className="form-group">
+                      <label>Coupon Code (Optional)</label>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="Enter coupon code (e.g. FIT20)"
+                          value={editingStudentData.appliedCoupon || ''}
+                          onChange={(e) => {
+                            const code = e.target.value.toUpperCase().trim();
+                            const coupon = resolveCouponCode(code);
+                            setEditingStudentData({
+                              ...editingStudentData,
+                              appliedCoupon: code,
+                              couponType: coupon ? coupon.type : 'percentage',
+                              couponValue: coupon ? coupon.value : 0,
+                              discountPercentage: (coupon && coupon.type === 'percentage') ? coupon.value : 0
+                            });
+                          }}
+                        />
+                        {editingStudentData.appliedCoupon && (() => {
+                          const coupon = resolveCouponCode(editingStudentData.appliedCoupon);
+                          if (coupon) {
+                            const display = coupon.type === 'amount' ? `₹${coupon.value}` : `${coupon.value}%`;
+                            return (
+                              <div style={{ alignSelf: 'center', whiteSpace: 'nowrap', fontSize: '0.85rem', color: '#51CF66', fontWeight: 600 }}>
+                                ✓ {display}
+                              </div>
+                            );
+                          } else {
+                            return (
+                              <div style={{ alignSelf: 'center', whiteSpace: 'nowrap', fontSize: '0.85rem', color: '#FF6B6B', fontWeight: 600 }}>
+                                ❌
+                              </div>
+                            );
+                          }
+                        })()}
+                      </div>
+                    </div>
+                    <div className="form-group">
+                      <label>Student Status</label>
+                      <select
                         className="form-control"
-                        placeholder="Enter coupon code (e.g. FIT20)"
-                        value={editingStudentData.appliedCoupon || ''}
-                        onChange={(e) => {
-                          const code = e.target.value.toUpperCase().trim();
-                          const coupon = resolveCouponCode(code);
-                          setEditingStudentData({
-                            ...editingStudentData,
-                            appliedCoupon: code,
-                            couponType: coupon ? coupon.type : 'percentage',
-                            couponValue: coupon ? coupon.value : 0,
-                            discountPercentage: (coupon && coupon.type === 'percentage') ? coupon.value : 0
-                          });
-                        }}
-                      />
-                      {editingStudentData.appliedCoupon && (() => {
-                        const coupon = resolveCouponCode(editingStudentData.appliedCoupon);
-                        if (coupon) {
-                          const display = coupon.type === 'amount' ? `₹${coupon.value}` : `${coupon.value}%`;
-                          return (
-                            <div style={{ alignSelf: 'center', whiteSpace: 'nowrap', fontSize: '0.85rem', color: '#51CF66', fontWeight: 600 }}>
-                              ✓ {display} Off
-                            </div>
-                          );
-                        } else {
-                          return (
-                            <div style={{ alignSelf: 'center', whiteSpace: 'nowrap', fontSize: '0.85rem', color: '#FF6B6B', fontWeight: 600 }}>
-                              ❌ Invalid
-                            </div>
-                          );
-                        }
-                      })()}
+                        value={editingStudentData.status || 'Active'}
+                        onChange={(e) => setEditingStudentData({ ...editingStudentData, status: e.target.value })}
+                      >
+                        <option value="Active">Active</option>
+                        <option value="Inactive">Inactive</option>
+                      </select>
                     </div>
                   </div>
                 </div>
@@ -3840,7 +3953,7 @@ function App() {
                       </div>
                     </div>
                     <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Join Date</span><div style={{ fontWeight: 600 }}>{selectedStudent.joinDate}</div></div>
-                    <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Status</span><div style={{ fontWeight: 600, color: '#4CAF50' }}>{selectedStudent.status}</div></div>
+                    <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Status</span><div style={{ fontWeight: 600, color: selectedStudent.status === 'Inactive' ? '#F44336' : '#4CAF50' }}>{selectedStudent.status || 'Active'}</div></div>
                   </div>
 
                   <div style={{ marginBottom: '1.5rem', background: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
@@ -3931,7 +4044,7 @@ function App() {
                   })()}
                 </div>
                 <div className="modal-actions">
-                  {isAdminUser(loggedInUser) && (
+                  {loggedInUser && (
                     <button className="btn-primary" onClick={() => {
                       setEditingStudentData(selectedStudent);
                       setIsEditingStudent(true);

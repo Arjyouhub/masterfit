@@ -41,6 +41,81 @@ function verifyPassword(password, storedHash) {
   return hash === checkHash;
 }
 
+// --- Secure Field-Level Database Encryption ---
+const ENCRYPTION_ALGORITHM = 'aes-256-cbc';
+const ENCRYPTION_KEY = process.env.DB_ENCRYPTION_KEY || 'masterfit_db_encryption_key_32ch'; // Must be 32 bytes
+const IV_LENGTH = 16;
+
+function encrypt(text) {
+  if (!text) return text;
+  const textStr = String(text);
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, Buffer.from(ENCRYPTION_KEY), iv);
+  let encrypted = cipher.update(textStr, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  return iv.toString('hex') + ':' + encrypted;
+}
+
+function decrypt(text) {
+  if (!text) return text;
+  try {
+    const textStr = String(text);
+    const parts = textStr.split(':');
+    if (parts.length !== 2) return text; // Not encrypted (fallback for backward compatibility)
+    
+    const iv = Buffer.from(parts[0], 'hex');
+    const encryptedText = Buffer.from(parts[1], 'hex');
+    const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, Buffer.from(ENCRYPTION_KEY), iv);
+    let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (err) {
+    // Fallback for unencrypted data or failed decryption
+    return text;
+  }
+}
+
+// Student field helpers
+function encryptStudentData(data) {
+  if (!data) return data;
+  const doc = { ...data };
+  if (doc.name) doc.name = encrypt(doc.name);
+  if (doc.phone) doc.phone = encrypt(doc.phone);
+  if (doc.photo) doc.photo = encrypt(doc.photo);
+  return doc;
+}
+
+function decryptStudent(student) {
+  if (!student) return student;
+  const doc = student.toObject ? student.toObject() : { ...student };
+  if (doc.name) doc.name = decrypt(doc.name);
+  if (doc.phone) doc.phone = decrypt(doc.phone);
+  if (doc.photo) doc.photo = decrypt(doc.photo);
+  return doc;
+}
+
+// Attendance field helpers
+function encryptAttendanceRecords(records) {
+  if (!records) return records;
+  const encrypted = {};
+  const entries = records instanceof Map ? Array.from(records.entries()) : Object.entries(records);
+  for (const [studentId, status] of entries) {
+    encrypted[studentId] = encrypt(status);
+  }
+  return encrypted;
+}
+
+function decryptAttendanceRecords(records) {
+  if (!records) return records;
+  const decrypted = {};
+  const entries = records instanceof Map ? Array.from(records.entries()) : Object.entries(records);
+  for (const [studentId, status] of entries) {
+    decrypted[studentId] = decrypt(status);
+  }
+  return decrypted;
+}
+
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -123,7 +198,7 @@ async function migratePlaintextPasswords() {
 
 // Connect to MongoDB Atlas
 console.log('Connecting to MongoDB URI:', process.env.MONGO_URI);
-mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/attendance')
+mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/attendance', { dbName: 'attendance' })
   .then(async () => {
     console.log('Successfully connected to MongoDB Atlas');
     await migratePlaintextPasswords();
@@ -137,7 +212,7 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/attendance'
 app.get('/api/students', async (req, res) => {
   try {
     const students = await Student.find({});
-    res.json(students);
+    res.json(students.map(decryptStudent));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -146,9 +221,10 @@ app.get('/api/students', async (req, res) => {
 // 2. Create student
 app.post('/api/students', async (req, res) => {
   try {
-    const newStudent = new Student(req.body);
+    const encryptedBody = encryptStudentData(req.body);
+    const newStudent = new Student(encryptedBody);
     const saved = await newStudent.save();
-    res.status(201).json(saved);
+    res.status(201).json(decryptStudent(saved));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -158,9 +234,10 @@ app.post('/api/students', async (req, res) => {
 app.put('/api/students/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const updated = await Student.findOneAndUpdate({ id: Number(id) }, req.body, { new: true });
+    const encryptedBody = encryptStudentData(req.body);
+    const updated = await Student.findOneAndUpdate({ id: Number(id) }, encryptedBody, { new: true });
     if (!updated) return res.status(404).json({ error: 'Student not found' });
-    res.json(updated);
+    res.json(decryptStudent(updated));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -185,7 +262,8 @@ app.get('/api/attendance', async (req, res) => {
     const attendanceMap = {};
     records.forEach(record => {
       const plainRecords = record.records instanceof Map ? Object.fromEntries(record.records) : record.records;
-      attendanceMap[record.date] = plainRecords;
+      const decryptedRecords = decryptAttendanceRecords(plainRecords);
+      attendanceMap[record.date] = decryptedRecords;
     });
     res.json(attendanceMap);
   } catch (err) {
@@ -199,9 +277,10 @@ app.post('/api/attendance', async (req, res) => {
     const { date, records } = req.body;
     if (!date) return res.status(400).json({ error: 'Date is required' });
     
+    const encryptedRecords = encryptAttendanceRecords(records);
     const updated = await Attendance.findOneAndUpdate(
       { date },
-      { date, records },
+      { date, records: encryptedRecords },
       { new: true, upsert: true }
     );
     res.json(updated);
@@ -359,6 +438,96 @@ app.delete('/api/sessions/:token', async (req, res) => {
 // In-memory OTP store
 const otpStore = {};
 
+// --- Real-time SMS and WhatsApp OTP Dispatch Utilities ---
+async function sendFast2SMS(phone, otp) {
+  const apiKey = process.env.FAST2SMS_API_KEY;
+  if (!apiKey) return false;
+  const cleanPhone = phone.replace(/\D/g, '').slice(-10);
+  const url = `https://www.fast2sms.com/dev/bulkV2?authorization=${apiKey}&variables_values=${otp}&route=otp&numbers=${cleanPhone}`;
+  try {
+    const response = await fetch(url);
+    const data = await response.json();
+    console.log('[Fast2SMS API Response]:', data);
+    return data.return === true;
+  } catch (err) {
+    console.error('Error sending Fast2SMS:', err);
+    return false;
+  }
+}
+
+async function sendCallMeBot(phone, otp) {
+  const apiKey = process.env.CALLMEBOT_API_KEY;
+  if (!apiKey) return false;
+  let cleanPhone = phone.replace(/\D/g, '');
+  if (cleanPhone.length === 10) cleanPhone = '91' + cleanPhone;
+  const message = encodeURIComponent(`Your MASTER FIT admin password reset OTP code is: ${otp}. Valid for 5 minutes.`);
+  const url = `https://api.callmebot.com/whatsapp.php?phone=${cleanPhone}&text=${message}&apikey=${apiKey}`;
+  try {
+    const response = await fetch(url);
+    const text = await response.text();
+    console.log('[CallMeBot API Response]:', text);
+    return text.includes('Success') || response.status === 200;
+  } catch (err) {
+    console.error('Error sending CallMeBot:', err);
+    return false;
+  }
+}
+
+async function sendTwilio(phone, otp) {
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  const from = process.env.TWILIO_FROM_PHONE;
+  if (!sid || !token || !from) return false;
+  
+  let cleanPhone = phone.replace(/\D/g, '');
+  if (!cleanPhone.startsWith('+')) {
+    if (cleanPhone.length === 10) cleanPhone = '+91' + cleanPhone;
+    else cleanPhone = '+' + cleanPhone;
+  }
+  
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
+  const auth = Buffer.from(`${sid}:${token}`).toString('base64');
+  
+  const bodyParams = new URLSearchParams();
+  bodyParams.append('To', cleanPhone);
+  bodyParams.append('From', from);
+  bodyParams.append('Body', `Your MASTER FIT admin password reset OTP code is: ${otp}. Valid for 5 minutes.`);
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: bodyParams.toString()
+    });
+    const data = await response.json();
+    console.log('[Twilio API Response]:', data);
+    return response.ok;
+  } catch (err) {
+    console.error('Error sending Twilio:', err);
+    return false;
+  }
+}
+
+async function sendOTPMedia(phone, otp) {
+  let sent = false;
+  if (process.env.FAST2SMS_API_KEY) {
+    const ok = await sendFast2SMS(phone, otp);
+    if (ok) sent = true;
+  }
+  if (!sent && process.env.CALLMEBOT_API_KEY) {
+    const ok = await sendCallMeBot(phone, otp);
+    if (ok) sent = true;
+  }
+  if (!sent && process.env.TWILIO_ACCOUNT_SID) {
+    const ok = await sendTwilio(phone, otp);
+    if (ok) sent = true;
+  }
+  return sent;
+}
+
 // Send OTP for Super Admin Password Reset
 app.post('/api/superadmin/forgot-password/send-otp', async (req, res) => {
   try {
@@ -396,7 +565,16 @@ app.post('/api/superadmin/forgot-password/send-otp', async (req, res) => {
     console.log(`[OTP SERVICE] Sent OTP ${otp} to 9633380198 for user '${enteredUser}'`);
     console.log(`======================================================\n`);
 
-    res.json({ success: true, message: 'OTP sent successfully' });
+    const sentReal = await sendOTPMedia(phone, otp);
+    const responseData = { success: true };
+    if (!sentReal) {
+      responseData.message = 'OTP logged to server console (Configure FAST2SMS_API_KEY or CALLMEBOT_API_KEY in .env for real SMS/WhatsApp)';
+      responseData.debugOtp = otp;
+    } else {
+      responseData.message = 'OTP sent to your phone successfully';
+    }
+
+    res.json(responseData);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -517,61 +695,131 @@ app.put('/api/credentials', async (req, res) => {
     const body = { ...req.body };
 
     // Fetch existing credentials to preserve un-modified hashed passwords
-    const existing = await Credential.findOne({ configType: 'main' });
-    
+    let credsDoc = await Credential.findOne({ configType: 'main' });
+    if (!credsDoc) {
+      credsDoc = new Credential({ configType: 'main' });
+    }
+
     if (body.adminCredentials) {
       for (const [user, pass] of Object.entries(body.adminCredentials)) {
-        if (pass === '••••••' && existing) {
+        if (pass === '••••••' && credsDoc) {
           // Password wasn't modified, restore the existing hash
-          const oldHash = existing.adminCredentials instanceof Map 
-            ? existing.adminCredentials.get(user) 
-            : existing.adminCredentials[user];
+          const oldHash = credsDoc.adminCredentials instanceof Map 
+            ? credsDoc.adminCredentials.get(user) 
+            : credsDoc.adminCredentials[user];
           body.adminCredentials[user] = oldHash;
         } else if (pass && !pass.includes(':')) {
           body.adminCredentials[user] = hashPassword(pass);
         }
       }
+      
+      // Update the Mongoose Map and handle deletions
+      const bodyKeys = Object.keys(body.adminCredentials);
+      for (const key of Array.from(credsDoc.adminCredentials.keys())) {
+        if (!bodyKeys.includes(key)) {
+          credsDoc.adminCredentials.delete(key);
+        }
+      }
+      for (const [user, pass] of Object.entries(body.adminCredentials)) {
+        credsDoc.adminCredentials.set(user, pass);
+      }
+      credsDoc.markModified('adminCredentials');
     }
+
     if (body.branchCredentials) {
       for (const [br, creds] of Object.entries(body.branchCredentials)) {
         if (creds && creds.password) {
-          if (creds.password === '••••••' && existing) {
-            const oldHash = existing.branchCredentials instanceof Map
-              ? existing.branchCredentials.get(br)?.password
-              : existing.branchCredentials[br]?.password;
+          if (creds.password === '••••••' && credsDoc) {
+            const oldHash = credsDoc.branchCredentials instanceof Map
+              ? credsDoc.branchCredentials.get(br)?.password
+              : credsDoc.branchCredentials[br]?.password;
             creds.password = oldHash;
           } else if (!creds.password.includes(':')) {
             creds.password = hashPassword(creds.password);
           }
         }
       }
+
+      // Update the Mongoose Map and handle deletions
+      const bodyKeys = Object.keys(body.branchCredentials);
+      for (const key of Array.from(credsDoc.branchCredentials.keys())) {
+        if (!bodyKeys.includes(key)) {
+          credsDoc.branchCredentials.delete(key);
+        }
+      }
+      for (const [br, creds] of Object.entries(body.branchCredentials)) {
+        credsDoc.branchCredentials.set(br, creds);
+      }
+      credsDoc.markModified('branchCredentials');
     }
+
     if (body.batchCredentials) {
       for (const [bt, creds] of Object.entries(body.batchCredentials)) {
         if (creds && creds.password) {
-          if (creds.password === '••••••' && existing) {
-            const oldHash = existing.batchCredentials instanceof Map
-              ? existing.batchCredentials.get(bt)?.password
-              : existing.batchCredentials[bt]?.password;
+          if (creds.password === '••••••' && credsDoc) {
+            const oldHash = credsDoc.batchCredentials instanceof Map
+              ? credsDoc.batchCredentials.get(bt)?.password
+              : credsDoc.batchCredentials[bt]?.password;
             creds.password = oldHash;
           } else if (!creds.password.includes(':')) {
             creds.password = hashPassword(creds.password);
           }
         }
       }
+
+      // Update the Mongoose Map and handle deletions
+      const bodyKeys = Object.keys(body.batchCredentials);
+      for (const key of Array.from(credsDoc.batchCredentials.keys())) {
+        if (!bodyKeys.includes(key)) {
+          credsDoc.batchCredentials.delete(key);
+        }
+      }
+      for (const [bt, creds] of Object.entries(body.batchCredentials)) {
+        credsDoc.batchCredentials.set(bt, creds);
+      }
+      credsDoc.markModified('batchCredentials');
     }
 
-    const updated = await Credential.findOneAndUpdate(
-      { configType: 'main' },
-      body,
-      { new: true, upsert: true }
-    );
-    res.json(updated);
+    if (body.customBranches !== undefined) {
+      credsDoc.customBranches = body.customBranches;
+      credsDoc.markModified('customBranches');
+    }
+
+    if (body.customBatches !== undefined) {
+      credsDoc.customBatches = body.customBatches;
+      credsDoc.markModified('customBatches');
+    }
+
+    if (body.monthlyFeeRate !== undefined) {
+      credsDoc.monthlyFeeRate = body.monthlyFeeRate;
+      credsDoc.markModified('monthlyFeeRate');
+    }
+
+    if (body.admissionFeeRate !== undefined) {
+      credsDoc.admissionFeeRate = body.admissionFeeRate;
+      credsDoc.markModified('admissionFeeRate');
+    }
+
+    if (body.coupons) {
+      // Update the Mongoose Map and handle deletions
+      const bodyKeys = Object.keys(body.coupons);
+      for (const key of Array.from(credsDoc.coupons.keys())) {
+        if (!bodyKeys.includes(key)) {
+          credsDoc.coupons.delete(key);
+        }
+      }
+      for (const [code, val] of Object.entries(body.coupons)) {
+        credsDoc.coupons.set(code, val);
+      }
+      credsDoc.markModified('coupons');
+    }
+
+    await credsDoc.save();
+    res.json(credsDoc);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
-
 app.listen(PORT, () => {
   console.log(`Express server is running on port ${PORT}`);
 });

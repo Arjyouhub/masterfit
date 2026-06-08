@@ -29,7 +29,8 @@ const credentialsSchema = new mongoose.Schema({
     default: []
   },
   monthlyFeeRate: { type: Number, default: 1000 },
-  admissionFeeRate: { type: Number, default: 2000 }
+  admissionFeeRate: { type: Number, default: 2000 },
+  coupons: { type: Map, of: mongoose.Schema.Types.Mixed, default: {} }
 }, { timestamps: true });
 
 export default mongoose.model('Credential', credentialsSchema);

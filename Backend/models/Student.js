@@ -17,7 +17,9 @@ const studentSchema = new mongoose.Schema({
   performanceScore: { type: Number, default: 50 },
   customMonthlyRate: { type: Number, default: null }, // custom monthly rate override
   appliedCoupon: { type: String, default: '' }, // applied coupon code
-  discountPercentage: { type: Number, default: 0 } // discount percentage
+  discountPercentage: { type: Number, default: 0 }, // discount percentage
+  couponType: { type: String, default: 'percentage' }, // 'percentage' or 'amount'
+  couponValue: { type: Number, default: 0 } // discount value (percentage or flat amount)
 }, { timestamps: true });
 
 export default mongoose.model('Student', studentSchema);
