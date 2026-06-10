@@ -87,7 +87,7 @@ function encryptStudentData(data) {
 
 function decryptStudent(student) {
   if (!student) return student;
-  const doc = student.toObject ? student.toObject() : { ...student };
+  const doc = student.toObject ? student.toObject({ flattenMaps: true }) : { ...student };
   if (doc.name) doc.name = decrypt(doc.name);
   if (doc.phone) doc.phone = decrypt(doc.phone);
   if (doc.photo) doc.photo = decrypt(doc.photo);
@@ -196,12 +196,36 @@ async function migratePlaintextPasswords() {
   }
 }
 
+async function migrateDefaultRates() {
+  try {
+    const creds = await Credential.findOne({ configType: 'main' });
+    if (creds) {
+      let updated = false;
+      if (creds.monthlyFeeRate === 1000) {
+        creds.monthlyFeeRate = 600;
+        updated = true;
+      }
+      if (creds.admissionFeeRate === 2000) {
+        creds.admissionFeeRate = 1500;
+        updated = true;
+      }
+      if (updated) {
+        await creds.save();
+        console.log('[Migration] Successfully updated default monthly fee to 600 and admission fee to 1500 in MongoDB.');
+      }
+    }
+  } catch (err) {
+    console.error('Error during default rates migration:', err);
+  }
+}
+
 // Connect to MongoDB Atlas
 console.log('Connecting to MongoDB URI:', process.env.MONGO_URI);
 mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/attendance', { dbName: 'attendance' })
   .then(async () => {
     console.log('Successfully connected to MongoDB Atlas');
     await migratePlaintextPasswords();
+    await migrateDefaultRates();
   })
   .catch(err => console.error('MongoDB connection error:', err));
 
@@ -801,6 +825,9 @@ app.put('/api/credentials', async (req, res) => {
     }
 
     if (body.coupons) {
+      if (!credsDoc.coupons) {
+        credsDoc.coupons = new Map();
+      }
       // Update the Mongoose Map and handle deletions
       const bodyKeys = Object.keys(body.coupons);
       for (const key of Array.from(credsDoc.coupons.keys())) {

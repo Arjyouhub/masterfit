@@ -17,9 +17,17 @@ const DEFAULT_BATCH_OPTIONS = [
 ];
 
 
-const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  ? 'http://localhost:5000/api'
+const isLocal = window.location.hostname === 'localhost' ||
+                window.location.hostname === '127.0.0.1' ||
+                /^192\.168\./.test(window.location.hostname) ||
+                /^10\./.test(window.location.hostname) ||
+                /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(window.location.hostname) ||
+                window.location.hostname.endsWith('.local');
+
+const API_BASE_URL = isLocal
+  ? `http://${window.location.hostname}:5000/api`
   : 'https://masterfit-dfz7.onrender.com/api';
+
 
 function App() {
   // Bulletproof Cookie Parser
@@ -108,8 +116,8 @@ function App() {
   const [activeSessions, setActiveSessions] = useState([]);
 
   // Fee rate configuration states
-  const [monthlyFeeRate, setMonthlyFeeRate] = useState(1000);
-  const [admissionFeeRate, setAdmissionFeeRate] = useState(2000);
+  const [monthlyFeeRate, setMonthlyFeeRate] = useState(600);
+  const [admissionFeeRate, setAdmissionFeeRate] = useState(1500);
 
   const updateFeeRatesInDB = (monthlyRate, admissionRate) => {
     fetch(`${API_BASE_URL}/credentials`, {
@@ -131,6 +139,9 @@ function App() {
   const [customStartMonth, setCustomStartMonth] = useState('');
   const [couponInput, setCouponInput] = useState('');
   const [couponMessage, setCouponMessage] = useState('');
+  const [admissionCouponInput, setAdmissionCouponInput] = useState('');
+  const [admissionCouponMessage, setAdmissionCouponMessage] = useState('');
+  const [customAdmissionInput, setCustomAdmissionInput] = useState('');
 
   // Super Admin Forgot Password (OTP) States
   const [forgotStep, setForgotStep] = useState(1);
@@ -277,8 +288,8 @@ function App() {
             ...customBatchesList
           ];
           setBatchOptions(uniqueBatches);
-          setMonthlyFeeRate(data.monthlyFeeRate !== undefined ? data.monthlyFeeRate : 1000);
-          setAdmissionFeeRate(data.admissionFeeRate !== undefined ? data.admissionFeeRate : 2000);
+          setMonthlyFeeRate(data.monthlyFeeRate !== undefined ? data.monthlyFeeRate : 600);
+          setAdmissionFeeRate(data.admissionFeeRate !== undefined ? data.admissionFeeRate : 1500);
           setCoupons(data.coupons || {});
         }
       })
@@ -547,7 +558,20 @@ function App() {
     if (!student) return { monthlyDue: 0, admissionDue: 0, totalDue: 0, unpaidMonths: [], paidMonthsList: [] };
 
     // 1. Admission Due
-    const admissionDue = student.admissionPaid ? 0 : admissionFeeRate;
+    const rateAdmission = student.customAdmissionRate !== undefined && student.customAdmissionRate !== null
+      ? student.customAdmissionRate
+      : admissionFeeRate;
+    const admissionCoupon = resolveCouponCode(student.appliedAdmissionCoupon);
+    let admissionDiscountAmount = 0;
+    if (admissionCoupon) {
+      if (admissionCoupon.type === 'percentage') {
+        admissionDiscountAmount = Math.round(rateAdmission * admissionCoupon.value / 100);
+      } else {
+        admissionDiscountAmount = admissionCoupon.value;
+      }
+    }
+    const finalAdmissionRate = Math.max(0, rateAdmission - admissionDiscountAmount);
+    const admissionDue = student.admissionPaid ? 0 : finalAdmissionRate;
 
     // 2. Monthly Fees Due
     let joinDateObj;
@@ -736,6 +760,52 @@ function App() {
         .then(res => res.json())
         .catch(err => console.error("Error updating fee status:", err));
     }
+  };
+
+  const handleCouponBlur = (student, field, newCode) => {
+    const code = newCode.trim().toUpperCase();
+    
+    // Validate the coupon code if one is entered
+    if (code) {
+      const resolved = resolveCouponCode(code);
+      if (!resolved) {
+        alert(`❌ Invalid coupon code: "${code}"`);
+        return;
+      }
+    }
+
+    let updated = { ...student };
+    if (field === 'appliedCoupon') {
+      updated.appliedCoupon = code;
+      if (code) {
+        const resolved = resolveCouponCode(code);
+        updated.couponType = resolved.type;
+        updated.couponValue = resolved.value;
+        updated.discountPercentage = resolved.type === 'percentage' ? resolved.value : 0;
+      } else {
+        updated.couponType = 'percentage';
+        updated.couponValue = 0;
+        updated.discountPercentage = 0;
+      }
+    } else if (field === 'appliedAdmissionCoupon') {
+      updated.appliedAdmissionCoupon = code;
+    }
+
+    // Update frontend state
+    const updatedStudentsList = students.map(s => s.id === student.id ? updated : s);
+    setStudents(updatedStudentsList);
+    if (selectedStudent && selectedStudent.id === student.id) {
+      setSelectedStudent(updated);
+    }
+
+    // Save to database
+    fetch(`${API_BASE_URL}/students/${student.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated)
+    })
+      .then(res => res.json())
+      .catch(err => console.error("Error updating coupon from table:", err));
   };
 
   const markAttendance = (studentId, status) => {
@@ -1242,7 +1312,24 @@ function App() {
         const finalRate = Math.max(0, rateToUse - discountAmount);
         return sum + finalRate;
       }, 0);
-    const admissionCollected = feeStudents.filter(s => s.admissionPaid === feeMonth).length * admissionFeeRate;
+    const admissionCollected = feeStudents
+      .filter(s => s.admissionPaid === feeMonth)
+      .reduce((sum, s) => {
+        const rateAdmission = s.customAdmissionRate !== undefined && s.customAdmissionRate !== null
+          ? s.customAdmissionRate
+          : admissionFeeRate;
+        const admissionCoupon = resolveCouponCode(s.appliedAdmissionCoupon);
+        let admissionDiscountAmount = 0;
+        if (admissionCoupon) {
+          if (admissionCoupon.type === 'percentage') {
+            admissionDiscountAmount = Math.round(rateAdmission * admissionCoupon.value / 100);
+          } else {
+            admissionDiscountAmount = admissionCoupon.value;
+          }
+        }
+        const finalAdmissionRate = Math.max(0, rateAdmission - admissionDiscountAmount);
+        return sum + finalAdmissionRate;
+      }, 0);
     const totalCollected = monthlyCollected + admissionCollected;
 
     return (
@@ -1386,7 +1473,9 @@ function App() {
                     {isAdminUser(loggedInUser) && <th>Branch</th>}
                     <th>Batch Time</th>
                     <th style={{ textAlign: 'center' }}>Admission (₹{admissionFeeRate})</th>
+                    <th style={{ textAlign: 'center' }}>Admission Coupon</th>
                     <th style={{ textAlign: 'center' }}>Monthly ({formatMonthName(feeMonth)})</th>
+                    <th style={{ textAlign: 'center' }}>Monthly Coupon</th>
                     <th>Monthly Details</th>
                     <th style={{ textAlign: 'center' }}>Outstanding Dues</th>
                   </tr>
@@ -1408,8 +1497,10 @@ function App() {
                               onClick={() => {
                                 setFeeEditingStudent(student);
                                 setCustomRateInput(student.customMonthlyRate !== undefined && student.customMonthlyRate !== null ? student.customMonthlyRate : '');
+                                setCustomAdmissionInput(student.customAdmissionRate !== undefined && student.customAdmissionRate !== null ? student.customAdmissionRate : '');
                                 setCustomStartMonth(student.joinDate ? student.joinDate.slice(0, 7) : new Date().toISOString().slice(0, 7));
                                 setCouponInput(student.appliedCoupon || '');
+                                setAdmissionCouponInput(student.appliedAdmissionCoupon || '');
                                 let activeMsg = '';
                                 if (student.appliedCoupon) {
                                   const resolved = resolveCouponCode(student.appliedCoupon);
@@ -1424,6 +1515,16 @@ function App() {
                                   }
                                 }
                                 setCouponMessage(activeMsg);
+
+                                let activeAdmMsg = '';
+                                if (student.appliedAdmissionCoupon) {
+                                  const resolved = resolveCouponCode(student.appliedAdmissionCoupon);
+                                  if (resolved) {
+                                    const display = resolved.type === 'amount' ? `₹${resolved.value}` : `${resolved.value}%`;
+                                    activeAdmMsg = `Active: ${student.appliedAdmissionCoupon} (${display} Off)`;
+                                  }
+                                }
+                                setAdmissionCouponMessage(activeAdmMsg);
                                 setIsFeeEditModalOpen(true);
                               }}
                               className="btn-icon"
@@ -1472,6 +1573,36 @@ function App() {
                           </select>
                         </td>
                         <td style={{ textAlign: 'center' }}>
+                          <input
+                            type="text"
+                            defaultValue={student.appliedAdmissionCoupon || ''}
+                            key={student.id + '_adm_' + (student.appliedAdmissionCoupon || '')}
+                            placeholder="Code"
+                            className="form-control"
+                            style={{
+                              padding: '0.3rem 0.6rem',
+                              fontSize: '0.8rem',
+                              width: '90px',
+                              textAlign: 'center',
+                              background: 'rgba(255,255,255,0.02)',
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              borderRadius: '20px',
+                              color: 'white',
+                              outline: 'none'
+                            }}
+                            onBlur={(e) => {
+                              if (e.target.value !== (student.appliedAdmissionCoupon || '')) {
+                                handleCouponBlur(student, 'appliedAdmissionCoupon', e.target.value);
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.target.blur();
+                              }
+                            }}
+                          />
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
                           <select
                             value={isPaid(student) ? "paid" : "pending"}
                             onChange={(e) => {
@@ -1499,6 +1630,36 @@ function App() {
                             <option value="paid" style={{ background: '#181818', color: '#51CF66' }}>Paid</option>
                             <option value="pending" style={{ background: '#181818', color: '#FF6B6B' }}>Pending</option>
                           </select>
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <input
+                            type="text"
+                            defaultValue={student.appliedCoupon || ''}
+                            key={student.id + '_mly_' + (student.appliedCoupon || '')}
+                            placeholder="Code"
+                            className="form-control"
+                            style={{
+                              padding: '0.3rem 0.6rem',
+                              fontSize: '0.8rem',
+                              width: '90px',
+                              textAlign: 'center',
+                              background: 'rgba(255,255,255,0.02)',
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              borderRadius: '20px',
+                              color: 'white',
+                              outline: 'none'
+                            }}
+                            onBlur={(e) => {
+                              if (e.target.value !== (student.appliedCoupon || '')) {
+                                handleCouponBlur(student, 'appliedCoupon', e.target.value);
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.target.blur();
+                              }
+                            }}
+                          />
                         </td>
                         <td>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxWidth: '250px' }}>
@@ -2091,6 +2252,7 @@ function App() {
         });
     };
 
+
     const handleUpdateAdmin = (e) => {
       e.preventDefault();
       setSettingsError('');
@@ -2597,14 +2759,16 @@ function App() {
                         <td style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>{code}</td>
                         <td><span className="badge badge-green">{displayValue} Off</span></td>
                         <td>
-                          <button
-                            type="button"
-                            className="btn-small"
-                            style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
-                            onClick={() => handleDeleteCoupon(code)}
-                          >
-                            Delete
-                          </button>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              type="button"
+                              className="btn-small"
+                              style={{ backgroundColor: '#F44336', borderColor: '#F44336', color: 'white', padding: '4px 8px', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', borderRadius: '4px' }}
+                              onClick={() => handleDeleteCoupon(code)}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -4095,14 +4259,27 @@ function App() {
                 />
               </div>
 
-              {/* Coupon Section */}
+              {/* Custom Admission Rate Override */}
               <div className="form-group" style={{ marginTop: '1.25rem' }}>
-                <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', display: 'block' }}>Apply Coupon Code</label>
+                <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', display: 'block' }}>Custom Admission Rate (₹) [Leave blank to use default ₹{admissionFeeRate}]</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  placeholder={`Default: ₹${admissionFeeRate}`}
+                  value={customAdmissionInput}
+                  onChange={(e) => setCustomAdmissionInput(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              {/* Monthly Coupon Section */}
+              <div className="form-group" style={{ marginTop: '1.25rem' }}>
+                <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', display: 'block' }}>Apply Monthly Coupon Code</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <input
                     type="text"
                     className="form-control"
-                    placeholder="Enter coupon (e.g. FIT20)"
+                    placeholder="Enter monthly coupon (e.g. FIT20)"
                     value={couponInput}
                     onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
                     style={{ flex: 1 }}
@@ -4155,6 +4332,62 @@ function App() {
                     {couponMessage}
                   </div>
                 )}
+              </div>
+
+              {/* Admission Coupon Section */}
+              <div className="form-group" style={{ marginTop: '1.25rem' }}>
+                <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', display: 'block' }}>Apply Admission Coupon Code</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="Enter admission coupon (e.g. FIT20)"
+                    value={admissionCouponInput}
+                    onChange={(e) => setAdmissionCouponInput(e.target.value.toUpperCase())}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    style={{ padding: '0 1rem', fontSize: '0.85rem', height: '38px' }}
+                    onClick={() => {
+                      const code = admissionCouponInput.trim().toUpperCase();
+                      if (!code) {
+                        setAdmissionCouponMessage('Admission Coupon cleared');
+                        setFeeEditingStudent(prev => ({
+                          ...prev,
+                          appliedAdmissionCoupon: ''
+                        }));
+                        return;
+                      }
+
+                      const coupon = resolveCouponCode(code);
+                      if (!coupon) {
+                        setAdmissionCouponMessage('❌ Invalid Coupon Code');
+                        return;
+                      }
+
+                      const display = coupon.type === 'amount' ? `₹${coupon.value}` : `${coupon.value}%`;
+                      setAdmissionCouponMessage(`✓ Admission Coupon Applied! ${display} Discount`);
+                      setFeeEditingStudent(prev => ({
+                        ...prev,
+                        appliedAdmissionCoupon: code
+                      }));
+                    }}
+                  >
+                    Apply
+                  </button>
+                </div>
+                {admissionCouponMessage && (
+                  <div style={{
+                    marginTop: '6px',
+                    fontSize: '0.8rem',
+                    color: admissionCouponMessage.includes('❌') ? '#FF6B6B' : '#51CF66',
+                    fontWeight: 500
+                  }}>
+                    {admissionCouponMessage}
+                  </div>
+                )}
                 <div style={{ marginTop: '8px', fontSize: '0.75rem', color: 'var(--color-text-muted)', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '4px' }}>
                   <strong>Available Coupons:</strong> FIT10 (10% off), FIT20 (20% off), FIT50 (50% off), FREE (100% off)
                 </div>
@@ -4171,11 +4404,45 @@ function App() {
               <button
                 className="btn-primary"
                 onClick={() => {
+                  const code = couponInput.trim().toUpperCase();
+                  let couponType = 'percentage';
+                  let couponValue = 0;
+                  let discountPercentage = 0;
+                  let appliedCoupon = '';
+
+                  if (code) {
+                    const resolved = resolveCouponCode(code);
+                    if (!resolved) {
+                      setCouponMessage('❌ Invalid Coupon Code');
+                      return;
+                    }
+                    appliedCoupon = code;
+                    couponType = resolved.type;
+                    couponValue = resolved.value;
+                    discountPercentage = resolved.type === 'percentage' ? resolved.value : 0;
+                  }
+
+                  const admCode = admissionCouponInput.trim().toUpperCase();
+                  if (admCode) {
+                    const resolved = resolveCouponCode(admCode);
+                    if (!resolved) {
+                      setAdmissionCouponMessage('❌ Invalid Admission Coupon Code');
+                      return;
+                    }
+                  }
+
                   const rate = customRateInput === '' ? null : parseInt(customRateInput, 10);
+                  const admissionRateOverride = customAdmissionInput === '' ? null : parseInt(customAdmissionInput, 10);
                   const updatedStudent = {
                     ...feeEditingStudent,
                     joinDate: `${customStartMonth}-01`,
-                    customMonthlyRate: rate
+                    customMonthlyRate: rate,
+                    customAdmissionRate: admissionRateOverride,
+                    appliedCoupon,
+                    couponType,
+                    couponValue,
+                    discountPercentage,
+                    appliedAdmissionCoupon: admCode
                   };
 
                   setStudents(students.map(s => s.id === updatedStudent.id ? updatedStudent : s));

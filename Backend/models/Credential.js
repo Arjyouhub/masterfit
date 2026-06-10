@@ -28,8 +28,8 @@ const credentialsSchema = new mongoose.Schema({
     }, { _id: false })],
     default: []
   },
-  monthlyFeeRate: { type: Number, default: 1000 },
-  admissionFeeRate: { type: Number, default: 2000 },
+  monthlyFeeRate: { type: Number, default: 600 },
+  admissionFeeRate: { type: Number, default: 1500 },
   coupons: { type: Map, of: mongoose.Schema.Types.Mixed, default: {} }
 }, { timestamps: true });
 
