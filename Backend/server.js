@@ -221,7 +221,7 @@ async function migrateDefaultRates() {
 
 // Connect to MongoDB Atlas
 console.log('Connecting to MongoDB URI:', process.env.MONGO_URI);
-mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/attendance', { dbName: 'attendance' })
+mongoose.connect(process.env.MONGO_URI, { dbName: 'attendance' })
   .then(async () => {
     console.log('Successfully connected to MongoDB Atlas');
     await migratePlaintextPasswords();

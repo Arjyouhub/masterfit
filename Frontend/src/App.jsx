@@ -17,16 +17,7 @@ const DEFAULT_BATCH_OPTIONS = [
 ];
 
 
-const isLocal = window.location.hostname === 'localhost' ||
-                window.location.hostname === '127.0.0.1' ||
-                /^192\.168\./.test(window.location.hostname) ||
-                /^10\./.test(window.location.hostname) ||
-                /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(window.location.hostname) ||
-                window.location.hostname.endsWith('.local');
-
-const API_BASE_URL = isLocal
-  ? `http://${window.location.hostname}:5000/api`
-  : 'https://masterfit-dfz7.onrender.com/api';
+const API_BASE_URL = 'https://masterfit-dfz7.onrender.com/api';
 
 
 function App() {
@@ -69,6 +60,7 @@ function App() {
   });
 
   const [currentView, setCurrentView] = useState('dashboard');
+  const [feeDetailsStudentId, setFeeDetailsStudentId] = useState(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [studentToDelete, setStudentToDelete] = useState(null);
@@ -101,6 +93,12 @@ function App() {
   // Settings Form States
   const [settingsError, setSettingsError] = useState('');
   const [settingsSuccess, setSettingsSuccess] = useState('');
+  const [adminPasswordError, setAdminPasswordError] = useState('');
+  const [createAdminPasswordError, setCreateAdminPasswordError] = useState('');
+  const [branchPasswordError, setBranchPasswordError] = useState('');
+  const [batchPasswordError, setBatchPasswordError] = useState('');
+  const [newBranchPasswordError, setNewBranchPasswordError] = useState('');
+  const [newBatchPasswordError, setNewBatchPasswordError] = useState('');
   const [adminForm, setAdminForm] = useState({ account: 'admin', newUsername: '', newPassword: '', confirmPassword: '' });
   const [createAdminForm, setCreateAdminForm] = useState({ username: '', password: '', confirmPassword: '' });
   const [branchForm, setBranchForm] = useState({ branch: 'kuttiady', newUsername: '', newPassword: '', confirmPassword: '' });
@@ -327,6 +325,41 @@ function App() {
     }
   }, []);
 
+  // Verify session validity periodically in the background (every 10 seconds)
+  useEffect(() => {
+    if (!loggedInUser) return;
+
+    const interval = setInterval(() => {
+      const sessionToken = getCookieValue('umai_session_token');
+      if (sessionToken) {
+        fetch(`${API_BASE_URL}/session/verify?token=${sessionToken}`)
+          .then(res => {
+            if (!res.ok) throw new Error('Session invalid');
+            return res.json();
+          })
+          .then(data => {
+            if (!data.success) {
+              throw new Error('Session invalid');
+            }
+          })
+          .catch(err => {
+            // Log out immediately
+            document.cookie = "umai_session_user=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+            document.cookie = "umai_session_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+            setLoggedInUser('');
+            setAppMode('login');
+            alert('Your session has been terminated by the administrator.');
+          });
+      } else {
+        // No session token
+        setLoggedInUser('');
+        setAppMode('login');
+      }
+    }, 10000); // 10 seconds check interval
+
+    return () => clearInterval(interval);
+  }, [loggedInUser]);
+
   // Fetch active sessions when settings page is loaded
   useEffect(() => {
     if (currentView === 'settings' && isAdminUser(loggedInUser)) {
@@ -397,12 +430,28 @@ function App() {
     }
   }, [appMode]);
 
+  // Helper functions to get current local date/month (avoiding UTC timezone shift issues)
+  const getLocalDateString = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const getLocalMonthString = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  };
+
   // Calendar State
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 4, 1)); // May 2026
-  const [feeMonth, setFeeMonth] = useState(new Date().toISOString().slice(0, 7)); // "YYYY-MM"
+  const [currentDate, setCurrentDate] = useState(new Date()); // Default to current month/year
+  const [feeMonth, setFeeMonth] = useState(getLocalMonthString()); // "YYYY-MM"
 
   // Profile modal dues calculation month limit
-  const [profileFeeMonth, setProfileFeeMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [profileFeeMonth, setProfileFeeMonth] = useState(getLocalMonthString());
 
   useEffect(() => {
     if (selectedStudent) {
@@ -411,7 +460,7 @@ function App() {
   }, [selectedStudent, feeMonth]);
 
   // Attendance Marking State
-  const [markingDate, setMarkingDate] = useState(new Date().toISOString().split('T')[0]);
+  const [markingDate, setMarkingDate] = useState(getLocalDateString());
   const [attendanceBatchFilter, setAttendanceBatchFilter] = useState('All');
   const [attendanceScheduleFilter, setAttendanceScheduleFilter] = useState('All');
 
@@ -421,7 +470,7 @@ function App() {
 
   // Form State
   const [newStudent, setNewStudent] = useState({
-    name: '', age: '', phone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: 'Kuttiady', photo: null, status: 'Active'
+    name: '', age: '', phone: '', belt: 'White', joinDate: getLocalDateString(), batch: 'Morning', schedule: 'Mon-Thu', branch: 'Kuttiady', photo: null, status: 'Active'
   });
 
   const handlePhotoUpload = (e) => {
@@ -762,6 +811,65 @@ function App() {
     }
   };
 
+  const markAllFeesPaid = (id) => {
+    let updatedStudent = null;
+    const updatedStudentsList = students.map(s => {
+      if (s.id === id) {
+        const fees = calculateStudentFees(s);
+        const newPaidMonths = { ...(s.paidMonths || {}) };
+        fees.unpaidMonths.forEach(m => {
+          newPaidMonths[m] = true;
+        });
+        let updated = { ...s, paidMonths: newPaidMonths };
+        updatedStudent = updated;
+        return updated;
+      }
+      return s;
+    });
+
+    setStudents(updatedStudentsList);
+    if (selectedStudent && selectedStudent.id === id) {
+      setSelectedStudent(updatedStudent);
+    }
+
+    if (updatedStudent) {
+      fetch(`${API_BASE_URL}/students/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedStudent)
+      })
+        .then(res => res.json())
+        .catch(err => console.error("Error updating fee status:", err));
+    }
+  };
+
+  const markAllFeesUnpaid = (id) => {
+    let updatedStudent = null;
+    const updatedStudentsList = students.map(s => {
+      if (s.id === id) {
+        let updated = { ...s, paidMonths: {} }; // Clear all paid months
+        updatedStudent = updated;
+        return updated;
+      }
+      return s;
+    });
+
+    setStudents(updatedStudentsList);
+    if (selectedStudent && selectedStudent.id === id) {
+      setSelectedStudent(updatedStudent);
+    }
+
+    if (updatedStudent) {
+      fetch(`${API_BASE_URL}/students/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedStudent)
+      })
+        .then(res => res.json())
+        .catch(err => console.error("Error updating fee status:", err));
+    }
+  };
+
   const handleCouponBlur = (student, field, newCode) => {
     const code = newCode.trim().toUpperCase();
     
@@ -810,9 +918,14 @@ function App() {
 
   const markAttendance = (studentId, status) => {
     const newDateRecords = {
-      ...(attendanceRecords[markingDate] || {}),
-      [studentId]: status
+      ...(attendanceRecords[markingDate] || {})
     };
+
+    if (status === 'none') {
+      delete newDateRecords[studentId];
+    } else {
+      newDateRecords[studentId] = status;
+    }
 
     setAttendanceRecords(prev => ({
       ...prev,
@@ -975,7 +1088,7 @@ function App() {
   );
 
   const renderYearCalendar = () => {
-    const year = 2026;
+    const year = new Date().getFullYear();
     const monthNames = [
       "January", "February", "March", "April", "May", "June",
       "July", "August", "September", "October", "November", "December"
@@ -984,8 +1097,8 @@ function App() {
     return (
       <div className="year-calendar-container panel">
         <div className="panel-header" style={{ marginBottom: '2rem' }}>
-          <h3 className="panel-title">2026 Full Year Calendar</h3>
-          <span style={{ color: 'var(--color-secondary)', fontWeight: 'bold' }}>Year: 2026</span>
+          <h3 className="panel-title">{year} Full Year Calendar</h3>
+          <span style={{ color: 'var(--color-secondary)', fontWeight: 'bold' }}>Year: {year}</span>
         </div>
         <div className="year-calendar-grid" style={{
           display: 'grid',
@@ -1132,20 +1245,19 @@ function App() {
         });
       }
 
-      const isMockPresent = i % 3 !== 0;
-      const displayPresent = totalMarked > 0 ? presentCount : (isMockPresent ? Math.floor(searchedStudents.length * 0.9) : Math.floor(searchedStudents.length * 0.6));
-
       days.push(
         <div key={i} className={`calendar-day ${dateStr === markingDate ? 'today' : ''}`} onClick={() => setMarkingDate(dateStr)} style={{ cursor: 'pointer' }}>
           <div className="day-number">{i}</div>
           <div className="day-content">
-            <div className="attendance-indicator">
-              {displayPresent >= (searchedStudents.length * 0.7) ? (
-                <span className="text-success"><CheckCircle size={14} /> {displayPresent}</span>
-              ) : (
-                <span className="text-warning"><XCircle size={14} /> {displayPresent}</span>
-              )}
-            </div>
+            {totalMarked > 0 && (
+              <div className="attendance-indicator">
+                {presentCount >= (searchedStudents.length * 0.7) ? (
+                  <span className="text-success"><CheckCircle size={14} /> {presentCount}</span>
+                ) : (
+                  <span className="text-warning"><XCircle size={14} /> {presentCount}</span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       );
@@ -1166,7 +1278,7 @@ function App() {
             style={attendanceTab === 'year2026' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
             onClick={() => setAttendanceTab('year2026')}
           >
-            2026 Full Calendar
+            {new Date().getFullYear()} Full Calendar
           </button>
         </div>
 
@@ -1259,6 +1371,13 @@ function App() {
                                 onClick={() => markAttendance(student.id, 'absent')}
                               >
                                 <XCircle size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Absent
+                              </button>
+                              <button
+                                className="btn-small"
+                                style={!status ? { backgroundColor: 'rgba(255,255,255,0.15)', borderColor: 'rgba(255,255,255,0.25)', color: 'white' } : { background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--color-text-muted)' }}
+                                onClick={() => markAttendance(student.id, 'none')}
+                              >
+                                <X size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> None
                               </button>
                             </div>
                           </td>
@@ -1476,7 +1595,7 @@ function App() {
                     <th style={{ textAlign: 'center' }}>Admission Coupon</th>
                     <th style={{ textAlign: 'center' }}>Monthly ({formatMonthName(feeMonth)})</th>
                     <th style={{ textAlign: 'center' }}>Monthly Coupon</th>
-                    <th>Monthly Details</th>
+                    <th style={{ textAlign: 'center' }}>Other Months</th>
                     <th style={{ textAlign: 'center' }}>Outstanding Dues</th>
                   </tr>
                 </thead>
@@ -1661,50 +1780,33 @@ function App() {
                             }}
                           />
                         </td>
-                        <td>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxWidth: '250px' }}>
-                            {feeDetails.unpaidMonths.map(m => (
-                              <button
-                                key={m}
-                                style={{
-                                  border: '1px solid rgba(229, 9, 20, 0.3)',
-                                  background: 'rgba(229, 9, 20, 0.08)',
-                                  color: '#FF8787',
-                                  borderRadius: '12px',
-                                  cursor: 'pointer',
-                                  padding: '3px 8px',
-                                  fontSize: '0.72rem',
-                                  fontWeight: 600,
-                                  transition: 'all 0.15s ease'
-                                }}
-                                onClick={() => markFeePaidCustomMonth(student.id, m)}
-                                title="Click to Pay"
-                              >
-                                • {formatMonthName(m)}
-                              </button>
-                            ))}
-                            {feeDetails.paidMonthsList.map(m => (
-                              <button
-                                key={m}
-                                style={{
-                                  border: '1px solid rgba(76, 175, 80, 0.3)',
-                                  background: 'rgba(76, 175, 80, 0.08)',
-                                  color: '#82C91E',
-                                  borderRadius: '12px',
-                                  cursor: 'pointer',
-                                  padding: '3px 8px',
-                                  fontSize: '0.72rem',
-                                  fontWeight: 600,
-                                  transition: 'all 0.15s ease'
-                                }}
-                                onClick={() => unmarkFeePaidCustomMonth(student.id, m)}
-                                title="Click to Undo"
-                              >
-                                ✓ {formatMonthName(m)}
-                              </button>
-                            ))}
-                            {feeDetails.unpaidMonths.length === 0 && feeDetails.paidMonthsList.length === 0 && (
+                        <td style={{ textAlign: 'center' }}>
+                          <div style={{ display: 'inline-block' }}>
+                            {feeDetails.unpaidMonths.length === 0 && feeDetails.paidMonthsList.length === 0 ? (
                               <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>No record</span>
+                            ) : (
+                              <button
+                                className="btn-small"
+                                style={{
+                                  padding: '0.35rem 0.75rem',
+                                  fontSize: '0.8rem',
+                                  background: feeDetails.unpaidMonths.length > 0 ? 'rgba(229, 9, 20, 0.12)' : 'rgba(76, 175, 80, 0.12)',
+                                  color: feeDetails.unpaidMonths.length > 0 ? '#FF6B6B' : '#51CF66',
+                                  border: `1px solid ${feeDetails.unpaidMonths.length > 0 ? 'rgba(229, 9, 20, 0.3)' : 'rgba(76, 175, 80, 0.3)'}`,
+                                  borderRadius: '20px',
+                                  cursor: 'pointer',
+                                  fontWeight: 600,
+                                  transition: 'all 0.15s ease'
+                                }}
+                                onClick={() => {
+                                  setFeeDetailsStudentId(student.id);
+                                  setCurrentView('student-fees');
+                                }}
+                              >
+                                {feeDetails.unpaidMonths.length > 0
+                                  ? `Pending (${feeDetails.unpaidMonths.length}m)`
+                                  : 'All Paid ✓'}
+                              </button>
                             )}
                           </div>
                         </td>
@@ -1758,6 +1860,239 @@ function App() {
           ) : (
             <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>
               No students found for this month and selection filters.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const getMonthsList = (student) => {
+    if (!student) return [];
+    
+    const currentMonthStr = new Date().toISOString().slice(0, 7); // YYYY-MM
+    const joinMonthStr = student.joinDate ? student.joinDate.slice(0, 7) : currentMonthStr;
+
+    const list = [];
+    let [joinYear, joinMonth] = joinMonthStr.split('-').map(Number);
+    let [currYear, currMonth] = currentMonthStr.split('-').map(Number);
+
+    if (joinYear && joinMonth && currYear && currMonth) {
+      let tempYear = joinYear;
+      let tempMonth = joinMonth;
+
+      while (tempYear < currYear || (tempYear === currYear && tempMonth <= currMonth)) {
+        const monthStr = `${tempYear}-${String(tempMonth).padStart(2, '0')}`;
+        const isPaid = student.paidMonths && student.paidMonths[monthStr];
+        list.push({
+          monthStr,
+          isPaid: !!isPaid
+        });
+
+        tempMonth++;
+        if (tempMonth > 12) {
+          tempMonth = 1;
+          tempYear++;
+        }
+      }
+    }
+    return list;
+  };
+
+  const renderStudentFees = () => {
+    const student = students.find(s => s.id === feeDetailsStudentId);
+    if (!student) {
+      return (
+        <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
+          <p style={{ color: 'var(--color-text-muted)' }}>Student not found.</p>
+          <button className="btn-primary" onClick={() => setCurrentView('fees')}>Back to Fees</button>
+        </div>
+      );
+    }
+
+    const months = getMonthsList(student);
+    const unpaidCount = months.filter(m => !m.isPaid).length;
+    const paidCount = months.filter(m => m.isPaid).length;
+
+    const rateToUse = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
+      ? student.customMonthlyRate
+      : monthlyFeeRate;
+    const discountAmount = getStudentDiscount(student, rateToUse);
+    const finalRate = Math.max(0, rateToUse - discountAmount);
+
+    return (
+      <div className="fees-details-view animate-fade-in">
+        {/* Back Button and Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+          <button
+            className="btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid var(--glass-border)', padding: '0.5rem 1rem', borderRadius: '8px' }}
+            onClick={() => setCurrentView('fees')}
+          >
+            <ChevronLeft size={16} /> Back to Fees
+          </button>
+          <h2 className="panel-title" style={{ margin: 0 }}>Fee History & Details</h2>
+        </div>
+
+        {/* Student Details Card */}
+        <div className="panel" style={{ marginBottom: '2rem', display: 'flex', flexWrap: 'wrap', gap: '2rem', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '1.4rem', color: '#E50914', fontFamily: 'var(--font-heading)' }}>{student.name}</h3>
+            <p style={{ margin: '0.25rem 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>
+              Branch: <strong>{student.branch}</strong> • Batch: <strong>{student.batch}</strong> ({student.schedule})
+            </p>
+            <p style={{ margin: '0.25rem 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>
+              Joined: <strong>{student.joinDate}</strong>
+            </p>
+          </div>
+          
+          <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
+            <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem 1.25rem', borderRadius: '10px', border: '1px solid var(--glass-border)', textAlign: 'center' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>Monthly Rate</span>
+              <strong style={{ fontSize: '1.2rem', color: '#4CAF50' }}>₹{finalRate}</strong>
+              {student.customMonthlyRate && <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', display: 'block' }}>(Customized)</span>}
+            </div>
+
+            <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem 1.25rem', borderRadius: '10px', border: '1px solid var(--glass-border)', textAlign: 'center' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>Status Summary</span>
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                <span className="badge badge-green" style={{ padding: '2px 8px' }}>{paidCount} Paid</span>
+                <span className="badge badge-red" style={{ padding: '2px 8px' }}>{unpaidCount} Pending</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Months Roster Grid */}
+        <div className="panel">
+          <div className="panel-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <h3 className="panel-title" style={{ margin: 0 }}>Month-by-Month Fees</h3>
+              <p style={{ margin: '0.25rem 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                Click any button below to toggle the payment status. Changes are saved immediately.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              {unpaidCount > 0 && (
+                <button
+                  className="btn-primary"
+                  style={{
+                    padding: '0.45rem 1rem',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    borderRadius: '20px',
+                    background: '#4CAF50',
+                    borderColor: '#4CAF50',
+                    color: 'white',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 4px 12px rgba(76, 175, 80, 0.2)'
+                  }}
+                  onClick={() => {
+                    if (window.confirm(`Are you sure you want to mark all ${unpaidCount} pending months as paid?`)) {
+                      markAllFeesPaid(student.id);
+                    }
+                  }}
+                >
+                  <CheckCircle size={14} /> Mark All Paid
+                </button>
+              )}
+              {paidCount > 0 && (
+                <button
+                  className="btn-secondary"
+                  style={{
+                    padding: '0.45rem 1rem',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    borderRadius: '20px',
+                    background: 'rgba(229, 9, 20, 0.15)',
+                    borderColor: 'rgba(229, 9, 20, 0.3)',
+                    color: '#FF6B6B',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 4px 12px rgba(229, 9, 20, 0.1)'
+                  }}
+                  onClick={() => {
+                    if (window.confirm(`Are you sure you want to mark all ${paidCount} paid months as unpaid?`)) {
+                      markAllFeesUnpaid(student.id);
+                    }
+                  }}
+                >
+                  <XCircle size={14} /> Mark All Unpaid
+                </button>
+              )}
+            </div>
+          </div>
+
+          {months.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>
+              No month history found (Check student join date).
+            </div>
+          ) : (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+              gap: '1.25rem'
+            }}>
+              {months.map(({ monthStr, isPaid }) => {
+                return (
+                  <div
+                    key={monthStr}
+                    style={{
+                      background: isPaid ? 'rgba(76, 175, 80, 0.04)' : 'rgba(229, 9, 20, 0.04)',
+                      border: `1px solid ${isPaid ? 'rgba(76, 175, 80, 0.2)' : 'rgba(229, 9, 20, 0.2)'}`,
+                      borderRadius: '12px',
+                      padding: '1.2rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '12px',
+                      transition: 'all 0.2s ease',
+                      boxShadow: isPaid ? 'none' : '0 4px 12px rgba(229, 9, 20, 0.05)'
+                    }}
+                  >
+                    <div style={{ fontSize: '1rem', fontWeight: 600, color: 'white' }}>
+                      {formatMonthName(monthStr)}
+                    </div>
+                    <div>
+                      {isPaid ? (
+                        <span className="badge badge-green" style={{ fontSize: '0.8rem', padding: '3px 10px', borderRadius: '20px' }}>Paid ✓</span>
+                      ) : (
+                        <span className="badge badge-red" style={{ fontSize: '0.8rem', padding: '3px 10px', borderRadius: '20px' }}>Pending</span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (isPaid) {
+                          unmarkFeePaidCustomMonth(student.id, monthStr);
+                        } else {
+                          markFeePaidCustomMonth(student.id, monthStr);
+                        }
+                      }}
+                      className="btn-small"
+                      style={{
+                        width: '100%',
+                        padding: '0.4rem 0.5rem',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        borderRadius: '8px',
+                        background: isPaid ? 'rgba(255,255,255,0.05)' : '#4CAF50',
+                        color: isPaid ? '#FF8787' : 'white',
+                        border: isPaid ? '1px solid rgba(255,255,255,0.1)' : '1px solid #4CAF50',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        textAlign: 'center'
+                      }}
+                    >
+                      {isPaid ? 'Mark Unpaid' : 'Mark Paid'}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1932,7 +2267,7 @@ function App() {
       }
 
       if (pass !== newBranchForm.confirmPassword) {
-        setSettingsError('Passwords do not match');
+        setNewBranchPasswordError('Passwords do not match');
         return;
       }
 
@@ -2052,7 +2387,7 @@ function App() {
       }
 
       if (pass !== newBatchForm.confirmPassword) {
-        setSettingsError('Passwords do not match');
+        setNewBatchPasswordError('Passwords do not match');
         return;
       }
 
@@ -2257,13 +2592,14 @@ function App() {
       e.preventDefault();
       setSettingsError('');
       setSettingsSuccess('');
+      setAdminPasswordError('');
 
       const acc = adminForm.account;
       const user = adminForm.newUsername.toLowerCase().trim() || acc;
       const pass = adminForm.newPassword;
 
       if (pass !== adminForm.confirmPassword) {
-        setSettingsError('Passwords do not match');
+        setAdminPasswordError('Passwords do not match');
         return;
       }
 
@@ -2296,6 +2632,7 @@ function App() {
       e.preventDefault();
       setSettingsError('');
       setSettingsSuccess('');
+      setCreateAdminPasswordError('');
 
       const user = createAdminForm.username.toLowerCase().trim();
       const pass = createAdminForm.password;
@@ -2311,7 +2648,7 @@ function App() {
       }
 
       if (pass !== createAdminForm.confirmPassword) {
-        setSettingsError('Passwords do not match');
+        setCreateAdminPasswordError('Passwords do not match');
         return;
       }
 
@@ -2375,13 +2712,14 @@ function App() {
       e.preventDefault();
       setSettingsError('');
       setSettingsSuccess('');
+      setBranchPasswordError('');
 
       const br = branchForm.branch;
       const pass = branchForm.newPassword;
       const user = branchForm.newUsername.trim() || branchCredentials[br]?.username || `admin@${br}`;
 
       if (pass !== branchForm.confirmPassword) {
-        setSettingsError('Passwords do not match');
+        setBranchPasswordError('Passwords do not match');
         return;
       }
 
@@ -2410,6 +2748,7 @@ function App() {
       e.preventDefault();
       setSettingsError('');
       setSettingsSuccess('');
+      setBatchPasswordError('');
 
       const br = batchForm.branch;
       const bt = batchForm.batch;
@@ -2419,7 +2758,7 @@ function App() {
       const user = batchForm.newUsername.trim() || batchCredentials[key]?.username || defaultUser;
 
       if (pass !== batchForm.confirmPassword) {
-        setSettingsError('Passwords do not match');
+        setBatchPasswordError('Passwords do not match');
         return;
       }
 
@@ -2475,11 +2814,14 @@ function App() {
                 <div className="grid-2-col" style={{ marginBottom: '1.5rem' }}>
                   <div className="form-group">
                     <label>New Password</label>
-                    <input type="password" className="form-control" placeholder="Enter new password" required value={adminForm.newPassword} onChange={(e) => setAdminForm({ ...adminForm, newPassword: e.target.value })} />
+                    <input type="password" className="form-control" placeholder="Enter new password" required value={adminForm.newPassword} onChange={(e) => { setAdminForm({ ...adminForm, newPassword: e.target.value }); setAdminPasswordError(''); }} />
                   </div>
                   <div className="form-group">
                     <label>Confirm Password</label>
-                    <input type="password" className="form-control" placeholder="Confirm new password" required value={adminForm.confirmPassword} onChange={(e) => setAdminForm({ ...adminForm, confirmPassword: e.target.value })} />
+                    <input type="password" className="form-control" placeholder="Confirm new password" required value={adminForm.confirmPassword} onChange={(e) => { setAdminForm({ ...adminForm, confirmPassword: e.target.value }); setAdminPasswordError(''); }} />
+                    {adminPasswordError && (
+                      <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{adminPasswordError}</div>
+                    )}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '1rem' }}>
@@ -2524,7 +2866,7 @@ function App() {
                       placeholder="Enter password"
                       required
                       value={createAdminForm.password}
-                      onChange={(e) => setCreateAdminForm({ ...createAdminForm, password: e.target.value })}
+                      onChange={(e) => { setCreateAdminForm({ ...createAdminForm, password: e.target.value }); setCreateAdminPasswordError(''); }}
                     />
                   </div>
                 </div>
@@ -2536,8 +2878,11 @@ function App() {
                     placeholder="Confirm password"
                     required
                     value={createAdminForm.confirmPassword}
-                    onChange={(e) => setCreateAdminForm({ ...createAdminForm, confirmPassword: e.target.value })}
+                    onChange={(e) => { setCreateAdminForm({ ...createAdminForm, confirmPassword: e.target.value }); setCreateAdminPasswordError(''); }}
                   />
+                  {createAdminPasswordError && (
+                    <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{createAdminPasswordError}</div>
+                  )}
                 </div>
                 <button type="submit" className="btn-primary">Create Admin Account</button>
               </form>
@@ -2806,11 +3151,14 @@ function App() {
                   </div>
                   <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                     <label>New Password</label>
-                    <input type="password" className="form-control" placeholder="Enter new password" required value={branchForm.newPassword} onChange={(e) => setBranchForm({ ...branchForm, newPassword: e.target.value })} />
+                    <input type="password" className="form-control" placeholder="Enter new password" required value={branchForm.newPassword} onChange={(e) => { setBranchForm({ ...branchForm, newPassword: e.target.value }); setBranchPasswordError(''); }} />
                   </div>
                   <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                     <label>Confirm Password</label>
-                    <input type="password" className="form-control" placeholder="Confirm new password" required value={branchForm.confirmPassword} onChange={(e) => setBranchForm({ ...branchForm, confirmPassword: e.target.value })} />
+                    <input type="password" className="form-control" placeholder="Confirm new password" required value={branchForm.confirmPassword} onChange={(e) => { setBranchForm({ ...branchForm, confirmPassword: e.target.value }); setBranchPasswordError(''); }} />
+                    {branchPasswordError && (
+                      <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{branchPasswordError}</div>
+                    )}
                   </div>
                   <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Save Branch Credentials</button>
                 </form>
@@ -2847,11 +3195,14 @@ function App() {
                   </div>
                   <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                     <label>New Password</label>
-                    <input type="password" className="form-control" placeholder="Enter new password" required value={batchForm.newPassword} onChange={(e) => setBatchForm({ ...batchForm, newPassword: e.target.value })} />
+                    <input type="password" className="form-control" placeholder="Enter new password" required value={batchForm.newPassword} onChange={(e) => { setBatchForm({ ...batchForm, newPassword: e.target.value }); setBatchPasswordError(''); }} />
                   </div>
                   <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                     <label>Confirm Password</label>
-                    <input type="password" className="form-control" placeholder="Confirm new password" required value={batchForm.confirmPassword} onChange={(e) => setBatchForm({ ...batchForm, confirmPassword: e.target.value })} />
+                    <input type="password" className="form-control" placeholder="Confirm new password" required value={batchForm.confirmPassword} onChange={(e) => { setBatchForm({ ...batchForm, confirmPassword: e.target.value }); setBatchPasswordError(''); }} />
+                    {batchPasswordError && (
+                      <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{batchPasswordError}</div>
+                    )}
                   </div>
                   <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Save Batch Credentials</button>
                 </form>
@@ -2896,7 +3247,7 @@ function App() {
                         className="form-control"
                         placeholder="Enter password"
                         value={newBranchForm.password}
-                        onChange={(e) => setNewBranchForm({ ...newBranchForm, password: e.target.value })}
+                        onChange={(e) => { setNewBranchForm({ ...newBranchForm, password: e.target.value }); setNewBranchPasswordError(''); }}
                         required
                       />
                     </div>
@@ -2907,9 +3258,12 @@ function App() {
                         className="form-control"
                         placeholder="Confirm password"
                         value={newBranchForm.confirmPassword}
-                        onChange={(e) => setNewBranchForm({ ...newBranchForm, confirmPassword: e.target.value })}
+                        onChange={(e) => { setNewBranchForm({ ...newBranchForm, confirmPassword: e.target.value }); setNewBranchPasswordError(''); }}
                         required
                       />
+                      {newBranchPasswordError && (
+                        <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{newBranchPasswordError}</div>
+                      )}
                     </div>
                   </div>
                   <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Branch & Credentials</button>
@@ -3014,7 +3368,7 @@ function App() {
                         className="form-control"
                         placeholder="Enter password"
                         value={newBatchForm.password}
-                        onChange={(e) => setNewBatchForm({ ...newBatchForm, password: e.target.value })}
+                        onChange={(e) => { setNewBatchForm({ ...newBatchForm, password: e.target.value }); setNewBatchPasswordError(''); }}
                         required
                       />
                     </div>
@@ -3025,9 +3379,12 @@ function App() {
                         className="form-control"
                         placeholder="Confirm password"
                         value={newBatchForm.confirmPassword}
-                        onChange={(e) => setNewBatchForm({ ...newBatchForm, confirmPassword: e.target.value })}
+                        onChange={(e) => { setNewBatchForm({ ...newBatchForm, confirmPassword: e.target.value }); setNewBatchPasswordError(''); }}
                         required
                       />
+                      {newBatchPasswordError && (
+                        <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{newBatchPasswordError}</div>
+                      )}
                     </div>
                   </div>
                   <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Batch & Credentials</button>
@@ -3163,7 +3520,8 @@ function App() {
                   })
                   .catch(err => {
                     setIsLoggingIn(false);
-                    setLoginError(err.message);
+                    const isNetworkError = err.message && (err.message.includes('Failed to fetch') || err.message.includes('fetch'));
+                    setLoginError(isNetworkError ? 'Connection error: The database server may be spinning up. Please wait 1 minute and try again.' : err.message);
                   });
               }}>
                 <div className="form-group animate-item-3" style={{ textAlign: 'left' }}>
@@ -3588,7 +3946,8 @@ function App() {
                 })
                 .catch(err => {
                   setIsLoggingIn(false);
-                  setLoginError(err.message);
+                  const isNetworkError = err.message && (err.message.includes('Failed to fetch') || err.message.includes('fetch'));
+                  setLoginError(isNetworkError ? 'Connection error: The database server may be spinning up. Please wait 1 minute and try again.' : err.message);
                 });
             }}>
               <div className="form-group animate-item-3" style={{ textAlign: 'left' }}>
@@ -3896,6 +4255,7 @@ function App() {
 
           {currentView === 'attendance' && renderAttendance()}
           {currentView === 'fees' && renderFees()}
+          {currentView === 'student-fees' && renderStudentFees()}
           {currentView === 'reminders' && renderReminders()}
           {currentView === 'performance' && renderPerformance()}
           {currentView === 'settings' && renderSettings()}
