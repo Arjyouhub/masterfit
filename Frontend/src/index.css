@@ -1040,10 +1040,17 @@ html.admin-html, body.admin-body {
   }
 
   /* Admin Dashboard Mobile Drawer layout */
+  html.admin-html, body.admin-body {
+    height: auto !important;
+    overflow: auto !important;
+    overflow-x: hidden !important;
+  }
+
   .dashboard-container { 
     flex-direction: column; 
-    height: 100vh; 
-    overflow: hidden; 
+    height: auto !important; 
+    min-height: 100vh;
+    overflow: visible !important; 
   }
   
   .sidebar { 
@@ -1161,8 +1168,8 @@ html.admin-html, body.admin-body {
   .main-content { 
     flex: 1;
     min-height: 0;
-    height: auto;
-    overflow-y: auto; 
+    height: auto !important;
+    overflow-y: visible !important; 
   }
   
   .content-area { 
