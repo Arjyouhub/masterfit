@@ -17,7 +17,9 @@ const DEFAULT_BATCH_OPTIONS = [
 ];
 
 
-const API_BASE_URL = 'https://masterfit-dfz7.onrender.com/api';
+const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? 'http://localhost:5000/api'
+  : 'https://masterfit-dfz7.onrender.com/api';
 
 
 function App() {
@@ -33,17 +35,40 @@ function App() {
     return '';
   };
 
+  // Session storage helper functions
+  const getSessionUser = () => {
+    return localStorage.getItem('umai_session_user') || getCookieValue('umai_session_user');
+  };
+
+  const getSessionToken = () => {
+    return localStorage.getItem('umai_session_token') || getCookieValue('umai_session_token');
+  };
+
+  const setSession = (username, token) => {
+    try {
+      localStorage.setItem('umai_session_user', username);
+      localStorage.setItem('umai_session_token', token);
+    } catch (e) {
+      console.error('Failed to set localStorage session:', e);
+    }
+    document.cookie = `umai_session_user=${username}; path=/;`;
+    document.cookie = `umai_session_token=${token}; path=/;`;
+  };
+
+  const clearSession = () => {
+    try {
+      localStorage.removeItem('umai_session_user');
+      localStorage.removeItem('umai_session_token');
+    } catch (e) {
+      console.error('Failed to clear localStorage session:', e);
+    }
+    document.cookie = "umai_session_user=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    document.cookie = "umai_session_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+  };
+
   const [appMode, setAppMode] = useState(() => {
     const hash = window.location.hash;
-    const cookies = document.cookie.split(';');
-    let hasSession = '';
-    for (let i = 0; i < cookies.length; i++) {
-      const cookie = cookies[i].trim();
-      if (cookie.startsWith('umai_session_user=')) {
-        hasSession = cookie.substring('umai_session_user='.length);
-        break;
-      }
-    }
+    const hasSession = getSessionUser();
 
     if (hasSession) {
       return 'admin'; // Always restore admin dashboard if session exists!
@@ -72,14 +97,7 @@ function App() {
   const [newCouponForm, setNewCouponForm] = useState({ code: '', type: 'percentage', value: '' });
 
   const [loggedInUser, setLoggedInUser] = useState(() => {
-    const cookies = document.cookie.split(';');
-    for (let i = 0; i < cookies.length; i++) {
-      const cookie = cookies[i].trim();
-      if (cookie.startsWith('umai_session_user=')) {
-        return cookie.substring('umai_session_user='.length);
-      }
-    }
-    return '';
+    return getSessionUser() || '';
   });
 
   const [isForgotPassword, setIsForgotPassword] = useState(false);
@@ -150,13 +168,128 @@ function App() {
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
 
 
+  const getSessionDetails = (username) => {
+    if (!username) return { role: 'Unknown', branch: 'Unknown', batchName: 'Unknown' };
+    
+    const cleanUsername = username.toLowerCase().trim();
+    
+    // Super Admin check
+    if (!cleanUsername.includes('@')) {
+      return {
+        role: 'Super Admin',
+        branch: 'All Branches',
+        batchName: 'All Batches (Admin)'
+      };
+    }
+    
+    const [userPart, branchPart] = cleanUsername.split('@');
+    
+    // Format branch name (capitalize first letter)
+    const branchName = branchPart.charAt(0).toUpperCase() + branchPart.slice(1);
+    
+    if (userPart === 'admin') {
+      return {
+        role: 'Branch Admin',
+        branch: branchName,
+        batchName: 'All Batches (Admin)'
+      };
+    }
+    
+    // Check if it's a batch coordinator
+    // Find batch in batchOptions
+    const batchObj = batchOptions.find(b => b.id.toLowerCase() === userPart);
+    const batchName = batchObj ? batchObj.name : userPart.charAt(0).toUpperCase() + userPart.slice(1);
+    
+    return {
+      role: 'Batch Coordinator',
+      branch: branchName,
+      batchName: batchName
+    };
+  };
+
+  const parseClientDetails = (userAgent, deviceName) => {
+    if (!userAgent) {
+      if (deviceName) return deviceName;
+      return 'Unknown Client';
+    }
+    const ua = userAgent;
+
+    // Detect browser
+    let browser = 'Unknown Browser';
+    if (ua.includes('Firefox/')) {
+      browser = 'Firefox';
+    } else if (ua.includes('Chrome/') && !ua.includes('Chromium/') && !ua.includes('Edg/')) {
+      browser = 'Chrome';
+    } else if (ua.includes('Safari/') && !ua.includes('Chrome/')) {
+      browser = 'Safari';
+    } else if (ua.includes('Edg/')) {
+      browser = 'Edge';
+    } else if (ua.includes('PostmanRuntime')) {
+      browser = 'Postman';
+    } else {
+      const match = ua.match(/(Opera|Chrome|Safari|Firefox|MSIE|Trident)\/?\s*(\d+)/i);
+      if (match) browser = match[1];
+    }
+
+    if (deviceName) {
+      return `${deviceName} (${browser})`;
+    }
+
+    // 1. Detect platform/OS
+    let os = 'Unknown OS';
+    let deviceModel = '';
+
+    if (ua.includes('Windows NT')) {
+      os = 'Windows';
+    } else if (ua.includes('Macintosh') && !ua.includes('iPhone') && !ua.includes('iPad')) {
+      os = 'macOS';
+    } else if (ua.includes('Linux') && !ua.includes('Android')) {
+      os = 'Linux';
+    } else if (ua.includes('Android')) {
+      os = 'Android';
+      const parts = ua.match(/\(([^)]+)\)/);
+      if (parts && parts[1]) {
+        const details = parts[1].split(';');
+        let modelCandidate = '';
+        for (let i = 0; i < details.length; i++) {
+          const detail = details[i].trim();
+          if (
+            detail.toLowerCase() !== 'linux' &&
+            !detail.toLowerCase().includes('android') &&
+            !detail.match(/^[a-z]{2}$/i) &&
+            !detail.match(/^[a-z]{2}[-_][a-z]{2}$/i) &&
+            detail.toLowerCase() !== 'wv' &&
+            detail.toLowerCase() !== 'u' &&
+            detail.toLowerCase() !== 'mobile'
+          ) {
+            if (detail.length > modelCandidate.length) {
+              modelCandidate = detail;
+            }
+          }
+        }
+        if (modelCandidate) {
+          deviceModel = modelCandidate.replace(/Build\/\w+/, '').trim();
+        }
+      }
+    } else if (ua.includes('iPhone')) {
+      os = 'iPhone';
+    } else if (ua.includes('iPad')) {
+      os = 'iPad';
+    }
+
+    if (deviceModel) {
+      return `${deviceModel} (${browser})`;
+    }
+    return `${os} (${browser})`;
+  };
+
   const isAdminUser = (user) => {
     if (!user) return false;
     const usernameClean = user.toLowerCase().trim();
     if (usernameClean.includes('@')) return false;
 
     // Fallback while adminCredentials are loading async
-    const sessionUser = getCookieValue('umai_session_user');
+    const sessionUser = getSessionUser();
     if (sessionUser && sessionUser.toLowerCase().trim() === usernameClean) {
       return true;
     }
@@ -301,26 +434,36 @@ function App() {
 
   // Verify session validity on mount
   useEffect(() => {
-    const sessionToken = getCookieValue('umai_session_token');
+    const sessionToken = getSessionToken();
     if (sessionToken) {
       fetch(`${API_BASE_URL}/session/verify?token=${sessionToken}`)
         .then(res => {
-          if (!res.ok) throw new Error('Session invalid');
+          if (res.status === 401 || res.status === 403) {
+            throw new Error('Session invalid');
+          }
+          if (!res.ok) {
+            throw new Error('Transient server error');
+          }
           return res.json();
         })
         .then(data => {
-          if (data.success) {
+          if (data && data.success) {
             setLoggedInUser(data.username);
             setAppMode('admin');
+            // Ensure localStorage/cookies are in sync
+            setSession(data.username, sessionToken);
           } else {
             throw new Error('Session invalid');
           }
         })
         .catch(err => {
-          document.cookie = "umai_session_user=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-          document.cookie = "umai_session_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-          setLoggedInUser('');
-          setAppMode('login');
+          if (err.message === 'Session invalid') {
+            clearSession();
+            setLoggedInUser('');
+            setAppMode('login');
+          } else {
+            console.warn('Session verification failed on mount due to network or server error:', err);
+          }
         });
     }
   }, []);
@@ -330,28 +473,37 @@ function App() {
     if (!loggedInUser) return;
 
     const interval = setInterval(() => {
-      const sessionToken = getCookieValue('umai_session_token');
+      const sessionToken = getSessionToken();
       if (sessionToken) {
         fetch(`${API_BASE_URL}/session/verify?token=${sessionToken}`)
           .then(res => {
-            if (!res.ok) throw new Error('Session invalid');
+            if (res.status === 401 || res.status === 403) {
+              throw new Error('Session invalid');
+            }
+            if (!res.ok) {
+              throw new Error('Transient server error');
+            }
             return res.json();
           })
           .then(data => {
-            if (!data.success) {
+            if (!data || !data.success) {
               throw new Error('Session invalid');
             }
           })
           .catch(err => {
-            // Log out immediately
-            document.cookie = "umai_session_user=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-            document.cookie = "umai_session_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-            setLoggedInUser('');
-            setAppMode('login');
-            alert('Your session has been terminated by the administrator.');
+            if (err.message === 'Session invalid') {
+              // Log out immediately
+              clearSession();
+              setLoggedInUser('');
+              setAppMode('login');
+              alert('Your session has been terminated by the administrator.');
+            } else {
+              console.warn('Periodic session verification failed due to network or server error:', err);
+            }
           });
       } else {
         // No session token
+        clearSession();
         setLoggedInUser('');
         setAppMode('login');
       }
@@ -378,11 +530,26 @@ function App() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  // Prevent body scroll in admin and login modes to avoid double scrollbars
+  useEffect(() => {
+    if (appMode === 'admin' || appMode === 'login' || appMode === 'superadmin-login') {
+      document.body.classList.add('admin-body');
+      document.documentElement.classList.add('admin-html');
+    } else {
+      document.body.classList.remove('admin-body');
+      document.documentElement.classList.remove('admin-html');
+    }
+    return () => {
+      document.body.classList.remove('admin-body');
+      document.documentElement.classList.remove('admin-html');
+    };
+  }, [appMode]);
+
   // Hash-based routing to support separate page navigation
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash;
-      const hasSession = getCookieValue('umai_session_user');
+      const hasSession = getSessionUser();
 
       if (hash === '#/superadmin') {
         if (hasSession) {
@@ -1324,7 +1491,7 @@ function App() {
               )}
 
               <div className="table-responsive">
-                <table className="data-table">
+                <table className="data-table responsive-table-cards">
                   <thead>
                     <tr>
                       <th>Student</th>
@@ -1345,18 +1512,19 @@ function App() {
                       return (
                         <tr key={student.id}>
                           <td
+                            data-label="Student"
                             style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}
                             onClick={() => setSelectedStudent(student)}
                           >
                             {student.name}
                           </td>
-                          <td><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.schedule} • {student.batch}</span></td>
-                          <td>
+                          <td data-label="Batch Info"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.schedule} • {student.batch}</span></td>
+                          <td data-label="Status">
                             {status === 'present' && <span className="badge badge-green">Present</span>}
                             {status === 'absent' && <span className="badge badge-red">Absent</span>}
                             {!status && <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Pending</span>}
                           </td>
-                          <td>
+                          <td data-label="Action">
                             <div style={{ display: 'flex', gap: '8px' }}>
                               <button
                                 className={`btn-small ${status === 'present' ? 'btn-primary' : ''}`}
@@ -1585,7 +1753,7 @@ function App() {
 
           {feeStudents.length > 0 ? (
             <div className="table-responsive">
-              <table className="data-table">
+              <table className="data-table responsive-table-cards">
                 <thead>
                   <tr>
                     <th>Student</th>
@@ -1604,7 +1772,7 @@ function App() {
                     const feeDetails = calculateStudentFees(student, feeMonth);
                     return (
                       <tr key={student.id}>
-                        <td>
+                        <td data-label="Student">
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <div
                               style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}
@@ -1657,12 +1825,12 @@ function App() {
                           </div>
                         </td>
                         {isAdminUser(loggedInUser) && (
-                          <td>
+                          <td data-label="Branch">
                             <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.branch}</span>
                           </td>
                         )}
-                        <td><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.batch}</span></td>
-                        <td style={{ textAlign: 'center' }}>
+                        <td data-label="Batch Time"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.batch}</span></td>
+                        <td data-label={`Admission (₹${admissionFeeRate})`} style={{ textAlign: 'center' }}>
                           <select
                             value={student.admissionPaid ? "paid" : "pending"}
                             onChange={(e) => {
@@ -1691,7 +1859,7 @@ function App() {
                             <option value="pending" style={{ background: '#181818', color: '#FF6B6B' }}>Pending</option>
                           </select>
                         </td>
-                        <td style={{ textAlign: 'center' }}>
+                        <td data-label="Admission Coupon" style={{ textAlign: 'center' }}>
                           <input
                             type="text"
                             defaultValue={student.appliedAdmissionCoupon || ''}
@@ -1721,7 +1889,7 @@ function App() {
                             }}
                           />
                         </td>
-                        <td style={{ textAlign: 'center' }}>
+                        <td data-label={`Monthly (${formatMonthName(feeMonth)})`} style={{ textAlign: 'center' }}>
                           <select
                             value={isPaid(student) ? "paid" : "pending"}
                             onChange={(e) => {
@@ -1750,7 +1918,7 @@ function App() {
                             <option value="pending" style={{ background: '#181818', color: '#FF6B6B' }}>Pending</option>
                           </select>
                         </td>
-                        <td style={{ textAlign: 'center' }}>
+                        <td data-label="Monthly Coupon" style={{ textAlign: 'center' }}>
                           <input
                             type="text"
                             defaultValue={student.appliedCoupon || ''}
@@ -1780,7 +1948,7 @@ function App() {
                             }}
                           />
                         </td>
-                        <td style={{ textAlign: 'center' }}>
+                        <td data-label="Other Months" style={{ textAlign: 'center' }}>
                           <div style={{ display: 'inline-block' }}>
                             {feeDetails.unpaidMonths.length === 0 && feeDetails.paidMonthsList.length === 0 ? (
                               <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>No record</span>
@@ -1810,7 +1978,7 @@ function App() {
                             )}
                           </div>
                         </td>
-                        <td style={{ textAlign: 'center' }}>
+                        <td data-label="Outstanding Dues" style={{ textAlign: 'center' }}>
                           <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
                             {feeDetails.totalDue > 0 ? (
                               <>
@@ -2129,7 +2297,7 @@ function App() {
           <h3 className="panel-title">Student Tracking</h3>
         </div>
         <div className="table-responsive">
-          <table className="data-table">
+          <table className="data-table responsive-table-cards">
             <thead>
               <tr>
                 <th>Name</th>
@@ -2142,11 +2310,11 @@ function App() {
             <tbody>
               {searchedStudents.map(student => (
                 <tr key={student.id}>
-                  <td style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>{student.name}</td>
-                  <td><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
-                  <td><span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>{student.schedule}</span></td>
-                  <td><span style={{ fontWeight: 'bold', color: student.performanceScore > 80 ? '#4CAF50' : '#FF9800' }}>{student.performanceScore}/100</span></td>
-                  <td style={{ width: '30%' }}>
+                  <td data-label="Name" style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>{student.name}</td>
+                  <td data-label="Belt Level"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
+                  <td data-label="Batch"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>{student.schedule}</span></td>
+                  <td data-label="Skill Score"><span style={{ fontWeight: 'bold', color: student.performanceScore > 80 ? '#4CAF50' : '#FF9800' }}>{student.performanceScore}/100</span></td>
+                  <td data-label="Progress to Next Belt" style={{ width: '30%' }}>
                     <div className="progress-container">
                       <div className="progress-bar" style={{ width: `${student.performanceScore}%` }}></div>
                     </div>
@@ -2187,7 +2355,7 @@ function App() {
           </div>
           {unpaidStudents.length > 0 ? (
             <div className="table-responsive">
-              <table className="data-table">
+              <table className="data-table responsive-table-cards">
                 <thead>
                   <tr>
                     <th>Student Name</th>
@@ -2209,9 +2377,9 @@ function App() {
 
                     return (
                       <tr key={student.id}>
-                        <td onClick={() => setSelectedStudent(student)} style={{ cursor: 'pointer', color: '#E50914', textDecoration: 'underline' }}>{student.name}</td>
-                        <td>{student.phone}</td>
-                        <td>
+                        <td data-label="Student Name" onClick={() => setSelectedStudent(student)} style={{ cursor: 'pointer', color: '#E50914', textDecoration: 'underline' }}>{student.name}</td>
+                        <td data-label="Phone">{student.phone}</td>
+                        <td data-label="Due Amount">
                           <span className="badge badge-red">₹{fees.totalDue}</span>
                           <span style={{ fontSize: '0.75rem', display: 'block', color: 'var(--color-text-muted)', marginTop: '2px' }}>
                             {fees.admissionDue > 0 ? 'Admission' : ''}
@@ -2219,7 +2387,7 @@ function App() {
                             {fees.unpaidMonths.length > 0 ? `${fees.unpaidMonths.length}m monthly` : ''}
                           </span>
                         </td>
-                        <td>
+                        <td data-label="Action">
                           <a href={`https://wa.me/${student.phone}?text=${encodedMsg}`} target="_blank" rel="noreferrer" className="btn-small" style={{ background: '#25D366', color: 'white', border: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
                             <MessageCircle size={14} /> WhatsApp
                           </a>
@@ -2479,7 +2647,7 @@ function App() {
     };
 
     const handleForceLogoutSession = (tokenToTerminate) => {
-      const currentToken = getCookieValue('umai_session_token');
+      const currentToken = getSessionToken();
       if (tokenToTerminate === currentToken) {
         setSettingsError('You cannot terminate your own active session from here. Use the standard logout button instead.');
         return;
@@ -2894,7 +3062,7 @@ function App() {
                 <h3 className="panel-title">Admin User Accounts List</h3>
               </div>
               <div className="table-responsive">
-                <table className="data-table">
+                <table className="data-table responsive-table-cards">
                   <thead>
                     <tr>
                       <th>Username</th>
@@ -2905,8 +3073,8 @@ function App() {
                   <tbody>
                     {Object.keys(adminCredentials).map(acc => (
                       <tr key={acc}>
-                        <td style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>{acc}</td>
-                        <td>
+                        <td data-label="Username" style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>{acc}</td>
+                        <td data-label="Status">
                           {acc === 'admin' ? (
                             <span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>Default Superadmin</span>
                           ) : acc === loggedInUser ? (
@@ -2915,7 +3083,7 @@ function App() {
                             <span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>Admin</span>
                           )}
                         </td>
-                        <td>
+                        <td data-label="Action">
                           {acc.toLowerCase().trim() !== loggedInUser.toLowerCase().trim() && acc.toLowerCase().trim() !== 'admin' ? (
                             <button
                               type="button"
@@ -2957,10 +3125,11 @@ function App() {
                 </button>
               </div>
               <div className="table-responsive">
-                <table className="data-table">
+                <table className="data-table responsive-table-cards">
                   <thead>
                     <tr>
-                      <th>Username</th>
+                      <th>User / Role</th>
+                      <th>Branch</th>
                       <th>Login Time</th>
                       <th>IP Address</th>
                       <th>Client Details</th>
@@ -2970,46 +3139,36 @@ function App() {
                   <tbody>
                     {activeSessions.length === 0 ? (
                       <tr>
-                        <td colSpan="5" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '2rem' }}>
+                        <td colSpan="6" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '2rem' }}>
                           No active sessions found.
                         </td>
                       </tr>
                     ) : (
                       activeSessions.map(session => {
-                        const isCurrent = session.token === getCookieValue('umai_session_token');
+                        const isCurrent = session.token === getSessionToken();
                         const loginDateFormatted = new Date(session.loginTime).toLocaleString();
-                        let browserInfo = 'Unknown Browser';
-                        const ua = session.userAgent || '';
-                        if (ua.includes('Firefox/')) {
-                          browserInfo = 'Firefox';
-                        } else if (ua.includes('Chrome/') && !ua.includes('Chromium/') && !ua.includes('Edg/')) {
-                          browserInfo = 'Chrome';
-                        } else if (ua.includes('Safari/') && !ua.includes('Chrome/')) {
-                          browserInfo = 'Safari';
-                        } else if (ua.includes('Edg/')) {
-                          browserInfo = 'Edge';
-                        } else if (ua.includes('PostmanRuntime')) {
-                          browserInfo = 'Postman';
-                        } else {
-                          const match = ua.match(/(Opera|Chrome|Safari|Firefox|MSIE|Trident)\/?\s*(\d+)/i);
-                          if (match) browserInfo = match[1];
-                        }
+                        const clientDetails = parseClientDetails(session.userAgent, session.deviceName);
+                        const details = getSessionDetails(session.username);
 
                         return (
                           <tr key={session.token}>
-                            <td style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>
-                              {session.username}
+                            <td data-label="User / Role" style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>
+                              <div style={{ fontWeight: 600 }}>{session.username}</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--color-primary)' }}>{details.role}</div>
                             </td>
-                            <td style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                            <td data-label="Branch" style={{ color: 'var(--color-text-light)' }}>
+                              {details.branch}
+                            </td>
+                            <td data-label="Login Time" style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
                               {loginDateFormatted}
                             </td>
-                            <td style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                            <td data-label="IP Address" style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
                               {session.ipAddress || 'Unknown'}
                             </td>
-                            <td style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }} title={session.userAgent}>
-                              {browserInfo}
+                            <td data-label="Client Details" style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }} title={session.userAgent}>
+                              {clientDetails}
                             </td>
-                            <td>
+                            <td data-label="Action">
                               {isCurrent ? (
                                 <span className="badge badge-green">Current Session</span>
                               ) : (
@@ -3087,7 +3246,7 @@ function App() {
             <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No custom coupons created yet.</p>
           ) : (
             <div className="table-responsive">
-              <table className="data-table">
+              <table className="data-table responsive-table-cards">
                 <thead>
                   <tr>
                     <th>Coupon Code</th>
@@ -3101,9 +3260,9 @@ function App() {
                     const displayValue = coupon.type === 'amount' ? `₹${coupon.value}` : `${coupon.value}%`;
                     return (
                       <tr key={code}>
-                        <td style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>{code}</td>
-                        <td><span className="badge badge-green">{displayValue} Off</span></td>
-                        <td>
+                        <td data-label="Coupon Code" style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>{code}</td>
+                        <td data-label="Discount"><span className="badge badge-green">{displayValue} Off</span></td>
+                        <td data-label="Action">
                           <div style={{ display: 'flex', gap: '8px' }}>
                             <button
                               type="button"
@@ -3274,7 +3433,7 @@ function App() {
                   <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No custom branches added yet.</p>
                 ) : (
                   <div className="table-responsive">
-                    <table className="data-table">
+                    <table className="data-table responsive-table-cards">
                       <thead>
                         <tr>
                           <th>Branch Name</th>
@@ -3284,8 +3443,8 @@ function App() {
                       <tbody>
                         {customBranches.map(br => (
                           <tr key={br}>
-                            <td style={{ color: 'var(--color-text-light)' }}>{br}</td>
-                            <td>
+                            <td data-label="Branch Name" style={{ color: 'var(--color-text-light)' }}>{br}</td>
+                            <td data-label="Action">
                               <button
                                 type="button"
                                 className="btn-small"
@@ -3395,7 +3554,7 @@ function App() {
                   <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No custom batches added yet.</p>
                 ) : (
                   <div className="table-responsive">
-                    <table className="data-table">
+                    <table className="data-table responsive-table-cards">
                       <thead>
                         <tr>
                           <th>Batch Details</th>
@@ -3405,11 +3564,11 @@ function App() {
                       <tbody>
                         {customBatches.map(bt => (
                           <tr key={bt.id}>
-                            <td>
+                            <td data-label="Batch Details">
                               <div style={{ color: 'var(--color-text-light)' }}>{bt.name}</div>
                               <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Pattern: {bt.schedule}</div>
                             </td>
-                            <td>
+                            <td data-label="Action">
                               <button
                                 type="button"
                                 className="btn-small"
@@ -3476,13 +3635,25 @@ function App() {
           ) : (
             <>
               {loginError && <div style={{ color: '#E50914', marginBottom: '1rem', background: 'rgba(229, 9, 20, 0.1)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(229, 9, 20, 0.3)' }} className="animate-item-3">{loginError}</div>}
-              <form onSubmit={(e) => {
+              <form onSubmit={async (e) => {
                 e.preventDefault();
                 setIsLoggingIn(true);
                 const branchKey = selectedBranchLogin.toLowerCase();
                 const batchKey = selectedBatchLogin;
                 const enteredUser = loginData.username.toLowerCase().trim();
                 const enteredPassword = loginData.password;
+
+                let devName = '';
+                if (navigator.userAgentData) {
+                  try {
+                    const uaData = await navigator.userAgentData.getHighEntropyValues(['model']);
+                    if (uaData && uaData.model) {
+                      devName = uaData.model;
+                    }
+                  } catch (err) {
+                    console.error('Failed to get high entropy device data:', err);
+                  }
+                }
 
                 fetch(`${API_BASE_URL}/login`, {
                   method: 'POST',
@@ -3492,7 +3663,8 @@ function App() {
                     username: enteredUser,
                     password: enteredPassword,
                     branch: branchKey,
-                    batch: batchKey
+                    batch: batchKey,
+                    deviceName: devName
                   })
                 })
                   .then(res => {
@@ -3508,8 +3680,7 @@ function App() {
                     if (data.success) {
                       setLoginError('');
                       setLoggedInUser(data.username);
-                      document.cookie = `umai_session_user=${data.username}; path=/;`;
-                      document.cookie = `umai_session_token=${data.token}; path=/;`;
+                      setSession(data.username, data.token);
                       const matchingBranch = branches.find(b => b.toLowerCase() === branchKey);
                       setBranchFilter(matchingBranch || 'All');
                       setLoginData({ username: '', password: '' });
@@ -3907,11 +4078,23 @@ function App() {
         ) : (
           <>
             {loginError && <div style={{ color: '#E50914', marginBottom: '1rem', background: 'rgba(229, 9, 20, 0.1)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(229, 9, 20, 0.3)' }} className="animate-item-3">{loginError}</div>}
-            <form onSubmit={(e) => {
+            <form onSubmit={async (e) => {
               e.preventDefault();
               setIsLoggingIn(true);
               const usernameLower = loginData.username.toLowerCase().trim();
               const enteredPassword = loginData.password;
+
+              let devName = '';
+              if (navigator.userAgentData) {
+                try {
+                  const uaData = await navigator.userAgentData.getHighEntropyValues(['model']);
+                  if (uaData && uaData.model) {
+                    devName = uaData.model;
+                  }
+                } catch (err) {
+                  console.error('Failed to get high entropy device data:', err);
+                }
+              }
 
               fetch(`${API_BASE_URL}/login`, {
                 method: 'POST',
@@ -3919,7 +4102,8 @@ function App() {
                 body: JSON.stringify({
                   loginType: 'superadmin',
                   username: usernameLower,
-                  password: enteredPassword
+                  password: enteredPassword,
+                  deviceName: devName
                 })
               })
                 .then(res => {
@@ -3935,8 +4119,7 @@ function App() {
                   if (data.success) {
                     setLoginError('');
                     setLoggedInUser(data.username);
-                    document.cookie = `umai_session_user=${data.username}; path=/;`;
-                    document.cookie = `umai_session_token=${data.token}; path=/;`;
+                    setSession(data.username, data.token);
                     setBranchFilter('All');
                     setLoginData({ username: '', password: '' });
                     setAppMode('admin');
@@ -4043,7 +4226,7 @@ function App() {
           )}
           <a className="nav-item" onClick={() => {
             const isAdm = isAdminUser(loggedInUser);
-            const token = getCookieValue('umai_session_token');
+            const token = getSessionToken();
             if (token) {
               fetch(`${API_BASE_URL}/logout`, {
                 method: 'POST',
@@ -4051,8 +4234,7 @@ function App() {
                 body: JSON.stringify({ token })
               }).catch(err => console.error(err));
             }
-            document.cookie = "umai_session_user=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-            document.cookie = "umai_session_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+            clearSession();
             setLoggedInUser('');
             if (isAdm) {
               setAppMode('superadmin-login');
@@ -4186,7 +4368,7 @@ function App() {
                 </div>
                 {searchedStudents.length > 0 ? (
                   <div className="table-responsive">
-                    <table className="data-table">
+                    <table className="data-table responsive-table-cards">
                       <thead>
                         <tr>
                           <th>Name</th>
@@ -4199,7 +4381,7 @@ function App() {
                       <tbody>
                         {searchedStudents.map(student => (
                           <tr key={student.id}>
-                            <td>
+                            <td data-label="Name">
                               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={() => setSelectedStudent(student)}>
                                 {student.photo ? (
                                   <img src={student.photo} alt="" style={{ width: '30px', height: '40px', borderRadius: '4px', objectFit: 'cover' }} />
@@ -4222,13 +4404,13 @@ function App() {
                                 )}
                               </div>
                             </td>
-                            <td>
+                            <td data-label="Batch Schedule">
                               <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', marginRight: '8px' }}>{student.branch}</span>
                               <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.schedule} • {student.batch}</span>
                             </td>
-                            <td><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
-                            <td style={{ color: 'var(--color-text-muted)' }}>{student.phone}</td>
-                            <td>
+                            <td data-label="Belt Level"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
+                            <td data-label="Phone" style={{ color: 'var(--color-text-muted)' }}>{student.phone}</td>
+                            <td data-label="Actions">
                               <div style={{ display: 'flex', gap: '8px' }}>
                                 <a href={`tel:${student.phone}`} className="btn-icon" style={{ color: '#2196F3' }} title="Call Student">
                                   <Phone size={18} />

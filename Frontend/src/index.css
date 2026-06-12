@@ -20,6 +20,11 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+html.admin-html, body.admin-body {
+  height: 100vh;
+  overflow: hidden;
+}
+
 /* Glassmorphism Utilities */
 .glass-panel {
   background: var(--color-surface-dark);
@@ -1178,6 +1183,64 @@ body {
     padding: 1.5rem; 
     max-width: 90%; 
   }
+
+  /* Responsive Table to Cards conversion on mobile */
+  .responsive-table-cards, 
+  .responsive-table-cards thead, 
+  .responsive-table-cards tbody, 
+  .responsive-table-cards th, 
+  .responsive-table-cards td, 
+  .responsive-table-cards tr { 
+    display: block !important; 
+  }
+  
+  .responsive-table-cards thead tr { 
+    position: absolute;
+    top: -9999px;
+    left: -9999px;
+  }
+  
+  .responsive-table-cards tr { 
+    border: 1px solid var(--glass-border) !important;
+    border-radius: 12px;
+    margin-bottom: 1rem;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 0.75rem;
+    box-sizing: border-box;
+  }
+  
+  .responsive-table-cards td { 
+    border: none !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important; 
+    position: relative;
+    padding-left: 50% !important; 
+    text-align: right !important;
+    white-space: normal !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    min-height: 2.2rem;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-end !important;
+    justify-content: center !important;
+    box-sizing: border-box;
+  }
+  
+  .responsive-table-cards td:last-child {
+    border-bottom: none !important;
+  }
+  
+  .responsive-table-cards td:before { 
+    position: absolute;
+    left: 10px;
+    width: 45%; 
+    padding-right: 10px; 
+    white-space: nowrap;
+    text-align: left;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    content: attr(data-label);
+  }
 }
 
 @media (max-width: 480px) {
@@ -1237,6 +1300,12 @@ body {
   width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+
+.table-responsive::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
 }
 
 .data-table td {

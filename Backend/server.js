@@ -316,7 +316,7 @@ app.post('/api/attendance', async (req, res) => {
 // 7. Login validation
 app.post('/api/login', async (req, res) => {
   try {
-    const { loginType, username, password, branch, batch } = req.body;
+    const { loginType, username, password, branch, batch, deviceName } = req.body;
     
     const creds = await Credential.findOne({ configType: 'main' });
     if (!creds) {
@@ -336,7 +336,8 @@ app.post('/api/login', async (req, res) => {
           username: enteredUser,
           token,
           ipAddress: req.ip,
-          userAgent: req.headers['user-agent']
+          userAgent: req.headers['user-agent'],
+          deviceName
         }).save();
         return res.json({ success: true, username: enteredUser, token });
       }
@@ -396,7 +397,8 @@ app.post('/api/login', async (req, res) => {
           username: fullUsername,
           token,
           ipAddress: req.ip,
-          userAgent: req.headers['user-agent']
+          userAgent: req.headers['user-agent'],
+          deviceName
         }).save();
         return res.json({ success: true, username: fullUsername, token });
       }
