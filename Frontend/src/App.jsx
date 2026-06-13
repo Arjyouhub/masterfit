@@ -631,6 +631,10 @@ function App() {
   const [attendanceBatchFilter, setAttendanceBatchFilter] = useState('All');
   const [attendanceScheduleFilter, setAttendanceScheduleFilter] = useState('All');
 
+  // Fee Filter State
+  const [feeBatchFilter, setFeeBatchFilter] = useState('All');
+  const [feeScheduleFilter, setFeeScheduleFilter] = useState('All');
+
   // Roster Filter State
   const [branchFilter, setBranchFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('Active');
@@ -1585,11 +1589,18 @@ function App() {
   const renderFees = () => {
     const isPaid = (student) => student.paidMonths && student.paidMonths[feeMonth];
 
-    const feeStudents = searchedStudents.filter(s => (s.status || 'Active') !== 'Inactive');
-    const totalUnpaid = feeStudents.filter(s => !isPaid(s)).length;
-    const totalPaid = feeStudents.filter(s => isPaid(s)).length;
+    const baseFeeStudents = searchedStudents.filter(s => (s.status || 'Active') !== 'Inactive');
 
-    const monthlyCollected = feeStudents
+    const filteredFeeStudents = baseFeeStudents.filter(s => {
+      const matchBatch = feeBatchFilter === 'All' || s.batch === feeBatchFilter;
+      const matchSchedule = feeScheduleFilter === 'All' || s.schedule === feeScheduleFilter;
+      return matchBatch && matchSchedule;
+    });
+
+    const totalUnpaid = filteredFeeStudents.filter(s => !isPaid(s)).length;
+    const totalPaid = filteredFeeStudents.filter(s => isPaid(s)).length;
+
+    const monthlyCollected = filteredFeeStudents
       .filter(s => isPaid(s))
       .reduce((sum, s) => {
         const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null
@@ -1599,7 +1610,7 @@ function App() {
         const finalRate = Math.max(0, rateToUse - discountAmount);
         return sum + finalRate;
       }, 0);
-    const admissionCollected = feeStudents
+    const admissionCollected = filteredFeeStudents
       .filter(s => s.admissionPaid === feeMonth)
       .reduce((sum, s) => {
         const rateAdmission = s.customAdmissionRate !== undefined && s.customAdmissionRate !== null
@@ -1730,6 +1741,30 @@ function App() {
             </div>
           </div>
 
+          <div className="filter-row" style={{ marginBottom: (!loggedInUser || !loggedInUser.startsWith('batch')) ? '0.75rem' : '1.5rem', marginTop: '1.25rem', paddingBottom: '0.25rem' }}>
+            <span style={{ color: 'var(--color-text-muted)', width: '80px', fontSize: '0.85rem' }}>Time:</span>
+            <button className={`btn-small ${feeBatchFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('All')}>All</button>
+            <button className={`btn-small ${feeBatchFilter === 'Morning' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Morning')}>Morning</button>
+            <button className={`btn-small ${feeBatchFilter === 'Evening' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Evening')}>Evening</button>
+            <button className={`btn-small ${feeBatchFilter === 'Night' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Night')}>Night</button>
+          </div>
+
+          {(!loggedInUser || !loggedInUser.startsWith('batch')) && (
+            <div className="filter-row" style={{ marginBottom: '1.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+              <span style={{ color: 'var(--color-text-muted)', width: '80px', fontSize: '0.85rem' }}>Batch:</span>
+              <button className={`btn-small ${feeScheduleFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeScheduleFilter('All')}>All Batches</button>
+              {batchOptions.map(opt => (
+                <button
+                  key={opt.id}
+                  className={`btn-small ${feeScheduleFilter === opt.schedule ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setFeeScheduleFilter(opt.schedule)}
+                >
+                  {opt.name}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="stats-grid" style={{ marginBottom: '1.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
             <div className="stat-card" style={{ borderLeft: '4px solid #E50914', padding: '1.5rem' }}>
               <div className="stat-details">
@@ -1751,7 +1786,7 @@ function App() {
             </div>
           </div>
 
-          {feeStudents.length > 0 ? (
+          {filteredFeeStudents.length > 0 ? (
             <div className="table-responsive">
               <table className="data-table responsive-table-cards">
                 <thead>
@@ -1768,7 +1803,7 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {feeStudents.map(student => {
+                  {filteredFeeStudents.map(student => {
                     const feeDetails = calculateStudentFees(student, feeMonth);
                     return (
                       <tr key={student.id}>
