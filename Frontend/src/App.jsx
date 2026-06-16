@@ -95,6 +95,8 @@ function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [coupons, setCoupons] = useState({});
   const [newCouponForm, setNewCouponForm] = useState({ code: '', type: 'percentage', value: '' });
+  const [rawCredentials, setRawCredentials] = useState(null);
+  const [loadingRawCreds, setLoadingRawCreds] = useState(false);
 
   const [loggedInUser, setLoggedInUser] = useState(() => {
     return getSessionUser() || '';
@@ -536,6 +538,23 @@ function App() {
         .then(res => res.json())
         .then(data => setActiveSessions(data || []))
         .catch(err => console.error('Error fetching sessions:', err));
+    }
+  }, [currentView, loggedInUser]);
+
+  // Fetch raw credentials when credentials-list page is loaded
+  useEffect(() => {
+    if (currentView === 'credentials-list' && isAdminUser(loggedInUser)) {
+      setLoadingRawCreds(true);
+      fetch(`${API_BASE_URL}/credentials/raw`)
+        .then(res => res.json())
+        .then(data => {
+          setRawCredentials(data);
+          setLoadingRawCreds(false);
+        })
+        .catch(err => {
+          console.error('Error fetching raw credentials:', err);
+          setLoadingRawCreds(false);
+        });
     }
   }, [currentView, loggedInUser]);
 
@@ -2499,6 +2518,181 @@ function App() {
     );
   };
 
+  const renderCredentialsList = () => {
+    const isSuper = isAdminUser(loggedInUser);
+
+    if (!isSuper) {
+      return (
+        <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
+          <h3 className="panel-title" style={{ color: '#E50914' }}>Access Denied</h3>
+          <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Only administrators can view credentials.</p>
+        </div>
+      );
+    }
+
+    if (loadingRawCreds) {
+      return (
+        <div className="panel" style={{ padding: '3rem', textAlign: 'center' }}>
+          <div className="loading-spinner" style={{ margin: '0 auto 1rem' }}></div>
+          <p style={{ color: 'var(--color-text-muted)' }}>Loading credentials database...</p>
+        </div>
+      );
+    }
+
+    if (!rawCredentials) {
+      return (
+        <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
+          <p style={{ color: 'var(--color-text-muted)' }}>No credentials data found or failed to load.</p>
+        </div>
+      );
+    }
+
+    const { adminCredentials = {}, branchCredentials = {}, batchCredentials = {} } = rawCredentials;
+
+    return (
+      <div className="credentials-view" style={{ maxWidth: '1000px', margin: '0 auto' }}>
+        
+        {/* Notice alert */}
+        <div className="panel" style={{ marginBottom: '2rem', borderLeft: '4px solid var(--color-primary)', background: 'rgba(229, 9, 20, 0.05)' }}>
+          <h4 style={{ margin: 0, color: 'var(--color-text-light)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Shield size={18} color="var(--color-primary)" />
+            Security notice: Encrypted Credentials View
+          </h4>
+          <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', marginTop: '0.5rem', lineHeight: '1.4' }}>
+            Passwords in the system are securely one-way encrypted using PBKDF2 with unique salts to protect user privacy.
+            Hashed passwords are displayed in their raw storage format below. Legacy or plain-text passwords will appear in clear text if any exist.
+            To modify any username or password, please go to the <a href="#" style={{ color: 'var(--color-primary)', textDecoration: 'underline' }} onClick={(e) => { e.preventDefault(); setCurrentView('settings'); }}>Account Settings</a> page.
+          </p>
+        </div>
+
+        {/* Superadmin Accounts Panel */}
+        <div className="panel" style={{ marginBottom: '2rem' }}>
+          <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+            <h3 className="panel-title">Super Admin Accounts</h3>
+          </div>
+          <div className="table-responsive">
+            <table className="data-table responsive-table-cards">
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Role</th>
+                  <th>Password Hash / Salt String</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(adminCredentials).map(([username, hash]) => (
+                  <tr key={username}>
+                    <td data-label="Username" style={{ fontWeight: 600, color: 'white' }}>{username}</td>
+                    <td data-label="Role"><span className="badge badge-green">Superadmin</span></td>
+                    <td data-label="Password Hash" style={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-all', color: 'var(--color-text-muted)' }}>
+                      {hash}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Branch Coordinator Accounts Panel */}
+        <div className="panel" style={{ marginBottom: '2rem' }}>
+          <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+            <h3 className="panel-title">Branch Coordinator Accounts</h3>
+          </div>
+          <div className="table-responsive">
+            <table className="data-table responsive-table-cards">
+              <thead>
+                <tr>
+                  <th>Branch Name</th>
+                  <th>Username</th>
+                  <th>Role</th>
+                  <th>Password Hash / Salt String</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(branchCredentials).length === 0 ? (
+                  <tr>
+                    <td colSpan="4" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No branch coordinators configured.</td>
+                  </tr>
+                ) : (
+                  Object.entries(branchCredentials).map(([branchKey, info]) => (
+                    <tr key={branchKey}>
+                      <td data-label="Branch Name" style={{ fontWeight: 600, color: 'white', textTransform: 'capitalize' }}>{branchKey}</td>
+                      <td data-label="Username" style={{ color: 'var(--color-text-light)' }}>{info.username}</td>
+                      <td data-label="Role"><span className="badge" style={{ background: 'rgba(52, 152, 219, 0.15)', color: '#3498db', border: '1px solid rgba(52, 152, 219, 0.3)' }}>Branch Admin</span></td>
+                      <td data-label="Password Hash" style={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-all', color: 'var(--color-text-muted)' }}>
+                        {info.password}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Batch Coordinator Accounts Panel */}
+        <div className="panel" style={{ marginBottom: '2rem' }}>
+          <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+            <h3 className="panel-title">Batch Coordinator / Coach Accounts</h3>
+          </div>
+          <div className="table-responsive">
+            <table className="data-table responsive-table-cards">
+              <thead>
+                <tr>
+                  <th>Batch Identification</th>
+                  <th>Username</th>
+                  <th>Role</th>
+                  <th>Password Hash / Salt String</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(batchCredentials).length === 0 ? (
+                  <tr>
+                    <td colSpan="4" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No batch coordinators configured.</td>
+                  </tr>
+                ) : (
+                  Object.entries(batchCredentials).map(([batchKey, info]) => {
+                    const parts = batchKey.split('_');
+                    const branchName = parts[0];
+                    const batchId = parts[1] || '';
+                    
+                    // Try to resolve human-readable batch name
+                    let batchNameText = batchId.toUpperCase();
+                    if (batchId.startsWith('batch')) {
+                      const batchNumStr = batchId.replace('batch', '');
+                      if (batchNumStr && !isNaN(batchNumStr)) {
+                        batchNameText = `Batch ${batchNumStr}`;
+                      }
+                    }
+                    const customBatchObj = customBatches.find(cb => cb.id === batchId || cb.id === `batch_${batchId}`);
+                    if (customBatchObj) {
+                      batchNameText = customBatchObj.name;
+                    }
+
+                    return (
+                      <tr key={batchKey}>
+                        <td data-label="Batch" style={{ fontWeight: 600, color: 'white' }}>
+                          <span style={{ textTransform: 'capitalize' }}>{branchName}</span> - {batchNameText}
+                        </td>
+                        <td data-label="Username" style={{ color: 'var(--color-text-light)' }}>{info.username}</td>
+                        <td data-label="Role"><span className="badge" style={{ background: 'rgba(155, 89, 182, 0.15)', color: '#9b59b6', border: '1px solid rgba(155, 89, 182, 0.3)' }}>Coach / Trainer</span></td>
+                        <td data-label="Password Hash" style={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-all', color: 'var(--color-text-muted)' }}>
+                          {info.password}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    );
+  };
+
   const renderSettings = () => {
     const isSuper = isAdminUser(loggedInUser);
     const isBranchAdm = isBranchAdmin(loggedInUser);
@@ -4381,6 +4575,11 @@ function App() {
             <TrendingUp className="nav-icon" /> <span>Performance</span>
           </a>
           <div style={{ flex: 1 }}></div>
+          {isAdminUser(loggedInUser) && (
+            <a className={`nav-item ${currentView === 'credentials-list' ? 'active' : ''}`} onClick={() => setCurrentView('credentials-list')}>
+              <Lock className="nav-icon" /> <span>All Credentials</span>
+            </a>
+          )}
           {hasSettingsAccess(loggedInUser) && (
             <a className={`nav-item ${currentView === 'settings' ? 'active' : ''}`} onClick={() => setCurrentView('settings')}>
               <Settings className="nav-icon" /> <span>Settings</span>
@@ -4423,6 +4622,7 @@ function App() {
                 {currentView === 'reminders' && 'Alerts & Reminders'}
                 {currentView === 'performance' && 'Student Performance'}
                 {currentView === 'settings' && 'Account Settings'}
+                {currentView === 'credentials-list' && 'System Accounts & Credentials'}
               </h1>
             </div>
 
@@ -4603,6 +4803,7 @@ function App() {
           {currentView === 'reminders' && renderReminders()}
           {currentView === 'performance' && renderPerformance()}
           {currentView === 'settings' && renderSettings()}
+          {currentView === 'credentials-list' && renderCredentialsList()}
         </div>
       </main>
 

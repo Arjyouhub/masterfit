@@ -722,6 +722,19 @@ app.post('/api/superadmin/forgot-password/reset', async (req, res) => {
   }
 });
 
+// Get raw credentials (unmasked database values)
+app.get('/api/credentials/raw', async (req, res) => {
+  try {
+    const creds = await Credential.findOne({ configType: 'main' }).lean();
+    if (!creds) {
+      return res.json({ configType: 'main', adminCredentials: {}, branchCredentials: {}, batchCredentials: {} });
+    }
+    res.json(creds);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 8. Get credentials (passwords masked for security)
 app.get('/api/credentials', async (req, res) => {
   try {
