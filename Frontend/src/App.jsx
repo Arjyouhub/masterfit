@@ -2534,7 +2534,7 @@ function App() {
       return (
         <div className="panel" style={{ padding: '3rem', textAlign: 'center' }}>
           <div className="loading-spinner" style={{ margin: '0 auto 1rem' }}></div>
-          <p style={{ color: 'var(--color-text-muted)' }}>Loading credentials database...</p>
+          <p style={{ color: 'var(--color-text-muted)' }}>Loading system accounts...</p>
         </div>
       );
     }
@@ -2542,26 +2542,31 @@ function App() {
     if (!rawCredentials) {
       return (
         <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
-          <p style={{ color: 'var(--color-text-muted)' }}>No credentials data found or failed to load.</p>
+          <p style={{ color: 'var(--color-text-muted)' }}>No accounts data found or failed to load.</p>
         </div>
       );
     }
 
     const { adminCredentials = {}, branchCredentials = {}, batchCredentials = {} } = rawCredentials;
 
+    const isUserLoggedIn = (username) => {
+      if (!username) return false;
+      const nameClean = username.toLowerCase().trim();
+      return activeSessions.some(session => session.username.toLowerCase().trim() === nameClean);
+    };
+
     return (
-      <div className="credentials-view" style={{ maxWidth: '1000px', margin: '0 auto' }}>
+      <div className="credentials-view" style={{ maxWidth: '900px', margin: '0 auto' }}>
         
         {/* Notice alert */}
         <div className="panel" style={{ marginBottom: '2rem', borderLeft: '4px solid var(--color-primary)', background: 'rgba(229, 9, 20, 0.05)' }}>
           <h4 style={{ margin: 0, color: 'var(--color-text-light)', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Shield size={18} color="var(--color-primary)" />
-            Security notice: Encrypted Credentials View
+            System Accounts Monitor
           </h4>
           <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', marginTop: '0.5rem', lineHeight: '1.4' }}>
-            Passwords in the system are securely one-way encrypted using PBKDF2 with unique salts to protect user privacy.
-            Hashed passwords are displayed in their raw storage format below. Legacy or plain-text passwords will appear in clear text if any exist.
-            To modify any username or password, please go to the <a href="#" style={{ color: 'var(--color-primary)', textDecoration: 'underline' }} onClick={(e) => { e.preventDefault(); setCurrentView('settings'); }}>Account Settings</a> page.
+            This page shows all configured system accounts, their associated roles, and whether they are currently logged in (active session).
+            To edit credentials, please navigate to the <a href="#" style={{ color: 'var(--color-primary)', textDecoration: 'underline' }} onClick={(e) => { e.preventDefault(); setCurrentView('settings'); }}>Account Settings</a> page.
           </p>
         </div>
 
@@ -2575,17 +2580,25 @@ function App() {
               <thead>
                 <tr>
                   <th>Username</th>
-                  <th>Role</th>
-                  <th>Password Hash / Salt String</th>
+                  <th>Position / Role</th>
+                  <th>Session Status</th>
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(adminCredentials).map(([username, hash]) => (
+                {Object.keys(adminCredentials).map((username) => (
                   <tr key={username}>
                     <td data-label="Username" style={{ fontWeight: 600, color: 'white' }}>{username}</td>
-                    <td data-label="Role"><span className="badge badge-green">Superadmin</span></td>
-                    <td data-label="Password Hash" style={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-all', color: 'var(--color-text-muted)' }}>
-                      {hash}
+                    <td data-label="Position / Role"><span className="badge badge-green">Superadmin</span></td>
+                    <td data-label="Session Status">
+                      {isUserLoggedIn(username) ? (
+                        <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          🟢 Logged In
+                        </span>
+                      ) : (
+                        <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          ⚪ Offline
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -2605,8 +2618,8 @@ function App() {
                 <tr>
                   <th>Branch Name</th>
                   <th>Username</th>
-                  <th>Role</th>
-                  <th>Password Hash / Salt String</th>
+                  <th>Position / Role</th>
+                  <th>Session Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -2619,9 +2632,17 @@ function App() {
                     <tr key={branchKey}>
                       <td data-label="Branch Name" style={{ fontWeight: 600, color: 'white', textTransform: 'capitalize' }}>{branchKey}</td>
                       <td data-label="Username" style={{ color: 'var(--color-text-light)' }}>{info.username}</td>
-                      <td data-label="Role"><span className="badge" style={{ background: 'rgba(52, 152, 219, 0.15)', color: '#3498db', border: '1px solid rgba(52, 152, 219, 0.3)' }}>Branch Admin</span></td>
-                      <td data-label="Password Hash" style={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-all', color: 'var(--color-text-muted)' }}>
-                        {info.password}
+                      <td data-label="Position / Role"><span className="badge" style={{ background: 'rgba(52, 152, 219, 0.15)', color: '#3498db', border: '1px solid rgba(52, 152, 219, 0.3)' }}>Branch Admin</span></td>
+                      <td data-label="Session Status">
+                        {isUserLoggedIn(info.username) ? (
+                          <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            🟢 Logged In
+                          </span>
+                        ) : (
+                          <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            ⚪ Offline
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -2640,10 +2661,10 @@ function App() {
             <table className="data-table responsive-table-cards">
               <thead>
                 <tr>
-                  <th>Batch Identification</th>
+                  <th>Batch Name</th>
                   <th>Username</th>
-                  <th>Role</th>
-                  <th>Password Hash / Salt String</th>
+                  <th>Position / Role</th>
+                  <th>Session Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -2657,7 +2678,6 @@ function App() {
                     const branchName = parts[0];
                     const batchId = parts[1] || '';
                     
-                    // Try to resolve human-readable batch name
                     let batchNameText = batchId.toUpperCase();
                     if (batchId.startsWith('batch')) {
                       const batchNumStr = batchId.replace('batch', '');
@@ -2676,9 +2696,17 @@ function App() {
                           <span style={{ textTransform: 'capitalize' }}>{branchName}</span> - {batchNameText}
                         </td>
                         <td data-label="Username" style={{ color: 'var(--color-text-light)' }}>{info.username}</td>
-                        <td data-label="Role"><span className="badge" style={{ background: 'rgba(155, 89, 182, 0.15)', color: '#9b59b6', border: '1px solid rgba(155, 89, 182, 0.3)' }}>Coach / Trainer</span></td>
-                        <td data-label="Password Hash" style={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-all', color: 'var(--color-text-muted)' }}>
-                          {info.password}
+                        <td data-label="Position / Role"><span className="badge" style={{ background: 'rgba(155, 89, 182, 0.15)', color: '#9b59b6', border: '1px solid rgba(155, 89, 182, 0.3)' }}>Coach / Trainer</span></td>
+                        <td data-label="Session Status">
+                          {isUserLoggedIn(info.username) ? (
+                            <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              🟢 Logged In
+                            </span>
+                          ) : (
+                            <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              ⚪ Offline
+                            </span>
+                          )}
                         </td>
                       </tr>
                     );
@@ -3951,7 +3979,7 @@ function App() {
   // --- Admin Login View ---
   const renderLogin = () => {
     return (
-      <div className="login-layout" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', overflowY: 'auto', padding: '2rem 1rem' }}>
+      <div className="login-layout" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', overflowY: 'auto', padding: '1rem 0.5rem' }}>
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(5,5,5,0.85)' }}></div>
         <div className="login-grid-overlay"></div>
         <div className="login-bg-glows">
@@ -3959,11 +3987,11 @@ function App() {
           <div className="login-glow-2"></div>
           <div className="login-glow-3"></div>
         </div>
-        <div className={`glass-panel login-card-animated ${isLoggingIn ? 'submitting' : ''}`} style={{ zIndex: 1, padding: '3rem', width: '100%', maxWidth: '400px', textAlign: 'center' }}>
-          <h2 className="brand animate-item-1" style={{ justifyContent: 'center', marginBottom: '0.5rem' }}>
+        <div className={`glass-panel login-card-animated ${isLoggingIn ? 'submitting' : ''}`} style={{ zIndex: 1, padding: '1.5rem 2rem', width: '100%', maxWidth: '400px', textAlign: 'center' }}>
+          <h2 className="brand animate-item-1" style={{ justifyContent: 'center', marginBottom: '0.25rem', fontSize: '1.8rem' }}>
             <span className="brand-accent">MASTER</span> FIT Login
           </h2>
-          <p className="animate-item-2" style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', marginBottom: '2rem', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase' }}>Branch & Batch Portal</p>
+          <p className="animate-item-2" style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem', marginBottom: '1rem', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase' }}>Branch & Batch Portal</p>
           {isForgotPassword ? (
             <>
               <p className="animate-item-3" style={{ color: 'var(--color-text-muted)', marginBottom: '1.5rem' }}>If you forgot your password, please contact the administrator via WhatsApp.</p>
@@ -4051,28 +4079,28 @@ function App() {
                     setLoginError(isNetworkError ? 'Connection error: The database server may be spinning up. Please wait 1 minute and try again.' : err.message);
                   });
               }}>
-                <div className="form-group animate-item-3" style={{ textAlign: 'left' }}>
-                  <label>Select Branch</label>
+                <div className="form-group animate-item-3" style={{ textAlign: 'left', marginBottom: '0.85rem' }}>
+                  <label style={{ marginBottom: '0.25rem', fontSize: '0.85rem' }}>Select Branch</label>
                   <select
                     className="form-control form-control-animated"
                     value={selectedBranchLogin}
                     disabled={isLoggingIn}
                     onChange={(e) => setSelectedBranchLogin(e.target.value)}
-                    style={{ background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                    style={{ background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', height: '38px', padding: '0.5rem' }}
                   >
                     {branches.map(b => (
                       <option key={b} value={b}>{b}</option>
                     ))}
                   </select>
                 </div>
-                <div className="form-group animate-item-4" style={{ textAlign: 'left' }}>
-                  <label>Select Batch</label>
+                <div className="form-group animate-item-4" style={{ textAlign: 'left', marginBottom: '0.85rem' }}>
+                  <label style={{ marginBottom: '0.25rem', fontSize: '0.85rem' }}>Select Batch</label>
                   <select
                     className="form-control form-control-animated"
                     value={selectedBatchLogin}
                     disabled={isLoggingIn}
                     onChange={(e) => setSelectedBatchLogin(e.target.value)}
-                    style={{ background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                    style={{ background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', height: '38px', padding: '0.5rem' }}
                   >
                     <option value="admin">Branch Admin (All Batches)</option>
                     {batchOptions.map(opt => (
@@ -4080,18 +4108,18 @@ function App() {
                     ))}
                   </select>
                 </div>
-                <div className="form-group animate-item-5" style={{ textAlign: 'left' }}>
-                  <label>Username</label>
-                  <input type="text" className="form-control form-control-animated" placeholder="Enter username" value={loginData.username} onChange={(e) => setLoginData({ ...loginData, username: e.target.value })} disabled={isLoggingIn} required />
+                <div className="form-group animate-item-5" style={{ textAlign: 'left', marginBottom: '0.85rem' }}>
+                  <label style={{ marginBottom: '0.25rem', fontSize: '0.85rem' }}>Username</label>
+                  <input type="text" className="form-control form-control-animated" placeholder="Enter username" value={loginData.username} onChange={(e) => setLoginData({ ...loginData, username: e.target.value })} disabled={isLoggingIn} required style={{ height: '38px' }} />
                 </div>
-                <div className="form-group animate-item-6" style={{ textAlign: 'left' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <label style={{ margin: 0 }}>Password</label>
-                    <a href="#" style={{ fontSize: '0.85rem', color: 'var(--color-primary)', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); if (!isLoggingIn) { setIsForgotPassword(true); setLoginError(''); } }}>Forgot Password?</a>
+                <div className="form-group animate-item-6" style={{ textAlign: 'left', marginBottom: '0.85rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                    <label style={{ margin: 0, fontSize: '0.85rem' }}>Password</label>
+                    <a href="#" style={{ fontSize: '0.8rem', color: 'var(--color-primary)', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); if (!isLoggingIn) { setIsForgotPassword(true); setLoginError(''); } }}>Forgot Password?</a>
                   </div>
-                  <input type="password" className="form-control form-control-animated" placeholder="Enter password" value={loginData.password} onChange={(e) => setLoginData({ ...loginData, password: e.target.value })} disabled={isLoggingIn} required />
+                  <input type="password" className="form-control form-control-animated" placeholder="Enter password" value={loginData.password} onChange={(e) => setLoginData({ ...loginData, password: e.target.value })} disabled={isLoggingIn} required style={{ height: '38px' }} />
                 </div>
-                <button type="submit" className="btn-primary animate-item-7" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }} disabled={isLoggingIn}>
+                <button type="submit" className="btn-primary animate-item-7" style={{ width: '100%', justifyContent: 'center', marginTop: '0.75rem', height: '38px' }} disabled={isLoggingIn}>
                   {isLoggingIn ? (
                     <div className="btn-loading-spinner">
                       <span className="spinner-dots">
@@ -4106,17 +4134,17 @@ function App() {
                   )}
                 </button>
               </form>
-              <button type="button" className="btn-secondary animate-item-7" style={{ width: '100%', justifyContent: 'center', marginTop: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '8px' }} disabled={isLoggingIn} onClick={() => {
+              <button type="button" className="btn-secondary animate-item-7" style={{ width: '100%', justifyContent: 'center', marginTop: '0.5rem', display: 'inline-flex', alignItems: 'center', gap: '8px', height: '38px' }} disabled={isLoggingIn} onClick={() => {
                 setNewStudent({ name: '', age: '', phone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: selectedBranchLogin, photo: null });
                 setIsAddModalOpen(true);
               }}>
                 <UserPlus size={16} /> Enroll New Student
               </button>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1.5rem' }} className="animate-item-7">
-                <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('superadmin-login'); }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '1rem' }} className="animate-item-7">
+                <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', padding: '4px 0', fontSize: '0.9rem' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('superadmin-login'); }}>
                   Switch to Admin Login
                 </button>
-                <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('website'); }}>
+                <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', padding: '4px 0', fontSize: '0.9rem' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('website'); }}>
                   Back to Website
                 </button>
               </div>
@@ -4129,7 +4157,7 @@ function App() {
 
   // --- Admin Login View ---
   const renderSuperAdminLogin = () => (
-    <div className="login-layout" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', overflowY: 'auto', padding: '2rem 1rem' }}>
+    <div className="login-layout" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', overflowY: 'auto', padding: '1rem 0.5rem' }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(5,5,5,0.85)' }}></div>
       <div className="login-grid-overlay"></div>
       <div className="login-bg-glows">
@@ -4137,11 +4165,11 @@ function App() {
         <div className="login-glow-2"></div>
         <div className="login-glow-3"></div>
       </div>
-      <div className={`glass-panel login-card-animated ${isLoggingIn ? 'submitting' : ''}`} style={{ zIndex: 1, padding: '3rem', width: '100%', maxWidth: '400px', textAlign: 'center' }}>
-        <h2 className="brand animate-item-1" style={{ justifyContent: 'center', marginBottom: '0.5rem' }}>
+      <div className={`glass-panel login-card-animated ${isLoggingIn ? 'submitting' : ''}`} style={{ zIndex: 1, padding: '1.5rem 2rem', width: '100%', maxWidth: '400px', textAlign: 'center' }}>
+        <h2 className="brand animate-item-1" style={{ justifyContent: 'center', marginBottom: '0.25rem', fontSize: '1.8rem' }}>
           <span className="brand-accent">MASTER</span> FIT Admin
         </h2>
-        <p className="animate-item-2" style={{ color: 'var(--color-secondary)', fontSize: '0.85rem', marginBottom: '2rem', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase' }}>Admin Portal</p>
+        <p className="animate-item-2" style={{ color: 'var(--color-secondary)', fontSize: '0.8rem', marginBottom: '1rem', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase' }}>Admin Portal</p>
         {isForgotPassword ? (
           <div style={{ textAlign: 'left' }}>
             {loginError && <div style={{ color: '#E50914', marginBottom: '1rem', background: 'rgba(229, 9, 20, 0.1)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(229, 9, 20, 0.3)' }} className="animate-item-3">{loginError}</div>}
@@ -4489,18 +4517,18 @@ function App() {
                   setLoginError(isNetworkError ? 'Connection error: The database server may be spinning up. Please wait 1 minute and try again.' : err.message);
                 });
             }}>
-              <div className="form-group animate-item-3" style={{ textAlign: 'left' }}>
-                <label>Admin Username</label>
-                <input type="text" className="form-control form-control-animated" placeholder="Enter admin username" value={loginData.username} onChange={(e) => setLoginData({ ...loginData, username: e.target.value })} disabled={isLoggingIn} required />
+              <div className="form-group animate-item-3" style={{ textAlign: 'left', marginBottom: '0.85rem' }}>
+                <label style={{ marginBottom: '0.25rem', fontSize: '0.85rem' }}>Admin Username</label>
+                <input type="text" className="form-control form-control-animated" placeholder="Enter admin username" value={loginData.username} onChange={(e) => setLoginData({ ...loginData, username: e.target.value })} disabled={isLoggingIn} required style={{ height: '38px' }} />
               </div>
-              <div className="form-group animate-item-4" style={{ textAlign: 'left' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <label style={{ margin: 0 }}>Password</label>
-                  <a href="#" style={{ fontSize: '0.85rem', color: 'var(--color-primary)', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); if (!isLoggingIn) { setIsForgotPassword(true); setLoginError(''); } }}>Forgot Password?</a>
+              <div className="form-group animate-item-4" style={{ textAlign: 'left', marginBottom: '0.85rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                  <label style={{ margin: 0, fontSize: '0.85rem' }}>Password</label>
+                  <a href="#" style={{ fontSize: '0.8rem', color: 'var(--color-primary)', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); if (!isLoggingIn) { setIsForgotPassword(true); setLoginError(''); } }}>Forgot Password?</a>
                 </div>
-                <input type="password" className="form-control form-control-animated" placeholder="Enter password" value={loginData.password} onChange={(e) => setLoginData({ ...loginData, password: e.target.value })} disabled={isLoggingIn} required />
+                <input type="password" className="form-control form-control-animated" placeholder="Enter password" value={loginData.password} onChange={(e) => setLoginData({ ...loginData, password: e.target.value })} disabled={isLoggingIn} required style={{ height: '38px' }} />
               </div>
-              <button type="submit" className="btn-primary animate-item-5" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }} disabled={isLoggingIn}>
+              <button type="submit" className="btn-primary animate-item-5" style={{ width: '100%', justifyContent: 'center', marginTop: '0.75rem', height: '38px' }} disabled={isLoggingIn}>
                 {isLoggingIn ? (
                   <div className="btn-loading-spinner">
                     <span className="spinner-dots">
@@ -4515,11 +4543,11 @@ function App() {
                 )}
               </button>
             </form>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1.5rem' }} className="animate-item-6">
-              <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('login'); }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '1rem' }} className="animate-item-6">
+              <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', padding: '4px 0', fontSize: '0.9rem' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('login'); }}>
                 Switch to Coordinator Login
               </button>
-              <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('website'); }}>
+              <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', padding: '4px 0', fontSize: '0.9rem' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('website'); }}>
                 Back to Website
               </button>
             </div>
