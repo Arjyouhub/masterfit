@@ -464,6 +464,18 @@ app.get('/api/sessions', async (req, res) => {
   }
 });
 
+// Terminate all sessions (with optional 'except' parameter to keep current session)
+app.delete('/api/sessions', async (req, res) => {
+  try {
+    const { except } = req.query;
+    const filter = except ? { token: { $ne: except } } : {};
+    const result = await Session.deleteMany(filter);
+    res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Terminate/Force Logout a session
 app.delete('/api/sessions/:token', async (req, res) => {
   try {

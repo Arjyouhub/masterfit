@@ -2767,6 +2767,68 @@ function App() {
         });
     };
 
+    const handleLogoutAllSessions = () => {
+      const currentToken = getSessionToken();
+      
+      if (window.confirm("Do you want to terminate all OTHER active sessions? (You will remain logged in)")) {
+        setSettingsError('');
+        setSettingsSuccess('');
+        fetch(`${API_BASE_URL}/sessions?except=${currentToken}`, {
+          method: 'DELETE'
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.success) {
+              setSettingsSuccess(`Successfully terminated ${data.deletedCount || 0} other session(s)!`);
+              fetch(`${API_BASE_URL}/sessions`)
+                .then(res => res.json())
+                .then(data => setActiveSessions(data || []))
+                .catch(err => console.error(err));
+            } else {
+              throw new Error(data.error || 'Failed to terminate other sessions');
+            }
+          })
+          .catch(err => {
+            setSettingsError('Error terminating sessions: ' + err.message);
+          });
+      } else if (window.confirm("Do you want to terminate ALL active sessions (including this one)? You will be logged out immediately.")) {
+        setSettingsError('');
+        setSettingsSuccess('');
+        fetch(`${API_BASE_URL}/sessions`, {
+          method: 'DELETE'
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.success) {
+              setSettingsSuccess('All sessions terminated. Logging you out...');
+              setTimeout(() => {
+                const isAdm = isAdminUser(loggedInUser);
+                const token = getSessionToken();
+                if (token) {
+                  fetch(`${API_BASE_URL}/logout`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token })
+                  }).catch(err => console.error(err));
+                }
+                clearSession();
+                setLoggedInUser('');
+                if (isAdm) {
+                  setAppMode('superadmin-login');
+                } else {
+                  setAppMode('login');
+                }
+              }, 1500);
+            } else {
+              throw new Error(data.error || 'Failed to terminate all sessions');
+            }
+          })
+          .catch(err => {
+            setSettingsError('Error terminating all sessions: ' + err.message);
+          });
+      }
+    };
+
     const handleCreateCoupon = (e) => {
       e.preventDefault();
       setSettingsError('');
@@ -3198,21 +3260,31 @@ function App() {
             <div className="panel" style={{ marginBottom: '2rem' }}>
               <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
                 <h3 className="panel-title">Manage Active Sessions</h3>
-                <button
-                  type="button"
-                  className="btn-small btn-secondary"
-                  onClick={() => {
-                    fetch(`${API_BASE_URL}/sessions`)
-                      .then(res => res.json())
-                      .then(data => {
-                        setActiveSessions(data || []);
-                        setSettingsSuccess('Sessions list refreshed!');
-                      })
-                      .catch(err => setSettingsError('Error refreshing sessions: ' + err.message));
-                  }}
-                >
-                  Refresh
-                </button>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button
+                    type="button"
+                    className="btn-small btn-secondary"
+                    onClick={() => {
+                      fetch(`${API_BASE_URL}/sessions`)
+                        .then(res => res.json())
+                        .then(data => {
+                          setActiveSessions(data || []);
+                          setSettingsSuccess('Sessions list refreshed!');
+                        })
+                        .catch(err => setSettingsError('Error refreshing sessions: ' + err.message));
+                    }}
+                  >
+                    Refresh
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-small"
+                    style={{ backgroundColor: '#F44336', borderColor: '#F44336', color: 'white' }}
+                    onClick={handleLogoutAllSessions}
+                  >
+                    Logout All
+                  </button>
+                </div>
               </div>
               <div className="table-responsive">
                 <table className="data-table responsive-table-cards">
