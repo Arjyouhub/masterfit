@@ -220,7 +220,7 @@ function App() {
     const batchName = batchObj ? batchObj.name : userPart.charAt(0).toUpperCase() + userPart.slice(1);
     
     return {
-      role: 'Batch Coordinator',
+      role: 'Batch Inspector',
       branch: branchName,
       batchName: batchName
     };
@@ -319,6 +319,47 @@ function App() {
     if (!user) return false;
     const usernameClean = user.toLowerCase().trim();
     return usernameClean.startsWith('admin@');
+  };
+
+  const getLoggedInUserBranch = () => {
+    if (!loggedInUser) return 'All';
+    if (isAdminUser(loggedInUser)) return 'All';
+    if (loggedInUser.includes('@')) {
+      const branchPart = loggedInUser.split('@')[1];
+      const match = branches.find(b => b.toLowerCase() === branchPart.toLowerCase());
+      if (match) return match;
+    }
+    if (batchOptions.some(b => b.id.toLowerCase() === loggedInUser.toLowerCase())) {
+      return 'Kuttiady';
+    }
+    return 'Kuttiady';
+  };
+
+  const getFilteredBatchOptions = (branchOverride) => {
+    if (!loggedInUser) return batchOptions;
+    
+    let targetBranch = 'All';
+    if (branchOverride) {
+      targetBranch = branchOverride;
+    } else if (isAdminUser(loggedInUser)) {
+      targetBranch = branchFilter;
+    } else {
+      targetBranch = getLoggedInUserBranch();
+    }
+
+    const branchKey = targetBranch.toLowerCase();
+    if (branchKey === 'all') {
+      return batchOptions;
+    }
+
+    return batchOptions.filter(opt => {
+      return batchCredentials[`${branchKey}_${opt.id}`] !== undefined;
+    });
+  };
+
+  const isBatchAdminUser = (user) => {
+    if (!user) return false;
+    return user.toLowerCase().trim().startsWith('batch');
   };
 
   const hasSettingsAccess = (user) => {
@@ -486,6 +527,34 @@ function App() {
         });
     }
   }, []);
+
+  // Synchronize branchFilter and form defaults with current loggedInUser branch
+  useEffect(() => {
+    if (loggedInUser) {
+      if (isAdminUser(loggedInUser)) {
+        setBranchFilter('Kuttiady');
+      } else {
+        const resolvedBranch = getLoggedInUserBranch();
+        setBranchFilter(resolvedBranch);
+        setBatchForm(prev => ({ ...prev, branch: resolvedBranch.toLowerCase() }));
+        setNewBatchForm(prev => ({ ...prev, branch: resolvedBranch.toLowerCase() }));
+      }
+    }
+  }, [loggedInUser, branches]);
+
+  // Synchronize batchFilter for batch coordinator on mount/login
+  useEffect(() => {
+    if (loggedInUser) {
+      if (isBatchAdminUser(loggedInUser)) {
+        const activeBatch = batchOptions.find(b => loggedInUser.toLowerCase().startsWith(b.id.toLowerCase()));
+        if (activeBatch) {
+          setBatchFilter(activeBatch.schedule);
+        }
+      } else {
+        setBatchFilter('All');
+      }
+    }
+  }, [loggedInUser, batchOptions]);
 
   // Verify session validity periodically in the background (every 10 seconds)
   useEffect(() => {
@@ -665,14 +734,13 @@ function App() {
   // Attendance Marking State
   const [markingDate, setMarkingDate] = useState(getLocalDateString());
   const [attendanceBatchFilter, setAttendanceBatchFilter] = useState('All');
-  const [attendanceScheduleFilter, setAttendanceScheduleFilter] = useState('All');
 
   // Fee Filter State
   const [feeBatchFilter, setFeeBatchFilter] = useState('All');
-  const [feeScheduleFilter, setFeeScheduleFilter] = useState('All');
 
   // Roster Filter State
-  const [branchFilter, setBranchFilter] = useState('All');
+  const [branchFilter, setBranchFilter] = useState('Kuttiady');
+  const [batchFilter, setBatchFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('Active');
 
   // Form State
@@ -752,12 +820,15 @@ function App() {
       ? true 
       : (s.status || 'Active') === statusFilter;
 
+    // Filter by global batch schedule
+    const matchesBatch = batchFilter === 'All' || s.schedule === batchFilter;
+
     const activeBatch = batchOptions.find(b => loggedInUser && loggedInUser.toLowerCase().startsWith(b.id.toLowerCase()));
     if (activeBatch) {
-      return matchesSearch && matchesBranch && matchesStatus && s.schedule === activeBatch.schedule;
+      return matchesSearch && matchesBranch && matchesStatus && matchesBatch && s.schedule === activeBatch.schedule;
     }
 
-    return matchesSearch && matchesBranch && matchesStatus;
+    return matchesSearch && matchesBranch && matchesStatus && matchesBatch;
   });
 
   const getBeltColorClass = (belt) => {
@@ -1530,17 +1601,59 @@ function App() {
         {attendanceTab === 'monthly' ? (
           <>
             <div className="panel" style={{ marginBottom: '2rem' }}>
-              <div className="panel-header">
+              <div className="panel-header" style={{ flexWrap: 'wrap', gap: '1rem' }}>
                 <h3 className="panel-title">Daily Attendance</h3>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ color: 'var(--color-text-muted)' }}>Date:</span>
-                  <input
-                    type="date"
-                    className="form-control"
-                    style={{ width: 'auto', padding: '0.4rem 0.75rem' }}
-                    value={markingDate}
-                    onChange={(e) => setMarkingDate(e.target.value)}
-                  />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
+                  {/* Branch Filter Selector */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>Branch:</span>
+                    <select
+                      className="form-control"
+                      style={{ padding: '0.4rem 2rem 0.4rem 0.75rem', width: '160px', height: '36px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                      value={branchFilter}
+                      onChange={(e) => setBranchFilter(e.target.value)}
+                      disabled={!isAdminUser(loggedInUser)}
+                    >
+                      {isAdminUser(loggedInUser) ? (
+                        <>
+                          {branches.map(b => (
+                            <option key={b} value={b}>{b}</option>
+                          ))}
+                          <option value="All">All Branches</option>
+                        </>
+                      ) : (
+                        <option value={branchFilter}>{branchFilter}</option>
+                      )}
+                    </select>
+                  </div>
+
+                  {/* Batch Filter Selector */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>Batch:</span>
+                    <select
+                      className="form-control"
+                      style={{ padding: '0.4rem 2rem 0.4rem 0.75rem', width: '160px', height: '36px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                      value={batchFilter}
+                      onChange={(e) => setBatchFilter(e.target.value)}
+                      disabled={isBatchAdminUser(loggedInUser)}
+                    >
+                      <option value="All">All Batches</option>
+                      {getFilteredBatchOptions().map(opt => (
+                        <option key={opt.id} value={opt.schedule}>{opt.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>Date:</span>
+                    <input
+                      type="date"
+                      className="form-control"
+                      style={{ width: 'auto', padding: '0.4rem 0.75rem', height: '36px', background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', borderRadius: '8px' }}
+                      value={markingDate}
+                      onChange={(e) => setMarkingDate(e.target.value)}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1552,23 +1665,7 @@ function App() {
                 <button className={`btn-small ${attendanceBatchFilter === 'Night' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setAttendanceBatchFilter('Night')}>Night</button>
               </div>
 
-              {(!loggedInUser || !loggedInUser.startsWith('batch')) && (
-                <div className="filter-row" style={{ marginBottom: '1.5rem' }}>
-                  <span style={{ color: 'var(--color-text-muted)', width: '80px', fontSize: '0.85rem' }}>Batch:</span>
-                  <button className={`btn-small ${attendanceScheduleFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setAttendanceScheduleFilter('All')}>All Batches</button>
-                  {batchOptions.map(opt => (
-                    <button
-                      key={opt.id}
-                      className={`btn-small ${attendanceScheduleFilter === opt.schedule ? 'btn-primary' : 'btn-secondary'}`}
-                      onClick={() => setAttendanceScheduleFilter(opt.schedule)}
-                    >
-                      {opt.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <div className="table-responsive">
+              <div className="table-responsive" style={{ marginTop: '1.5rem' }}>
                 <table className="data-table responsive-table-cards">
                   <thead>
                     <tr>
@@ -1583,7 +1680,7 @@ function App() {
                       const isInactive = (s.status || 'Active') === 'Inactive';
                       if (isInactive) return false;
                       const matchBatch = attendanceBatchFilter === 'All' || s.batch === attendanceBatchFilter;
-                      const matchSchedule = attendanceScheduleFilter === 'All' || s.schedule === attendanceScheduleFilter;
+                      const matchSchedule = batchFilter === 'All' || s.schedule === batchFilter;
                       return matchBatch && matchSchedule;
                     }).map(student => {
                       const status = attendanceRecords[markingDate]?.[student.id];
@@ -1667,7 +1764,7 @@ function App() {
 
     const filteredFeeStudents = baseFeeStudents.filter(s => {
       const matchBatch = feeBatchFilter === 'All' || s.batch === feeBatchFilter;
-      const matchSchedule = feeScheduleFilter === 'All' || s.schedule === feeScheduleFilter;
+      const matchSchedule = batchFilter === 'All' || s.schedule === batchFilter;
       return matchBatch && matchSchedule;
     });
 
@@ -1823,21 +1920,7 @@ function App() {
             <button className={`btn-small ${feeBatchFilter === 'Night' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Night')}>Night</button>
           </div>
 
-          {(!loggedInUser || !loggedInUser.startsWith('batch')) && (
-            <div className="filter-row" style={{ marginBottom: '1.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-              <span style={{ color: 'var(--color-text-muted)', width: '80px', fontSize: '0.85rem' }}>Batch:</span>
-              <button className={`btn-small ${feeScheduleFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeScheduleFilter('All')}>All Batches</button>
-              {batchOptions.map(opt => (
-                <button
-                  key={opt.id}
-                  className={`btn-small ${feeScheduleFilter === opt.schedule ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setFeeScheduleFilter(opt.schedule)}
-                >
-                  {opt.name}
-                </button>
-              ))}
-            </div>
-          )}
+
 
           <div className="stats-grid" style={{ marginBottom: '1.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
             <div className="stat-card" style={{ borderLeft: '4px solid #E50914', padding: '1.5rem' }}>
@@ -2607,10 +2690,10 @@ function App() {
           </div>
         </div>
 
-        {/* Branch Coordinator Accounts Panel */}
+        {/* Branch Inspector Accounts Panel */}
         <div className="panel" style={{ marginBottom: '2rem' }}>
           <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-            <h3 className="panel-title">Branch Coordinator Accounts</h3>
+            <h3 className="panel-title">Branch Inspector Accounts</h3>
           </div>
           <div className="table-responsive">
             <table className="data-table responsive-table-cards">
@@ -2625,7 +2708,7 @@ function App() {
               <tbody>
                 {Object.entries(branchCredentials).length === 0 ? (
                   <tr>
-                    <td colSpan="4" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No branch coordinators configured.</td>
+                    <td colSpan="4" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No branch inspectors configured.</td>
                   </tr>
                 ) : (
                   Object.entries(branchCredentials).map(([branchKey, info]) => (
@@ -2652,10 +2735,10 @@ function App() {
           </div>
         </div>
 
-        {/* Batch Coordinator Accounts Panel */}
+        {/* Batch Inspector Accounts Panel */}
         <div className="panel" style={{ marginBottom: '2rem' }}>
           <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-            <h3 className="panel-title">Batch Coordinator / Coach Accounts</h3>
+            <h3 className="panel-title">Batch Inspector / Coach Accounts</h3>
           </div>
           <div className="table-responsive">
             <table className="data-table responsive-table-cards">
@@ -2670,7 +2753,7 @@ function App() {
               <tbody>
                 {Object.entries(batchCredentials).length === 0 ? (
                   <tr>
-                    <td colSpan="4" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No batch coordinators configured.</td>
+                    <td colSpan="4" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No batch inspectors configured.</td>
                   </tr>
                 ) : (
                   Object.entries(batchCredentials).map(([batchKey, info]) => {
@@ -3278,7 +3361,7 @@ function App() {
         .then(res => res.json())
         .then(data => {
           setBranchCredentials(data.branchCredentials || {});
-          setSettingsSuccess(`Branch Coordinator credentials for "${br.toUpperCase()}" updated successfully!`);
+          setSettingsSuccess(`Branch Inspector credentials for "${br.toUpperCase()}" updated successfully!`);
           setBranchForm({ branch: br, newUsername: '', newPassword: '', confirmPassword: '' });
         })
         .catch(err => {
@@ -3317,7 +3400,7 @@ function App() {
         .then(res => res.json())
         .then(data => {
           setBatchCredentials(data.batchCredentials || {});
-          setSettingsSuccess(`Batch Coordinator credentials for "${br.toUpperCase()} - ${bt.toUpperCase()}" updated successfully!`);
+          setSettingsSuccess(`Batch Inspector credentials for "${br.toUpperCase()} - ${bt.toUpperCase()}" updated successfully!`);
           setBatchForm({ branch: br, batch: bt, newUsername: '', newPassword: '', confirmPassword: '' });
         })
         .catch(err => {
@@ -3667,11 +3750,11 @@ function App() {
           )}
         </div>
 
-        {isSuper && (
-          <>
-            {/* Coordinator Passwords Management */}
-            <div className="grid-2-col" style={{ gap: '2rem' }}>
-              {/* Branch Passwords */}
+        {/* Coordinator Passwords Management */}
+        {(isSuper || isBranchAdm) && (
+          <div className={isSuper ? "grid-2-col" : ""} style={{ gap: '2rem', marginBottom: '2rem' }}>
+            {/* Branch Passwords */}
+            {isSuper && (
               <div className="panel">
                 <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
                   <h3 className="panel-title">Manage Branch Credentials</h3>
@@ -3706,272 +3789,303 @@ function App() {
                   <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Save Branch Credentials</button>
                 </form>
               </div>
+            )}
 
-              {/* Batch Passwords */}
-              <div className="panel">
-                <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-                  <h3 className="panel-title">Manage Batch Credentials</h3>
-                </div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
-                  Current Username: <strong style={{ color: 'var(--color-text-light)' }}>{batchCredentials[`${batchForm.branch}_${batchForm.batch}`]?.username || `${batchForm.batch}@${batchForm.branch}`}</strong>
-                </div>
-                <form onSubmit={handleUpdateBatchPassword}>
-                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                    <label>Select Branch</label>
-                    <select className="form-control" value={batchForm.branch} onChange={(e) => setBatchForm({ ...batchForm, branch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
-                      {branches.map(br => (
-                        <option key={br} value={br.toLowerCase()}>{br}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                    <label>Select Batch</label>
-                    <select className="form-control" value={batchForm.batch} onChange={(e) => setBatchForm({ ...batchForm, batch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
-                      {batchOptions.map(opt => (
-                        <option key={opt.id} value={opt.id}>{opt.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                    <label>New Username (Optional)</label>
-                    <input type="text" className="form-control" placeholder="Enter new username" value={batchForm.newUsername} onChange={(e) => setBatchForm({ ...batchForm, newUsername: e.target.value })} />
-                  </div>
-                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                    <label>New Password</label>
-                    <input type="password" className="form-control" placeholder="Enter new password" required value={batchForm.newPassword} onChange={(e) => { setBatchForm({ ...batchForm, newPassword: e.target.value }); setBatchPasswordError(''); }} />
-                  </div>
-                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                    <label>Confirm Password</label>
-                    <input type="password" className="form-control" placeholder="Confirm new password" required value={batchForm.confirmPassword} onChange={(e) => { setBatchForm({ ...batchForm, confirmPassword: e.target.value }); setBatchPasswordError(''); }} />
-                    {batchPasswordError && (
-                      <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{batchPasswordError}</div>
-                    )}
-                  </div>
-                  <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Save Batch Credentials</button>
-                </form>
+            {/* Batch Passwords */}
+            <div className="panel">
+              <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+                <h3 className="panel-title">Manage Batch Credentials</h3>
               </div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
+                Current Username: <strong style={{ color: 'var(--color-text-light)' }}>{batchCredentials[`${batchForm.branch}_${batchForm.batch}`]?.username || `${batchForm.batch}@${batchForm.branch}`}</strong>
+              </div>
+              <form onSubmit={handleUpdateBatchPassword}>
+                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                  <label>Select Branch</label>
+                  <select
+                    className="form-control"
+                    value={batchForm.branch}
+                    disabled={!isSuper}
+                    onChange={(e) => setBatchForm({ ...batchForm, branch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}
+                  >
+                    {isSuper ? (
+                      branches.map(br => (
+                        <option key={br} value={br.toLowerCase()}>{br}</option>
+                      ))
+                    ) : (
+                      <option value={getLoggedInUserBranch().toLowerCase()}>{getLoggedInUserBranch()}</option>
+                    )}
+                  </select>
+                </div>
+                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                  <label>Select Batch</label>
+                  <select className="form-control" value={batchForm.batch} onChange={(e) => setBatchForm({ ...batchForm, batch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
+                    {batchOptions.filter(opt => {
+                      if (DEFAULT_BATCH_OPTIONS.some(d => d.id === opt.id)) return true;
+                      return batchCredentials[`${batchForm.branch.toLowerCase()}_${opt.id}`] !== undefined;
+                    }).map(opt => (
+                      <option key={opt.id} value={opt.id}>{opt.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                  <label>New Username (Optional)</label>
+                  <input type="text" className="form-control" placeholder="Enter new username" value={batchForm.newUsername} onChange={(e) => setBatchForm({ ...batchForm, newUsername: e.target.value })} />
+                </div>
+                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                  <label>New Password</label>
+                  <input type="password" className="form-control" placeholder="Enter new password" required value={batchForm.newPassword} onChange={(e) => { setBatchForm({ ...batchForm, newPassword: e.target.value }); setBatchPasswordError(''); }} />
+                </div>
+                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                  <label>Confirm Password</label>
+                  <input type="password" className="form-control" placeholder="Confirm new password" required value={batchForm.confirmPassword} onChange={(e) => { setBatchForm({ ...batchForm, confirmPassword: e.target.value }); setBatchPasswordError(''); }} />
+                  {batchPasswordError && (
+                    <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{batchPasswordError}</div>
+                  )}
+                </div>
+                <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Save Batch Credentials</button>
+              </form>
             </div>
+          </div>
+        )}
 
             {/* Manage Branches & Batches Options */}
-            <div className="grid-2-col" style={{ gap: '2rem', marginTop: '2rem' }}>
-              {/* Branch List and Add Form */}
-              <div className="panel">
-                <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-                  <h3 className="panel-title">Add & Manage Branches</h3>
-                </div>
-
-                <form onSubmit={handleAddBranch} style={{ marginBottom: '2rem' }}>
-                  <div className="form-group" style={{ marginBottom: '1rem' }}>
-                    <label>Branch Name</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="e.g. Vatakara"
-                      value={newBranchForm.name}
-                      onChange={(e) => setNewBranchForm({ ...newBranchForm, name: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="form-group" style={{ marginBottom: '1rem' }}>
-                    <label>Coordinator Username (Optional)</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="e.g. admin@vatakara (auto-default)"
-                      value={newBranchForm.username}
-                      onChange={(e) => setNewBranchForm({ ...newBranchForm, username: e.target.value })}
-                    />
-                  </div>
-                  <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
-                    <div className="form-group">
-                      <label>Coordinator Password</label>
-                      <input
-                        type="password"
-                        className="form-control"
-                        placeholder="Enter password"
-                        value={newBranchForm.password}
-                        onChange={(e) => { setNewBranchForm({ ...newBranchForm, password: e.target.value }); setNewBranchPasswordError(''); }}
-                        required
-                      />
+            {(isSuper || isBranchAdm) && (
+              <div className={isSuper ? "grid-2-col" : ""} style={{ gap: '2rem', marginTop: '2rem' }}>
+                {/* Branch List and Add Form */}
+                {isSuper && (
+                  <div className="panel">
+                    <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+                      <h3 className="panel-title">Add & Manage Branches</h3>
                     </div>
-                    <div className="form-group">
-                      <label>Confirm Password</label>
-                      <input
-                        type="password"
-                        className="form-control"
-                        placeholder="Confirm password"
-                        value={newBranchForm.confirmPassword}
-                        onChange={(e) => { setNewBranchForm({ ...newBranchForm, confirmPassword: e.target.value }); setNewBranchPasswordError(''); }}
-                        required
-                      />
-                      {newBranchPasswordError && (
-                        <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{newBranchPasswordError}</div>
-                      )}
-                    </div>
-                  </div>
-                  <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Branch & Credentials</button>
-                </form>
 
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Custom Branches List</label>
-                {customBranches.length === 0 ? (
-                  <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No custom branches added yet.</p>
-                ) : (
-                  <div className="table-responsive">
-                    <table className="data-table responsive-table-cards">
-                      <thead>
-                        <tr>
-                          <th>Branch Name</th>
-                          <th>Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {customBranches.map(br => (
-                          <tr key={br}>
-                            <td data-label="Branch Name" style={{ color: 'var(--color-text-light)' }}>{br}</td>
-                            <td data-label="Action">
-                              <button
-                                type="button"
-                                className="btn-small"
-                                style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
-                                onClick={() => handleDeleteCustomBranch(br)}
-                              >
-                                Delete
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <form onSubmit={handleAddBranch} style={{ marginBottom: '2rem' }}>
+                      <div className="form-group" style={{ marginBottom: '1rem' }}>
+                        <label>Branch Name</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="e.g. Vatakara"
+                          value={newBranchForm.name}
+                          onChange={(e) => setNewBranchForm({ ...newBranchForm, name: e.target.value })}
+                          required
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: '1rem' }}>
+                        <label>Inspector Username (Optional)</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="e.g. admin@vatakara (auto-default)"
+                          value={newBranchForm.username}
+                          onChange={(e) => setNewBranchForm({ ...newBranchForm, username: e.target.value })}
+                        />
+                      </div>
+                      <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
+                        <div className="form-group">
+                          <label>Inspector Password</label>
+                          <input
+                            type="password"
+                            className="form-control"
+                            placeholder="Enter password"
+                            value={newBranchForm.password}
+                            onChange={(e) => { setNewBranchForm({ ...newBranchForm, password: e.target.value }); setNewBranchPasswordError(''); }}
+                            required
+                          />
+                        </div>
+                        <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
+                          <div className="form-group">
+                            <label>Confirm Password</label>
+                            <input
+                              type="password"
+                              className="form-control"
+                              placeholder="Confirm password"
+                              value={newBranchForm.confirmPassword}
+                              onChange={(e) => { setNewBranchForm({ ...newBranchForm, confirmPassword: e.target.value }); setNewBranchPasswordError(''); }}
+                              required
+                            />
+                            {newBranchPasswordError && (
+                              <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{newBranchPasswordError}</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Branch & Credentials</button>
+                    </form>
+
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Custom Branches List</label>
+                    {customBranches.length === 0 ? (
+                      <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No custom branches added yet.</p>
+                    ) : (
+                      <div className="table-responsive">
+                        <table className="data-table responsive-table-cards">
+                          <thead>
+                            <tr>
+                              <th>Branch Name</th>
+                              <th>Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {customBranches.map(br => (
+                              <tr key={br}>
+                                <td data-label="Branch Name" style={{ color: 'var(--color-text-light)' }}>{br}</td>
+                                <td data-label="Action">
+                                  <button
+                                    type="button"
+                                    className="btn-small"
+                                    style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
+                                    onClick={() => handleDeleteCustomBranch(br)}
+                                  >
+                                    Delete
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
 
-              {/* Batch List and Add Form */}
-              <div className="panel">
-                <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-                  <h3 className="panel-title">Add & Manage Batches</h3>
-                </div>
-
-                <form onSubmit={handleAddBatch} style={{ marginBottom: '2rem' }}>
-                  <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
-                    <div className="form-group">
-                      <label>Batch Name</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        placeholder="e.g. Batch 4 (Sat - Sun)"
-                        value={newBatchForm.name}
-                        onChange={(e) => setNewBatchForm({ ...newBatchForm, name: e.target.value })}
-                        required
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>Schedule Pattern</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        placeholder="e.g. Sat-Sun"
-                        value={newBatchForm.schedule}
-                        onChange={(e) => setNewBatchForm({ ...newBatchForm, schedule: e.target.value })}
-                        required
-                      />
-                    </div>
+                {/* Batch List and Add Form */}
+                <div className="panel">
+                  <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+                    <h3 className="panel-title">Add & Manage Batches</h3>
                   </div>
 
-                  <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
-                    <div className="form-group">
-                      <label>Configure Credentials for Branch</label>
-                      <select
-                        className="form-control"
-                        value={newBatchForm.branch}
-                        onChange={(e) => setNewBatchForm({ ...newBatchForm, branch: e.target.value })}
-                      >
-                        {branches.map(br => (
-                          <option key={br} value={br.toLowerCase()}>{br}</option>
-                        ))}
-                      </select>
+                  <form onSubmit={handleAddBatch} style={{ marginBottom: '2rem' }}>
+                    <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
+                      <div className="form-group">
+                        <label>Batch Name</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="e.g. Batch 4 (Sat - Sun)"
+                          value={newBatchForm.name}
+                          onChange={(e) => setNewBatchForm({ ...newBatchForm, name: e.target.value })}
+                          required
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Schedule Pattern</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="e.g. Sat-Sun"
+                          value={newBatchForm.schedule}
+                          onChange={(e) => setNewBatchForm({ ...newBatchForm, schedule: e.target.value })}
+                          required
+                        />
+                      </div>
                     </div>
-                    <div className="form-group">
-                      <label>Coordinator Username (Optional)</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        placeholder="e.g. batch_id@branch (auto)"
-                        value={newBatchForm.username}
-                        onChange={(e) => setNewBatchForm({ ...newBatchForm, username: e.target.value })}
-                      />
-                    </div>
-                  </div>
 
-                  <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
-                    <div className="form-group">
-                      <label>Coordinator Password</label>
-                      <input
-                        type="password"
-                        className="form-control"
-                        placeholder="Enter password"
-                        value={newBatchForm.password}
-                        onChange={(e) => { setNewBatchForm({ ...newBatchForm, password: e.target.value }); setNewBatchPasswordError(''); }}
-                        required
-                      />
+                    <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
+                      <div className="form-group">
+                        <label>Configure Credentials for Branch</label>
+                        <select
+                          className="form-control"
+                          value={newBatchForm.branch}
+                          disabled={!isSuper}
+                          onChange={(e) => setNewBatchForm({ ...newBatchForm, branch: e.target.value })}
+                        >
+                          {isSuper ? (
+                            branches.map(br => (
+                              <option key={br} value={br.toLowerCase()}>{br}</option>
+                            ))
+                          ) : (
+                            <option value={getLoggedInUserBranch().toLowerCase()}>{getLoggedInUserBranch()}</option>
+                          )}
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label>Inspector Username (Optional)</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="e.g. batch_id@branch (auto)"
+                          value={newBatchForm.username}
+                          onChange={(e) => setNewBatchForm({ ...newBatchForm, username: e.target.value })}
+                        />
+                      </div>
                     </div>
-                    <div className="form-group">
-                      <label>Confirm Password</label>
-                      <input
-                        type="password"
-                        className="form-control"
-                        placeholder="Confirm password"
-                        value={newBatchForm.confirmPassword}
-                        onChange={(e) => { setNewBatchForm({ ...newBatchForm, confirmPassword: e.target.value }); setNewBatchPasswordError(''); }}
-                        required
-                      />
-                      {newBatchPasswordError && (
-                        <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{newBatchPasswordError}</div>
-                      )}
-                    </div>
-                  </div>
-                  <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Batch & Credentials</button>
-                </form>
 
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Custom Batches List</label>
-                {customBatches.length === 0 ? (
-                  <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No custom batches added yet.</p>
-                ) : (
-                  <div className="table-responsive">
-                    <table className="data-table responsive-table-cards">
-                      <thead>
-                        <tr>
-                          <th>Batch Details</th>
-                          <th>Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {customBatches.map(bt => (
-                          <tr key={bt.id}>
-                            <td data-label="Batch Details">
-                              <div style={{ color: 'var(--color-text-light)' }}>{bt.name}</div>
-                              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Pattern: {bt.schedule}</div>
-                            </td>
-                            <td data-label="Action">
-                              <button
-                                type="button"
-                                className="btn-small"
-                                style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
-                                onClick={() => handleDeleteCustomBatch(bt.id, bt.name)}
-                              >
-                                Delete
-                              </button>
-                            </td>
+                    <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
+                      <div className="form-group">
+                        <label>Inspector Password</label>
+                        <input
+                          type="password"
+                          className="form-control"
+                          placeholder="Enter password"
+                          value={newBatchForm.password}
+                          onChange={(e) => { setNewBatchForm({ ...newBatchForm, password: e.target.value }); setNewBatchPasswordError(''); }}
+                          required
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Confirm Password</label>
+                        <input
+                          type="password"
+                          className="form-control"
+                          placeholder="Confirm password"
+                          value={newBatchForm.confirmPassword}
+                          onChange={(e) => { setNewBatchForm({ ...newBatchForm, confirmPassword: e.target.value }); setNewBatchPasswordError(''); }}
+                          required
+                        />
+                        {newBatchPasswordError && (
+                          <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{newBatchPasswordError}</div>
+                        )}
+                      </div>
+                    </div>
+                    <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Batch & Credentials</button>
+                  </form>
+
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Custom Batches List</label>
+                  {customBatches.filter(bt => {
+                    if (isSuper) return true;
+                    const userBranch = getLoggedInUserBranch().toLowerCase();
+                    return batchCredentials[`${userBranch}_${bt.id}`] !== undefined;
+                  }).length === 0 ? (
+                    <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No custom batches added yet.</p>
+                  ) : (
+                    <div className="table-responsive">
+                      <table className="data-table responsive-table-cards">
+                        <thead>
+                          <tr>
+                            <th>Batch Details</th>
+                            <th>Action</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                        </thead>
+                        <tbody>
+                          {customBatches.filter(bt => {
+                            if (isSuper) return true;
+                            const userBranch = getLoggedInUserBranch().toLowerCase();
+                            return batchCredentials[`${userBranch}_${bt.id}`] !== undefined;
+                          }).map(bt => (
+                            <tr key={bt.id}>
+                              <td data-label="Batch Details">
+                                <div style={{ color: 'var(--color-text-light)' }}>{bt.name}</div>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Pattern: {bt.schedule}</div>
+                              </td>
+                              <td data-label="Action">
+                                <button
+                                  type="button"
+                                  className="btn-small"
+                                  style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
+                                  onClick={() => handleDeleteCustomBatch(bt.id, bt.name)}
+                                >
+                                  Delete
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          </>
-        )}
+            )}
       </div>
     );
   };
@@ -4089,7 +4203,7 @@ function App() {
                     style={{ background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', height: '38px', padding: '0.5rem' }}
                   >
                     {branches.map(b => (
-                      <option key={b} value={b}>{b}</option>
+                      <option key={b} value={b} style={{ background: '#1a1a1a', color: '#ffffff' }}>{b}</option>
                     ))}
                   </select>
                 </div>
@@ -4102,9 +4216,12 @@ function App() {
                     onChange={(e) => setSelectedBatchLogin(e.target.value)}
                     style={{ background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', height: '38px', padding: '0.5rem' }}
                   >
-                    <option value="admin">Branch Admin (All Batches)</option>
-                    {batchOptions.map(opt => (
-                      <option key={opt.id} value={opt.id}>{opt.name}</option>
+                    <option value="admin" style={{ background: '#1a1a1a', color: '#ffffff' }}>Branch Admin (All Batches)</option>
+                    {batchOptions.filter(opt => {
+                      if (DEFAULT_BATCH_OPTIONS.some(d => d.id === opt.id)) return true;
+                      return batchCredentials[`${selectedBranchLogin.toLowerCase()}_${opt.id}`] !== undefined;
+                    }).map(opt => (
+                      <option key={opt.id} value={opt.id} style={{ background: '#1a1a1a', color: '#ffffff' }}>{opt.name}</option>
                     ))}
                   </select>
                 </div>
@@ -4545,7 +4662,7 @@ function App() {
             </form>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '1rem' }} className="animate-item-6">
               <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', padding: '4px 0', fontSize: '0.9rem' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('login'); }}>
-                Switch to Coordinator Login
+                Switch to Inspector Login
               </button>
               <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', padding: '4px 0', fontSize: '0.9rem' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('website'); }}>
                 Back to Website
@@ -4669,16 +4786,36 @@ function App() {
                 onChange={(e) => setBranchFilter(e.target.value)}
                 disabled={!isAdminUser(loggedInUser)}
               >
-                {isAdminUser(loggedInUser) && <option value="All">All Branches</option>}
                 {isAdminUser(loggedInUser) ? (
-                  branches.map(b => (
-                    <option key={b} value={b}>{b}</option>
-                  ))
+                  <>
+                    {branches.map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                    <option value="All">All Branches</option>
+                  </>
                 ) : (
                   <option value={branchFilter}>{branchFilter}</option>
                 )}
               </select>
             </div>
+
+            {/* Batch Filter Selector */}
+            {(currentView === 'dashboard' || currentView === 'attendance' || currentView === 'fees' || currentView === 'performance') && (
+              <div style={{ position: 'relative' }}>
+                <select
+                  className="form-control"
+                  style={{ padding: '0.5rem 1rem', paddingRight: '2rem', width: '180px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                  value={batchFilter}
+                  onChange={(e) => setBatchFilter(e.target.value)}
+                  disabled={isBatchAdminUser(loggedInUser)}
+                >
+                  <option value="All">All Batches</option>
+                  {getFilteredBatchOptions().map(opt => (
+                    <option key={opt.id} value={opt.schedule}>{opt.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             {/* Status Filter Selector */}
             {(currentView === 'dashboard' || currentView === 'performance') && (
               <div style={{ position: 'relative' }}>
@@ -4906,7 +5043,7 @@ function App() {
                         value={editingStudentData.schedule}
                         onChange={(e) => setEditingStudentData({ ...editingStudentData, schedule: e.target.value })}
                       >
-                        {batchOptions.map(opt => (
+                        {getFilteredBatchOptions(editingStudentData.branch).map(opt => (
                           <option key={opt.id} value={opt.schedule}>{opt.name}</option>
                         ))}
                       </select>
@@ -5443,7 +5580,7 @@ function App() {
                 <div className="form-group">
                   <label>Batch Schedule</label>
                   <select className="form-control" value={newStudent.schedule} onChange={(e) => setNewStudent({ ...newStudent, schedule: e.target.value })}>
-                    {batchOptions.map(opt => (
+                    {getFilteredBatchOptions(newStudent.branch).map(opt => (
                       <option key={opt.id} value={opt.schedule}>{opt.name}</option>
                     ))}
                   </select>

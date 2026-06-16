@@ -118,7 +118,10 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  let logUrl = req.url;
+  // Redact token in query parameters to prevent exposing session tokens in terminal logs
+  logUrl = logUrl.replace(/([\?&]token=)[^&]+/g, '$1[REDACTED]');
+  console.log(`[${new Date().toISOString()}] ${req.method} ${logUrl}`);
   next();
 });
 app.use(cors());
