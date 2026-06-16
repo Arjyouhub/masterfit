@@ -16,13 +16,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const envPath = path.join(__dirname, '.env');
-console.log('Dotenv path:', envPath);
-try {
-  console.log('Dotenv file content on disk:\n', fs.readFileSync(envPath, 'utf8'));
-} catch (e) {
-  console.error('Error reading dotenv file:', e);
+if (fs.existsSync(envPath)) {
+  dotenv.config({ path: envPath, override: true });
+} else {
+  dotenv.config();
 }
-dotenv.config({ path: envPath, override: true });
 
 // Password Hashing Helper Functions
 function hashPassword(password) {
@@ -463,6 +461,17 @@ app.delete('/api/sessions/:token', async (req, res) => {
 
 // In-memory OTP store
 const otpStore = {};
+
+// Periodically clean up expired OTPs every 5 minutes to prevent memory leaks
+const OTP_CLEANUP_INTERVAL = 5 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const username in otpStore) {
+    if (otpStore[username] && otpStore[username].expiresAt < now) {
+      delete otpStore[username];
+    }
+  }
+}, OTP_CLEANUP_INTERVAL).unref();
 
 // --- Real-time SMS and WhatsApp OTP Dispatch Utilities ---
 async function sendFast2SMS(phone, otp) {
