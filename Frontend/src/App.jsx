@@ -11,9 +11,9 @@ import './index.css';
 const DEFAULT_BRANCHES = ["Kuttiady", "Perambra", "Orkatteri", "Paarakadav", "Kallachi", "Chambra", "Devargovil"];
 
 const DEFAULT_BATCH_OPTIONS = [
-  { id: 'batch1', name: 'Batch 1 (Mon - Thu)', schedule: 'Mon-Thu' },
-  { id: 'batch2', name: 'Batch 2 (Tue - Fri)', schedule: 'Tue-Fri' },
-  { id: 'batch3', name: 'Batch 3 (Wed - Sat)', schedule: 'Wed-Sat' }
+  { id: 'batch1', name: 'Batch 1', schedule: 'Mon-Thu' },
+  { id: 'batch2', name: 'Batch 2', schedule: 'Tue-Fri' },
+  { id: 'batch3', name: 'Batch 3', schedule: 'Wed-Sat' }
 ];
 
 
@@ -362,6 +362,12 @@ function App() {
     return user.toLowerCase().trim().startsWith('batch');
   };
 
+  const getBatchNameFromSchedule = (schedule) => {
+    if (!schedule) return '';
+    const opt = batchOptions.find(b => b.schedule.toLowerCase() === schedule.toLowerCase());
+    return opt ? opt.name : schedule;
+  };
+
   const hasSettingsAccess = (user) => {
     return isAdminUser(user) || isBranchAdmin(user);
   };
@@ -600,9 +606,9 @@ function App() {
     return () => clearInterval(interval);
   }, [loggedInUser]);
 
-  // Fetch active sessions when settings page is loaded
+  // Fetch active sessions when settings page or credentials list is loaded
   useEffect(() => {
-    if (currentView === 'settings' && isAdminUser(loggedInUser)) {
+    if ((currentView === 'settings' || currentView === 'credentials-list') && isAdminUser(loggedInUser)) {
       fetch(`${API_BASE_URL}/sessions`)
         .then(res => res.json())
         .then(data => setActiveSessions(data || []))
@@ -634,6 +640,419 @@ function App() {
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  const handleAddBranch = (e) => {
+    e.preventDefault();
+    const newBrClean = newBranchForm.name.trim();
+    const pass = newBranchForm.password;
+
+    if (!newBrClean || !pass) {
+      setSettingsError('Branch name and password are required');
+      return;
+    }
+
+    if (pass !== newBranchForm.confirmPassword) {
+      setNewBranchPasswordError('Passwords do not match');
+      return;
+    }
+
+    const newBrLower = newBrClean.toLowerCase();
+    if (branches.some(b => b.toLowerCase() === newBrLower)) {
+      setSettingsError('Branch already exists!');
+      return;
+    }
+
+    const defaultUser = `admin@${newBrLower}`;
+
+    const updatedCustomBranches = [...customBranches, newBrClean];
+    const updatedBranchCreds = {
+      ...branchCredentials,
+      [newBrLower]: { username: defaultUser, password: pass }
+    };
+
+    fetch(`${API_BASE_URL}/credentials`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customBranches: updatedCustomBranches,
+        branchCredentials: updatedBranchCreds
+      })
+    })
+      .then(res => res.json())
+      .then(data => {
+        setCustomBranches(data.customBranches || []);
+        setBranchCredentials(data.branchCredentials || {});
+        if (rawCredentials) {
+          setRawCredentials(prev => ({
+            ...prev,
+            customBranches: data.customBranches || [],
+            branchCredentials: data.branchCredentials || {}
+          }));
+        }
+
+        const dbBranches = Object.keys(data.branchCredentials || {}).map(b => b.charAt(0).toUpperCase() + b.slice(1));
+        const uniqueBranches = Array.from(new Set([
+          ...DEFAULT_BRANCHES,
+          ...dbBranches,
+          ...(data.customBranches || []).map(b => b.charAt(0).toUpperCase() + b.slice(1))
+        ]));
+        setBranches(uniqueBranches);
+        setNewBranchForm({ name: '', username: '', password: '', confirmPassword: '' });
+        setSettingsSuccess(`Branch "${newBrClean}" created and credentials configured successfully!`);
+      })
+      .catch(err => {
+        setSettingsError('Error adding branch: ' + err.message);
+      });
+  };
+
+  const handleDeleteCustomBranch = (branchToDelete) => {
+    if (DEFAULT_BRANCHES.includes(branchToDelete)) {
+      setSettingsError('Cannot delete default system branches!');
+      return;
+    }
+    if (!window.confirm(`Are you sure you want to delete the branch "${branchToDelete}"?`)) {
+      return;
+    }
+
+    const branchKey = branchToDelete.toLowerCase().trim();
+    const updatedCustomBranches = customBranches.filter(b => b.toLowerCase().trim() !== branchKey);
+
+    // Also delete from branchCredentials map
+    const updatedBranchCreds = { ...branchCredentials };
+    delete updatedBranchCreds[branchKey];
+
+    // Also clean up associated batch credentials
+    const updatedBatchCreds = { ...batchCredentials };
+    for (const key of Object.keys(updatedBatchCreds)) {
+      if (key.startsWith(`${branchKey}_`)) {
+        delete updatedBatchCreds[key];
+      }
+    }
+
+    // Optimistically update
+    setCustomBranches(updatedCustomBranches);
+    setBranchCredentials(updatedBranchCreds);
+    setBatchCredentials(updatedBatchCreds);
+    
+    const dbBranches = Object.keys(updatedBranchCreds).map(b => b.charAt(0).toUpperCase() + b.slice(1));
+    const uniqueBranches = Array.from(new Set([
+      ...DEFAULT_BRANCHES,
+      ...dbBranches,
+      ...updatedCustomBranches.map(b => b.charAt(0).toUpperCase() + b.slice(1))
+    ]));
+    setBranches(uniqueBranches);
+
+    fetch(`${API_BASE_URL}/credentials`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        customBranches: updatedCustomBranches,
+        branchCredentials: updatedBranchCreds,
+        batchCredentials: updatedBatchCreds
+      })
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to delete branch on server');
+        return res.json();
+      })
+      .then(data => {
+        setCustomBranches(data.customBranches || []);
+        setBranchCredentials(data.branchCredentials || {});
+        setBatchCredentials(data.batchCredentials || {});
+        if (rawCredentials) {
+          setRawCredentials(prev => ({
+            ...prev,
+            customBranches: data.customBranches || [],
+            branchCredentials: data.branchCredentials || {},
+            batchCredentials: data.batchCredentials || {}
+          }));
+        }
+        
+        const dbBranches = Object.keys(data.branchCredentials || {}).map(b => b.charAt(0).toUpperCase() + b.slice(1));
+        const uniqueBranches = Array.from(new Set([
+          ...DEFAULT_BRANCHES,
+          ...dbBranches,
+          ...(data.customBranches || []).map(b => b.charAt(0).toUpperCase() + b.slice(1))
+        ]));
+        setBranches(uniqueBranches);
+        setSettingsSuccess(`Branch "${branchToDelete}" deleted successfully!`);
+      })
+      .catch(err => {
+        setSettingsError('Error deleting branch: ' + err.message);
+        reloadAllAppData();
+      });
+  };
+
+  const handleEditCustomBranch = (oldName, newName) => {
+    const oldBrClean = oldName.trim();
+    const newBrClean = newName.trim();
+    if (!newBrClean) {
+      alert('Branch name cannot be empty.');
+      return;
+    }
+    const oldBrLower = oldBrClean.toLowerCase();
+    const newBrLower = newBrClean.toLowerCase();
+
+    if (DEFAULT_BRANCHES.some(b => b.toLowerCase() === newBrLower) || 
+        customBranches.some(b => b.toLowerCase() === newBrLower && b.toLowerCase() !== oldBrLower)) {
+      alert('Branch name already exists!');
+      return;
+    }
+
+    const updatedCustomBranches = customBranches.map(b => b.toLowerCase() === oldBrLower ? newBrClean : b);
+
+    const updatedBranchCreds = { ...branchCredentials };
+    if (updatedBranchCreds[oldBrLower]) {
+      const creds = updatedBranchCreds[oldBrLower];
+      const newUsername = creds.username.toLowerCase() === `admin@${oldBrLower}` 
+        ? `admin@${newBrLower}` 
+        : creds.username;
+      updatedBranchCreds[newBrLower] = {
+        username: newUsername,
+        password: creds.password
+      };
+      delete updatedBranchCreds[oldBrLower];
+    }
+
+    const updatedBatchCreds = { ...batchCredentials };
+    for (const key of Object.keys(updatedBatchCreds)) {
+      if (key.startsWith(`${oldBrLower}_`)) {
+        const parts = key.split('_');
+        const batchId = parts.slice(1).join('_');
+        const newKey = `${newBrLower}_${batchId}`;
+        const creds = updatedBatchCreds[key];
+        
+        const newUsername = creds.username.toLowerCase() === `${batchId}@${oldBrLower}` 
+          ? `${batchId}@${newBrLower}` 
+          : creds.username;
+
+        updatedBatchCreds[newKey] = {
+          username: newUsername,
+          password: creds.password
+        };
+        delete updatedBatchCreds[key];
+      }
+    }
+
+    setCustomBranches(updatedCustomBranches);
+    setBranchCredentials(updatedBranchCreds);
+    setBatchCredentials(updatedBatchCreds);
+
+    const dbBranches = Object.keys(updatedBranchCreds).map(b => b.charAt(0).toUpperCase() + b.slice(1));
+    const uniqueBranches = Array.from(new Set([
+      ...DEFAULT_BRANCHES,
+      ...dbBranches,
+      ...updatedCustomBranches.map(b => b.charAt(0).toUpperCase() + b.slice(1))
+    ]));
+    setBranches(uniqueBranches);
+
+    fetch(`${API_BASE_URL}/credentials`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customBranches: updatedCustomBranches,
+        branchCredentials: updatedBranchCreds,
+        batchCredentials: updatedBatchCreds
+      })
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to update branch on server');
+        return res.json();
+      })
+      .then(data => {
+        setCustomBranches(data.customBranches || []);
+        setBranchCredentials(data.branchCredentials || {});
+        setBatchCredentials(data.batchCredentials || {});
+        
+        const dbBranches = Object.keys(data.branchCredentials || {}).map(b => b.charAt(0).toUpperCase() + b.slice(1));
+        const uniqueBranches = Array.from(new Set([
+          ...DEFAULT_BRANCHES,
+          ...dbBranches,
+          ...(data.customBranches || []).map(b => b.charAt(0).toUpperCase() + b.slice(1))
+        ]));
+        setBranches(uniqueBranches);
+        
+        if (rawCredentials) {
+          setRawCredentials(prev => ({
+            ...prev,
+            customBranches: data.customBranches || [],
+            branchCredentials: data.branchCredentials || {},
+            batchCredentials: data.batchCredentials || {}
+          }));
+        }
+        setSettingsSuccess(`Branch "${oldBrClean}" renamed to "${newBrClean}" successfully!`);
+      })
+      .catch(err => {
+        setSettingsError('Error renaming branch: ' + err.message);
+        reloadAllAppData();
+      });
+  };
+
+  const handleAddBatch = (e) => {
+    e.preventDefault();
+    const name = newBatchForm.name.trim();
+    const schedule = newBatchForm.schedule.trim();
+    const br = newBatchForm.branch.toLowerCase();
+    const pass = newBatchForm.password;
+
+    if (!name || !schedule || !pass) {
+      setSettingsError('Batch name, schedule pattern, and password are required');
+      return;
+    }
+
+    if (pass !== newBatchForm.confirmPassword) {
+      setNewBatchPasswordError('Passwords do not match');
+      return;
+    }
+
+    if (batchOptions.some(b => b.name.toLowerCase() === name.toLowerCase() || b.schedule.toLowerCase() === schedule.toLowerCase())) {
+      setSettingsError('A batch with this name or schedule already exists!');
+      return;
+    }
+
+    const id = 'batch_' + Date.now();
+    const newBatchObj = { id, name, schedule };
+
+    const key = `${br}_${id}`;
+    const defaultUser = `${id}@${br}`;
+
+    const updatedCustomBatches = [...customBatches, newBatchObj];
+    const updatedBatchCreds = {
+      ...batchCredentials,
+      [key]: { username: defaultUser, password: pass }
+    };
+
+    fetch(`${API_BASE_URL}/credentials`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customBatches: updatedCustomBatches,
+        batchCredentials: updatedBatchCreds
+      })
+    })
+      .then(res => res.json())
+      .then(data => {
+        setCustomBatches(data.customBatches || []);
+        setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...(data.customBatches || [])]);
+        setBatchCredentials(data.batchCredentials || {});
+        if (rawCredentials) {
+          setRawCredentials(prev => ({
+            ...prev,
+            customBatches: data.customBatches || [],
+            batchCredentials: data.batchCredentials || {}
+          }));
+        }
+        setNewBatchForm({ name: '', schedule: '', branch: 'kuttiady', username: '', password: '', confirmPassword: '' });
+        setSettingsSuccess(`Batch "${name}" added and credentials configured successfully!`);
+      })
+      .catch(err => {
+        setSettingsError('Error adding batch: ' + err.message);
+      });
+  };
+
+  const handleDeleteCustomBatch = (batchIdToDelete, batchName) => {
+    if (DEFAULT_BATCH_OPTIONS.some(b => b.id === batchIdToDelete)) {
+      setSettingsError('Cannot delete default system batches!');
+      return;
+    }
+    if (!window.confirm(`Are you sure you want to delete the batch "${batchName}"?`)) {
+      return;
+    }
+
+    const updatedCustomBatches = customBatches.filter(b => b.id !== batchIdToDelete);
+    
+    // Also delete from batchCredentials map
+    const updatedBatchCreds = { ...batchCredentials };
+    for (const key of Object.keys(updatedBatchCreds)) {
+      if (key.endsWith(`_${batchIdToDelete}`) || key === batchIdToDelete) {
+        delete updatedBatchCreds[key];
+      }
+    }
+
+    // Optimistically update
+    setCustomBatches(updatedCustomBatches);
+    setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...updatedCustomBatches]);
+    setBatchCredentials(updatedBatchCreds);
+
+    fetch(`${API_BASE_URL}/credentials`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        customBatches: updatedCustomBatches,
+        batchCredentials: updatedBatchCreds
+      })
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to delete batch on server');
+        return res.json();
+      })
+      .then(data => {
+        setCustomBatches(data.customBatches || []);
+        setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...(data.customBatches || [])]);
+        setBatchCredentials(data.batchCredentials || {});
+        if (rawCredentials) {
+          setRawCredentials(prev => ({
+            ...prev,
+            customBatches: data.customBatches || [],
+            batchCredentials: data.batchCredentials || {}
+          }));
+        }
+        setSettingsSuccess(`Batch "${batchName}" deleted successfully!`);
+      })
+      .catch(err => {
+        setSettingsError('Error deleting batch: ' + err.message);
+        reloadAllAppData();
+      });
+  };
+
+  const handleEditCustomBatch = (batchId, newName, newSchedule) => {
+    const nameClean = newName.trim();
+    const scheduleClean = newSchedule.trim();
+
+    if (!nameClean || !scheduleClean) {
+      alert('Batch name and schedule pattern are required.');
+      return;
+    }
+
+    if (batchOptions.some(b => b.id !== batchId && (b.name.toLowerCase() === nameClean.toLowerCase() || b.schedule.toLowerCase() === scheduleClean.toLowerCase()))) {
+      alert('A batch with this name or schedule already exists!');
+      return;
+    }
+
+    const updatedCustomBatches = customBatches.map(b => b.id === batchId ? { ...b, name: nameClean, schedule: scheduleClean } : b);
+    
+    setCustomBatches(updatedCustomBatches);
+    setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...updatedCustomBatches]);
+
+    fetch(`${API_BASE_URL}/credentials`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customBatches: updatedCustomBatches
+      })
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to update batch on server');
+        return res.json();
+      })
+      .then(data => {
+        setCustomBatches(data.customBatches || []);
+        setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...(data.customBatches || [])]);
+        
+        if (rawCredentials) {
+          setRawCredentials(prev => ({
+            ...prev,
+            customBatches: data.customBatches || []
+          }));
+        }
+        setSettingsSuccess(`Batch renamed to "${nameClean}" successfully!`);
+      })
+      .catch(err => {
+        setSettingsError('Error renaming batch: ' + err.message);
+        reloadAllAppData();
+      });
+  };
+
 
   // Prevent body scroll in admin mode to avoid double scrollbars
   useEffect(() => {
@@ -1693,7 +2112,7 @@ function App() {
                           >
                             {student.name}
                           </td>
-                          <td data-label="Batch Info"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.schedule} • {student.batch}</span></td>
+                          <td data-label="Batch Info"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule)} • {student.batch}</span></td>
                           <td data-label="Status">
                             {status === 'present' && <span className="badge badge-green">Present</span>}
                             {status === 'absent' && <span className="badge badge-red">Absent</span>}
@@ -2021,7 +2440,7 @@ function App() {
                             <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.branch}</span>
                           </td>
                         )}
-                        <td data-label="Batch Time"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.batch}</span></td>
+                        <td data-label="Batch Time"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule)} • {student.batch}</span></td>
                         <td data-label={`Admission (₹${admissionFeeRate})`} style={{ textAlign: 'center' }}>
                           <select
                             value={student.admissionPaid ? "paid" : "pending"}
@@ -2299,7 +2718,7 @@ function App() {
           <div>
             <h3 style={{ margin: 0, fontSize: '1.4rem', color: '#E50914', fontFamily: 'var(--font-heading)' }}>{student.name}</h3>
             <p style={{ margin: '0.25rem 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>
-              Branch: <strong>{student.branch}</strong> • Batch: <strong>{student.batch}</strong> ({student.schedule})
+              Branch: <strong>{student.branch}</strong> • Batch: <strong>{getBatchNameFromSchedule(student.schedule)} • {student.batch}</strong>
             </p>
             <p style={{ margin: '0.25rem 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>
               Joined: <strong>{student.joinDate}</strong>
@@ -2504,7 +2923,7 @@ function App() {
                 <tr key={student.id}>
                   <td data-label="Name" style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>{student.name}</td>
                   <td data-label="Belt Level"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
-                  <td data-label="Batch"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>{student.schedule}</span></td>
+                  <td data-label="Batch"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>{getBatchNameFromSchedule(student.schedule)} • {student.batch}</span></td>
                   <td data-label="Skill Score"><span style={{ fontWeight: 'bold', color: student.performanceScore > 80 ? '#4CAF50' : '#FF9800' }}>{student.performanceScore}/100</span></td>
                   <td data-label="Progress to Next Belt" style={{ width: '30%' }}>
                     <div className="progress-container">
@@ -2703,12 +3122,13 @@ function App() {
                   <th>Username</th>
                   <th>Position / Role</th>
                   <th>Session Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {Object.entries(branchCredentials).length === 0 ? (
                   <tr>
-                    <td colSpan="4" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No branch inspectors configured.</td>
+                    <td colSpan="5" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No branch inspectors configured.</td>
                   </tr>
                 ) : (
                   Object.entries(branchCredentials).map(([branchKey, info]) => (
@@ -2725,6 +3145,35 @@ function App() {
                           <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                             ⚪ Offline
                           </span>
+                        )}
+                      </td>
+                      <td data-label="Actions">
+                        {DEFAULT_BRANCHES.map(b => b.toLowerCase().trim()).includes(branchKey.toLowerCase().trim()) ? (
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>System Default</span>
+                        ) : (
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              type="button"
+                              className="btn-small"
+                              style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
+                              onClick={() => {
+                                const newName = prompt(`Enter new name for branch "${branchKey}":`, branchKey);
+                                if (newName && newName.trim() && newName.trim().toLowerCase() !== branchKey.toLowerCase()) {
+                                  handleEditCustomBranch(branchKey, newName.trim());
+                                }
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-small"
+                              style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
+                              onClick={() => handleDeleteCustomBranch(branchKey)}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -2748,12 +3197,13 @@ function App() {
                   <th>Username</th>
                   <th>Position / Role</th>
                   <th>Session Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {Object.entries(batchCredentials).length === 0 ? (
                   <tr>
-                    <td colSpan="4" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No batch inspectors configured.</td>
+                    <td colSpan="5" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No batch inspectors configured.</td>
                   </tr>
                 ) : (
                   Object.entries(batchCredentials).map(([batchKey, info]) => {
@@ -2791,6 +3241,39 @@ function App() {
                             </span>
                           )}
                         </td>
+                        <td data-label="Actions">
+                          {DEFAULT_BATCH_OPTIONS.some(b => b.id === batchId) ? (
+                            <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>System Default</span>
+                          ) : (
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button
+                                type="button"
+                                className="btn-small"
+                                style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
+                                onClick={() => {
+                                  const customBatchObj = customBatches.find(cb => cb.id === batchId);
+                                  const currentName = customBatchObj ? customBatchObj.name : batchNameText;
+                                  const currentSchedule = customBatchObj ? customBatchObj.schedule : '';
+                                  const newName = prompt(`Enter new name for batch:`, currentName);
+                                  if (newName === null) return;
+                                  const newSchedule = prompt(`Enter new schedule pattern:`, currentSchedule);
+                                  if (newSchedule === null) return;
+                                  handleEditCustomBatch(batchId, newName.trim(), newSchedule.trim());
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-small"
+                                style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
+                                onClick={() => handleDeleteCustomBatch(batchId, batchNameText)}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </td>
                       </tr>
                     );
                   })
@@ -2818,228 +3301,7 @@ function App() {
       );
     }
 
-    const handleAddBranch = (e) => {
-      e.preventDefault();
-      const newBrClean = newBranchForm.name.trim();
-      const user = newBranchForm.username.trim();
-      const pass = newBranchForm.password;
 
-      if (!newBrClean || !pass) {
-        setSettingsError('Branch name and password are required');
-        return;
-      }
-
-      if (pass !== newBranchForm.confirmPassword) {
-        setNewBranchPasswordError('Passwords do not match');
-        return;
-      }
-
-      const newBrLower = newBrClean.toLowerCase();
-      if (branches.some(b => b.toLowerCase() === newBrLower)) {
-        setSettingsError('Branch already exists!');
-        return;
-      }
-
-      const defaultUser = `admin@${newBrLower}`;
-      const finalUser = user || defaultUser;
-
-      const updatedCustomBranches = [...customBranches, newBrClean];
-      const updatedBranchCreds = {
-        ...branchCredentials,
-        [newBrLower]: { username: finalUser, password: pass }
-      };
-
-      fetch(`${API_BASE_URL}/credentials`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customBranches: updatedCustomBranches,
-          branchCredentials: updatedBranchCreds
-        })
-      })
-        .then(res => res.json())
-        .then(data => {
-          setCustomBranches(data.customBranches || []);
-          setBranchCredentials(data.branchCredentials || {});
-
-          const dbBranches = Object.keys(data.branchCredentials || {}).map(b => b.charAt(0).toUpperCase() + b.slice(1));
-          const uniqueBranches = Array.from(new Set([
-            ...DEFAULT_BRANCHES,
-            ...dbBranches,
-            ...(data.customBranches || []).map(b => b.charAt(0).toUpperCase() + b.slice(1))
-          ]));
-          setBranches(uniqueBranches);
-          setNewBranchForm({ name: '', username: '', password: '', confirmPassword: '' });
-          setSettingsSuccess(`Branch "${newBrClean}" created and credentials configured successfully!`);
-        })
-        .catch(err => {
-          setSettingsError('Error adding branch: ' + err.message);
-        });
-    };
-
-    const handleDeleteCustomBranch = (branchToDelete) => {
-      if (DEFAULT_BRANCHES.includes(branchToDelete)) {
-        setSettingsError('Cannot delete default system branches!');
-        return;
-      }
-      if (!window.confirm(`Are you sure you want to delete the branch "${branchToDelete}"?`)) {
-        return;
-      }
-
-      const branchKey = branchToDelete.toLowerCase().trim();
-      const updatedCustomBranches = customBranches.filter(b => b.toLowerCase().trim() !== branchKey);
-
-      // Also delete from branchCredentials map
-      const updatedBranchCreds = { ...branchCredentials };
-      delete updatedBranchCreds[branchKey];
-
-      // Optimistically update
-      setCustomBranches(updatedCustomBranches);
-      setBranchCredentials(updatedBranchCreds);
-      
-      const dbBranches = Object.keys(updatedBranchCreds).map(b => b.charAt(0).toUpperCase() + b.slice(1));
-      const uniqueBranches = Array.from(new Set([
-        ...DEFAULT_BRANCHES,
-        ...dbBranches,
-        ...updatedCustomBranches.map(b => b.charAt(0).toUpperCase() + b.slice(1))
-      ]));
-      setBranches(uniqueBranches);
-
-      fetch(`${API_BASE_URL}/credentials`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          customBranches: updatedCustomBranches,
-          branchCredentials: updatedBranchCreds
-        })
-      })
-        .then(res => {
-          if (!res.ok) throw new Error('Failed to delete branch on server');
-          return res.json();
-        })
-        .then(data => {
-          setCustomBranches(data.customBranches || []);
-          setBranchCredentials(data.branchCredentials || {});
-          
-          const dbBranches = Object.keys(data.branchCredentials || {}).map(b => b.charAt(0).toUpperCase() + b.slice(1));
-          const uniqueBranches = Array.from(new Set([
-            ...DEFAULT_BRANCHES,
-            ...dbBranches,
-            ...(data.customBranches || []).map(b => b.charAt(0).toUpperCase() + b.slice(1))
-          ]));
-          setBranches(uniqueBranches);
-          setSettingsSuccess(`Branch "${branchToDelete}" deleted successfully!`);
-        })
-        .catch(err => {
-          setSettingsError('Error deleting branch: ' + err.message);
-          reloadAllAppData();
-        });
-    };
-
-    const handleAddBatch = (e) => {
-      e.preventDefault();
-      const name = newBatchForm.name.trim();
-      const schedule = newBatchForm.schedule.trim();
-      const br = newBatchForm.branch.toLowerCase();
-      const user = newBatchForm.username.trim();
-      const pass = newBatchForm.password;
-
-      if (!name || !schedule || !pass) {
-        setSettingsError('Batch name, schedule pattern, and password are required');
-        return;
-      }
-
-      if (pass !== newBatchForm.confirmPassword) {
-        setNewBatchPasswordError('Passwords do not match');
-        return;
-      }
-
-      if (batchOptions.some(b => b.name.toLowerCase() === name.toLowerCase() || b.schedule.toLowerCase() === schedule.toLowerCase())) {
-        setSettingsError('A batch with this name or schedule already exists!');
-        return;
-      }
-
-      const id = 'batch_' + Date.now();
-      const newBatchObj = { id, name, schedule };
-
-      const key = `${br}_${id}`;
-      const defaultUser = `${id}@${br}`;
-      const finalUser = user || defaultUser;
-
-      const updatedCustomBatches = [...customBatches, newBatchObj];
-      const updatedBatchCreds = {
-        ...batchCredentials,
-        [key]: { username: finalUser, password: pass }
-      };
-
-      fetch(`${API_BASE_URL}/credentials`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customBatches: updatedCustomBatches,
-          batchCredentials: updatedBatchCreds
-        })
-      })
-        .then(res => res.json())
-        .then(data => {
-          setCustomBatches(data.customBatches || []);
-          setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...(data.customBatches || [])]);
-          setBatchCredentials(data.batchCredentials || {});
-          setNewBatchForm({ name: '', schedule: '', branch: 'kuttiady', username: '', password: '', confirmPassword: '' });
-          setSettingsSuccess(`Batch "${name}" added and credentials configured successfully!`);
-        })
-        .catch(err => {
-          setSettingsError('Error adding batch: ' + err.message);
-        });
-    };
-
-    const handleDeleteCustomBatch = (batchIdToDelete, batchName) => {
-      if (DEFAULT_BATCH_OPTIONS.some(b => b.id === batchIdToDelete)) {
-        setSettingsError('Cannot delete default system batches!');
-        return;
-      }
-      if (!window.confirm(`Are you sure you want to delete the batch "${batchName}"?`)) {
-        return;
-      }
-
-      const updatedCustomBatches = customBatches.filter(b => b.id !== batchIdToDelete);
-      
-      // Also delete from batchCredentials map
-      const updatedBatchCreds = { ...batchCredentials };
-      for (const key of Object.keys(updatedBatchCreds)) {
-        if (key.endsWith(`_${batchIdToDelete}`) || key === batchIdToDelete) {
-          delete updatedBatchCreds[key];
-        }
-      }
-
-      // Optimistically update
-      setCustomBatches(updatedCustomBatches);
-      setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...updatedCustomBatches]);
-      setBatchCredentials(updatedBatchCreds);
-
-      fetch(`${API_BASE_URL}/credentials`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          customBatches: updatedCustomBatches,
-          batchCredentials: updatedBatchCreds
-        })
-      })
-        .then(res => {
-          if (!res.ok) throw new Error('Failed to delete batch on server');
-          return res.json();
-        })
-        .then(data => {
-          setCustomBatches(data.customBatches || []);
-          setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...(data.customBatches || [])]);
-          setBatchCredentials(data.batchCredentials || {});
-          setSettingsSuccess(`Batch "${batchName}" deleted successfully!`);
-        })
-        .catch(err => {
-          setSettingsError('Error deleting batch: ' + err.message);
-          reloadAllAppData();
-        });
-    };
 
     const handleForceLogoutSession = (tokenToTerminate) => {
       const currentToken = getSessionToken();
@@ -3872,79 +4134,34 @@ function App() {
                         />
                       </div>
                       <div className="form-group" style={{ marginBottom: '1rem' }}>
-                        <label>Inspector Username (Optional)</label>
+                        <label>Password</label>
                         <input
-                          type="text"
+                          type="password"
                           className="form-control"
-                          placeholder="e.g. admin@vatakara (auto-default)"
-                          value={newBranchForm.username}
-                          onChange={(e) => setNewBranchForm({ ...newBranchForm, username: e.target.value })}
+                          placeholder="Enter password"
+                          value={newBranchForm.password || ''}
+                          onChange={(e) => { setNewBranchForm({ ...newBranchForm, password: e.target.value }); setNewBranchPasswordError(''); }}
+                          required
                         />
                       </div>
-                      <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
-                        <div className="form-group">
-                          <label>Inspector Password</label>
-                          <input
-                            type="password"
-                            className="form-control"
-                            placeholder="Enter password"
-                            value={newBranchForm.password}
-                            onChange={(e) => { setNewBranchForm({ ...newBranchForm, password: e.target.value }); setNewBranchPasswordError(''); }}
-                            required
-                          />
-                        </div>
-                        <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
-                          <div className="form-group">
-                            <label>Confirm Password</label>
-                            <input
-                              type="password"
-                              className="form-control"
-                              placeholder="Confirm password"
-                              value={newBranchForm.confirmPassword}
-                              onChange={(e) => { setNewBranchForm({ ...newBranchForm, confirmPassword: e.target.value }); setNewBranchPasswordError(''); }}
-                              required
-                            />
-                            {newBranchPasswordError && (
-                              <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{newBranchPasswordError}</div>
-                            )}
-                          </div>
-                        </div>
+                      <div className="form-group" style={{ marginBottom: '1rem' }}>
+                        <label>Confirm Password</label>
+                        <input
+                          type="password"
+                          className="form-control"
+                          placeholder="Confirm password"
+                          value={newBranchForm.confirmPassword || ''}
+                          onChange={(e) => { setNewBranchForm({ ...newBranchForm, confirmPassword: e.target.value }); setNewBranchPasswordError(''); }}
+                          required
+                        />
+                        {newBranchPasswordError && (
+                          <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{newBranchPasswordError}</div>
+                        )}
                       </div>
-                      <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Branch & Credentials</button>
+                      <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Branch</button>
                     </form>
 
-                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Custom Branches List</label>
-                    {customBranches.length === 0 ? (
-                      <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No custom branches added yet.</p>
-                    ) : (
-                      <div className="table-responsive">
-                        <table className="data-table responsive-table-cards">
-                          <thead>
-                            <tr>
-                              <th>Branch Name</th>
-                              <th>Action</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {customBranches.map(br => (
-                              <tr key={br}>
-                                <td data-label="Branch Name" style={{ color: 'var(--color-text-light)' }}>{br}</td>
-                                <td data-label="Action">
-                                  <button
-                                    type="button"
-                                    className="btn-small"
-                                    style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
-                                    onClick={() => handleDeleteCustomBranch(br)}
-                                  >
-                                    Delete
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
+
                   </div>
                 )}
 
@@ -3955,134 +4172,74 @@ function App() {
                   </div>
 
                   <form onSubmit={handleAddBatch} style={{ marginBottom: '2rem' }}>
-                    <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
-                      <div className="form-group">
-                        <label>Batch Name</label>
-                        <input
-                          type="text"
-                          className="form-control"
-                          placeholder="e.g. Batch 4 (Sat - Sun)"
-                          value={newBatchForm.name}
-                          onChange={(e) => setNewBatchForm({ ...newBatchForm, name: e.target.value })}
-                          required
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label>Schedule Pattern</label>
-                        <input
-                          type="text"
-                          className="form-control"
-                          placeholder="e.g. Sat-Sun"
-                          value={newBatchForm.schedule}
-                          onChange={(e) => setNewBatchForm({ ...newBatchForm, schedule: e.target.value })}
-                          required
-                        />
-                      </div>
+                    <div className="form-group" style={{ marginBottom: '1rem' }}>
+                      <label>Batch Name</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. Batch 4"
+                        value={newBatchForm.name}
+                        onChange={(e) => setNewBatchForm({ ...newBatchForm, name: e.target.value })}
+                        required
+                      />
                     </div>
-
-                    <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
-                      <div className="form-group">
-                        <label>Configure Credentials for Branch</label>
-                        <select
-                          className="form-control"
-                          value={newBatchForm.branch}
-                          disabled={!isSuper}
-                          onChange={(e) => setNewBatchForm({ ...newBatchForm, branch: e.target.value })}
-                        >
-                          {isSuper ? (
-                            branches.map(br => (
-                              <option key={br} value={br.toLowerCase()}>{br}</option>
-                            ))
-                          ) : (
-                            <option value={getLoggedInUserBranch().toLowerCase()}>{getLoggedInUserBranch()}</option>
-                          )}
-                        </select>
-                      </div>
-                      <div className="form-group">
-                        <label>Inspector Username (Optional)</label>
-                        <input
-                          type="text"
-                          className="form-control"
-                          placeholder="e.g. batch_id@branch (auto)"
-                          value={newBatchForm.username}
-                          onChange={(e) => setNewBatchForm({ ...newBatchForm, username: e.target.value })}
-                        />
-                      </div>
+                    <div className="form-group" style={{ marginBottom: '1rem' }}>
+                      <label>Schedule Pattern</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. Sat-Sun"
+                        value={newBatchForm.schedule}
+                        onChange={(e) => setNewBatchForm({ ...newBatchForm, schedule: e.target.value })}
+                        required
+                      />
                     </div>
-
-                    <div className="grid-2-col" style={{ gap: '1rem', marginBottom: '1rem' }}>
-                      <div className="form-group">
-                        <label>Inspector Password</label>
-                        <input
-                          type="password"
-                          className="form-control"
-                          placeholder="Enter password"
-                          value={newBatchForm.password}
-                          onChange={(e) => { setNewBatchForm({ ...newBatchForm, password: e.target.value }); setNewBatchPasswordError(''); }}
-                          required
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label>Confirm Password</label>
-                        <input
-                          type="password"
-                          className="form-control"
-                          placeholder="Confirm password"
-                          value={newBatchForm.confirmPassword}
-                          onChange={(e) => { setNewBatchForm({ ...newBatchForm, confirmPassword: e.target.value }); setNewBatchPasswordError(''); }}
-                          required
-                        />
-                        {newBatchPasswordError && (
-                          <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{newBatchPasswordError}</div>
+                    <div className="form-group" style={{ marginBottom: '1rem' }}>
+                      <label>Select Branch</label>
+                      <select
+                        className="form-control"
+                        value={newBatchForm.branch}
+                        disabled={!isSuper}
+                        onChange={(e) => setNewBatchForm({ ...newBatchForm, branch: e.target.value })}
+                      >
+                        {isSuper ? (
+                          branches.map(br => (
+                            <option key={br} value={br.toLowerCase()}>{br}</option>
+                          ))
+                        ) : (
+                          <option value={getLoggedInUserBranch().toLowerCase()}>{getLoggedInUserBranch()}</option>
                         )}
-                      </div>
+                      </select>
                     </div>
-                    <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Batch & Credentials</button>
+                    <div className="form-group" style={{ marginBottom: '1rem' }}>
+                      <label>Password</label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        placeholder="Enter password"
+                        value={newBatchForm.password || ''}
+                        onChange={(e) => { setNewBatchForm({ ...newBatchForm, password: e.target.value }); setNewBatchPasswordError(''); }}
+                        required
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: '1rem' }}>
+                      <label>Confirm Password</label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        placeholder="Confirm password"
+                        value={newBatchForm.confirmPassword || ''}
+                        onChange={(e) => { setNewBatchForm({ ...newBatchForm, confirmPassword: e.target.value }); setNewBatchPasswordError(''); }}
+                        required
+                      />
+                      {newBatchPasswordError && (
+                        <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{newBatchPasswordError}</div>
+                      )}
+                    </div>
+                    <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Batch</button>
                   </form>
 
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Custom Batches List</label>
-                  {customBatches.filter(bt => {
-                    if (isSuper) return true;
-                    const userBranch = getLoggedInUserBranch().toLowerCase();
-                    return batchCredentials[`${userBranch}_${bt.id}`] !== undefined;
-                  }).length === 0 ? (
-                    <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No custom batches added yet.</p>
-                  ) : (
-                    <div className="table-responsive">
-                      <table className="data-table responsive-table-cards">
-                        <thead>
-                          <tr>
-                            <th>Batch Details</th>
-                            <th>Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {customBatches.filter(bt => {
-                            if (isSuper) return true;
-                            const userBranch = getLoggedInUserBranch().toLowerCase();
-                            return batchCredentials[`${userBranch}_${bt.id}`] !== undefined;
-                          }).map(bt => (
-                            <tr key={bt.id}>
-                              <td data-label="Batch Details">
-                                <div style={{ color: 'var(--color-text-light)' }}>{bt.name}</div>
-                                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Pattern: {bt.schedule}</div>
-                              </td>
-                              <td data-label="Action">
-                                <button
-                                  type="button"
-                                  className="btn-small"
-                                  style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
-                                  onClick={() => handleDeleteCustomBatch(bt.id, bt.name)}
-                                >
-                                  Delete
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+
                 </div>
               </div>
             )}
@@ -4933,7 +5090,7 @@ function App() {
                             </td>
                             <td data-label="Batch Schedule">
                               <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', marginRight: '8px' }}>{student.branch}</span>
-                              <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.schedule} • {student.batch}</span>
+                              <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule)} • {student.batch}</span>
                             </td>
                             <td data-label="Belt Level"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
                             <td data-label="Phone" style={{ color: 'var(--color-text-muted)' }}>{student.phone}</td>
@@ -5194,7 +5351,7 @@ function App() {
                     <h4 style={{ margin: '0 0 1rem 0', color: 'var(--color-secondary)', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Academy Details</h4>
                     <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                       <span className="badge" style={{ background: 'var(--color-primary)', color: 'white' }}>{selectedStudent.branch} Branch</span>
-                      <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>{selectedStudent.schedule}</span>
+                      <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>{getBatchNameFromSchedule(selectedStudent.schedule)}</span>
                       <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>{selectedStudent.batch} Batch</span>
                     </div>
                   </div>
@@ -5709,6 +5866,8 @@ function App() {
           </div>
         </div>
       )}
+
+
     </div>
   );
 }
