@@ -9,4 +9,6 @@ const sessionSchema = new mongoose.Schema({
   deviceName: { type: String }
 }, { timestamps: true });
 
+sessionSchema.index({ username: 1 });
+
 export default mongoose.model('Session', sessionSchema);

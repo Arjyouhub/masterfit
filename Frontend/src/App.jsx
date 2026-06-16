@@ -100,6 +100,23 @@ function App() {
     return getSessionUser() || '';
   });
 
+  const handleSelectStudent = (student) => {
+    if (!student) {
+      setSelectedStudent(null);
+      return;
+    }
+    setSelectedStudent(student);
+    if (student.photo === undefined) {
+      fetch(`${API_BASE_URL}/students/${student.id}/photo`)
+        .then(res => res.json())
+        .then(data => {
+          setSelectedStudent(prev => prev && prev.id === student.id ? { ...prev, photo: data.photo } : prev);
+          setStudents(prevList => prevList.map(s => s.id === student.id ? { ...s, photo: data.photo } : s));
+        })
+        .catch(err => console.error('Error fetching student photo:', err));
+    }
+  };
+
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [selectedBranchLogin, setSelectedBranchLogin] = useState('Kuttiady');
   const [selectedBatchLogin, setSelectedBatchLogin] = useState('admin');
@@ -644,12 +661,50 @@ function App() {
     name: '', age: '', phone: '', belt: 'White', joinDate: getLocalDateString(), batch: 'Morning', schedule: 'Mon-Thu', branch: 'Kuttiady', photo: null, status: 'Active'
   });
 
+  const compressImage = (base64Str, maxWidth = 150, maxHeight = 150, quality = 0.7) => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = base64Str;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressedBase64);
+      };
+      img.onerror = () => {
+        resolve(base64Str);
+      };
+    });
+  };
+
   const handlePhotoUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setNewStudent({ ...newStudent, photo: reader.result });
+        compressImage(reader.result).then(compressedDataUrl => {
+          setNewStudent({ ...newStudent, photo: compressedDataUrl });
+        });
       };
       reader.readAsDataURL(file);
     }
@@ -1518,7 +1573,7 @@ function App() {
                           <td
                             data-label="Student"
                             style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}
-                            onClick={() => setSelectedStudent(student)}
+                            onClick={() => handleSelectStudent(student)}
                           >
                             {student.name}
                           </td>
@@ -1811,7 +1866,7 @@ function App() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <div
                               style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}
-                              onClick={() => setSelectedStudent(student)}
+                              onClick={() => handleSelectStudent(student)}
                             >
                               {student.name}
                             </div>
@@ -2412,7 +2467,7 @@ function App() {
 
                     return (
                       <tr key={student.id}>
-                        <td data-label="Student Name" onClick={() => setSelectedStudent(student)} style={{ cursor: 'pointer', color: '#E50914', textDecoration: 'underline' }}>{student.name}</td>
+                        <td data-label="Student Name" onClick={() => handleSelectStudent(student)} style={{ cursor: 'pointer', color: '#E50914', textDecoration: 'underline' }}>{student.name}</td>
                         <td data-label="Phone">{student.phone}</td>
                         <td data-label="Due Amount">
                           <span className="badge badge-red">₹{fees.totalDue}</span>
@@ -4417,7 +4472,7 @@ function App() {
                         {searchedStudents.map(student => (
                           <tr key={student.id}>
                             <td data-label="Name">
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={() => setSelectedStudent(student)}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={() => handleSelectStudent(student)}>
                                 {student.photo ? (
                                   <img src={student.photo} alt="" style={{ width: '30px', height: '40px', borderRadius: '4px', objectFit: 'cover' }} />
                                 ) : (

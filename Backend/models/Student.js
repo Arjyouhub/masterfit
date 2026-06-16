@@ -24,4 +24,6 @@ const studentSchema = new mongoose.Schema({
   couponValue: { type: Number, default: 0 } // discount value (percentage or flat amount)
 }, { timestamps: true });
 
+studentSchema.index({ branch: 1, status: 1 });
+
 export default mongoose.model('Student', studentSchema);

@@ -117,6 +117,10 @@ function decryptAttendanceRecords(records) {
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
@@ -230,11 +234,23 @@ mongoose.connect(process.env.MONGO_URI, { dbName: 'attendance' })
 // Credentials seeding removed - relies entirely on existing database values.
 
 // Routes
-// 1. Get all students
+// 1. Get all students (excl. photo for memory optimization)
 app.get('/api/students', async (req, res) => {
   try {
-    const students = await Student.find({});
+    const students = await Student.find({}).select('-photo').lean();
     res.json(students.map(decryptStudent));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 1.1. Get student photo by ID (on-demand)
+app.get('/api/students/:id/photo', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const student = await Student.findOne({ id: Number(id) }).select('photo').lean();
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    res.json({ photo: decrypt(student.photo) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -277,10 +293,10 @@ app.delete('/api/students/:id', async (req, res) => {
   }
 });
 
-// 5. Get all attendance records
+// 5. Get all attendance records (using lean for memory efficiency)
 app.get('/api/attendance', async (req, res) => {
   try {
-    const records = await Attendance.find({});
+    const records = await Attendance.find({}).lean();
     const attendanceMap = {};
     records.forEach(record => {
       const plainRecords = record.records instanceof Map ? Object.fromEntries(record.records) : record.records;
@@ -415,7 +431,7 @@ app.get('/api/session/verify', async (req, res) => {
     const { token } = req.query;
     if (!token) return res.status(400).json({ success: false, error: 'Token is required' });
     
-    const session = await Session.findOne({ token });
+    const session = await Session.findOne({ token }).lean();
     if (session) {
       return res.json({ success: true, username: session.username });
     }
@@ -430,7 +446,7 @@ app.post('/api/logout', async (req, res) => {
   try {
     const { token } = req.body;
     if (token) {
-      await Session.findOneAndDelete({ token });
+      await Session.deleteOne({ token });
     }
     res.json({ success: true });
   } catch (err) {
@@ -441,7 +457,7 @@ app.post('/api/logout', async (req, res) => {
 // Get all active sessions (Super Admin only)
 app.get('/api/sessions', async (req, res) => {
   try {
-    const sessions = await Session.find({}).sort({ loginTime: -1 });
+    const sessions = await Session.find({}).sort({ loginTime: -1 }).lean();
     res.json(sessions);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -452,7 +468,7 @@ app.get('/api/sessions', async (req, res) => {
 app.delete('/api/sessions/:token', async (req, res) => {
   try {
     const { token } = req.params;
-    await Session.findOneAndDelete({ token });
+    await Session.deleteOne({ token });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -697,12 +713,12 @@ app.post('/api/superadmin/forgot-password/reset', async (req, res) => {
 // 8. Get credentials (passwords masked for security)
 app.get('/api/credentials', async (req, res) => {
   try {
-    const creds = await Credential.findOne({ configType: 'main' });
+    const creds = await Credential.findOne({ configType: 'main' }).lean();
     if (!creds) {
       return res.json({ configType: 'main', adminCredentials: {}, branchCredentials: {}, batchCredentials: {} });
     }
     
-    const safeCreds = creds.toJSON();
+    const safeCreds = { ...creds };
     if (safeCreds.adminCredentials) {
       for (const user of Object.keys(safeCreds.adminCredentials)) {
         safeCreds.adminCredentials[user] = '••••••';
