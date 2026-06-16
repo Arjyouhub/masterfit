@@ -1312,12 +1312,27 @@ html.admin-html, body.admin-body {
   width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE/Edge */
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: rgba(255, 255, 255, 0.2) rgba(0, 0, 0, 0.2); /* Firefox */
 }
 
 .table-responsive::-webkit-scrollbar {
-  display: none; /* Chrome, Safari, Opera */
+  height: 6px; /* Custom thin height */
+  display: block; /* Chrome, Safari, Opera */
+}
+
+.table-responsive::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 3px;
+}
+
+.table-responsive::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+.table-responsive::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.35);
 }
 
 .data-table td {

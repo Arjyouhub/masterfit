@@ -530,9 +530,9 @@ function App() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Prevent body scroll in admin and login modes to avoid double scrollbars
+  // Prevent body scroll in admin mode to avoid double scrollbars
   useEffect(() => {
-    if (appMode === 'admin' || appMode === 'login' || appMode === 'superadmin-login') {
+    if (appMode === 'admin') {
       document.body.classList.add('admin-body');
       document.documentElement.classList.add('admin-html');
     } else {
