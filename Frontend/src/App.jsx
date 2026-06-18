@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Users, CalendarDays, Wallet, Bell, Settings, LogOut, UserPlus, AlertTriangle, X,
   ChevronLeft, ChevronRight, CheckCircle, XCircle, MessageCircle,
   Search, Phone, Trash2, ArrowRight, Activity, MapPin, TrendingUp, Award, Menu,
-  Shield, Lock, Unlock, FileDown, FileUp
+  Shield, Lock, Unlock, FileDown, FileUp, Database, Terminal, Cpu, HardDrive, Key, History
 } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import './index.css';
 
 // Academy Branches static list fallback
@@ -23,6 +24,9 @@ const API_BASE_URL = window.location.hostname === 'localhost' || window.location
 
 
 function App() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
   // Bulletproof Cookie Parser
   const getCookieValue = (name) => {
     const cookies = document.cookie.split(';');
@@ -71,6 +75,10 @@ function App() {
     const hasSession = getSessionUser();
 
     if (hasSession) {
+      const cleanUser = hasSession.toLowerCase().trim();
+      if (cleanUser === 'developer' || cleanUser.startsWith('developer@')) {
+        return 'developer';
+      }
       return 'admin'; // Always restore admin dashboard if session exists!
     }
 
@@ -97,6 +105,63 @@ function App() {
   const [newCouponForm, setNewCouponForm] = useState({ code: '', type: 'percentage', value: '' });
   const [rawCredentials, setRawCredentials] = useState(null);
   const [loadingRawCreds, setLoadingRawCreds] = useState(false);
+
+  // Rebuilt Developer Panel States
+  const [devView, setDevView] = useState('dashboard');
+  const [devDashboardStats, setDevDashboardStats] = useState(null);
+  const [devUsers, setDevUsers] = useState([]);
+  const [devUsersPage, setDevUsersPage] = useState(1);
+  const [devUsersTotalPages, setDevUsersTotalPages] = useState(1);
+  const [devUsersTotalItems, setDevUsersTotalItems] = useState(0);
+  const [devUserSearch, setDevUserSearch] = useState('');
+  const [devUserEdit, setDevUserEdit] = useState(null);
+  const [devUserEditForm, setDevUserEditForm] = useState({ username: '', email: '', role: '', status: '' });
+  
+  const [devSessions, setDevSessions] = useState([]);
+  const [devSessionsPage, setDevSessionsPage] = useState(1);
+  const [devSessionsTotalPages, setDevSessionsTotalPages] = useState(1);
+  const [devSessionsTotalItems, setDevSessionsTotalItems] = useState(0);
+  
+  const [devLoginHistory, setDevLoginHistory] = useState([]);
+  const [devLoginHistoryPage, setDevLoginHistoryPage] = useState(1);
+  const [devLoginHistoryTotalPages, setDevLoginHistoryTotalPages] = useState(1);
+  const [devLoginHistoryTotalItems, setDevLoginHistoryTotalItems] = useState(0);
+
+  const [devSecurityLogs, setDevSecurityLogs] = useState([]);
+  const [devSecurityLogsPage, setDevSecurityLogsPage] = useState(1);
+  const [devSecurityLogsTotalPages, setDevSecurityLogsTotalPages] = useState(1);
+  const [devSecurityLogsTotalItems, setDevSecurityLogsTotalItems] = useState(0);
+  
+  const [devAppLogs, setDevAppLogs] = useState([]);
+  const [devAppLogsPage, setDevAppLogsPage] = useState(1);
+  const [devAppLogsTotalPages, setDevAppLogsTotalPages] = useState(1);
+  const [devAppLogsTotalItems, setDevAppLogsTotalItems] = useState(0);
+  const [devLogsType, setDevLogsType] = useState('all');
+  const [devLogsSearch, setDevLogsSearch] = useState('');
+  
+  const [devSystemStatus, setDevSystemStatus] = useState(null);
+  const [devDatabaseInfo, setDevDatabaseInfo] = useState(null);
+  
+  const [devAuditLogs, setDevAuditLogs] = useState([]);
+  const [devAuditLogsPage, setDevAuditLogsPage] = useState(1);
+  const [devAuditLogsTotalPages, setDevAuditLogsTotalPages] = useState(1);
+  const [devAuditLogsTotalItems, setDevAuditLogsTotalItems] = useState(0);
+  const [devAuditType, setDevAuditType] = useState('');
+  
+  const [devSettings, setDevSettings] = useState({
+    maintenanceMode: false,
+    sessionTimeoutMinutes: 30,
+    minPasswordLength: 6,
+    failedLoginThreshold: 5,
+    failedLoginBlockTimeMinutes: 15,
+    logRetentionLimit: 1000
+  });
+  
+  const [devSettingsSuccess, setDevSettingsSuccess] = useState('');
+  const [devSettingsError, setDevSettingsError] = useState('');
+  const [devActionLoading, setDevActionLoading] = useState(false);
+  const [devSessionFeedback, setDevSessionFeedback] = useState(null);
+  const [devUserFeedback, setDevUserFeedback] = useState(null);
 
   const [loggedInUser, setLoggedInUser] = useState(() => {
     return getSessionUser() || '';
@@ -633,6 +698,277 @@ function App() {
     }
   }, [currentView, loggedInUser]);
 
+  // Developer Panel API Integrations
+  const getDevHeaders = () => {
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${getSessionToken()}`
+    };
+  };
+
+  const loadDevDashboardStats = () => {
+    fetch(`${API_BASE_URL}/developer/dashboard-stats`, { headers: getDevHeaders() })
+      .then(res => {
+        if (!res.ok) throw new Error('Access Denied');
+        return res.json();
+      })
+      .then(data => setDevDashboardStats(data))
+      .catch(err => console.error("Error loading developer dashboard stats:", err));
+  };
+
+  const loadDevUsers = (page = devUsersPage, search = devUserSearch) => {
+    fetch(`${API_BASE_URL}/developer/users?page=${page}&limit=10&search=${encodeURIComponent(search)}`, { headers: getDevHeaders() })
+      .then(res => res.json())
+      .then(data => {
+        setDevUsers(data.users || []);
+        setDevUsersTotalPages(data.pagination.totalPages || 1);
+        setDevUsersPage(data.pagination.page || 1);
+        setDevUsersTotalItems(data.pagination.totalItems || 0);
+      })
+      .catch(err => console.error("Error loading users:", err));
+  };
+
+  const loadDevSessions = (page = devSessionsPage) => {
+    fetch(`${API_BASE_URL}/developer/sessions?page=${page}&limit=10`, { headers: getDevHeaders() })
+      .then(res => res.json())
+      .then(data => {
+        setDevSessions(data.sessions || []);
+        setDevSessionsTotalPages(data.pagination.totalPages || 1);
+        setDevSessionsPage(data.pagination.page || 1);
+        setDevSessionsTotalItems(data.pagination.totalItems || 0);
+      })
+      .catch(err => console.error("Error loading sessions:", err));
+  };
+
+  const loadDevLoginHistory = (page = devLoginHistoryPage) => {
+    fetch(`${API_BASE_URL}/developer/login-history?page=${page}&limit=10`, { headers: getDevHeaders() })
+      .then(res => res.json())
+      .then(data => {
+        setDevLoginHistory(data.history || []);
+        setDevLoginHistoryTotalPages(data.pagination.totalPages || 1);
+        setDevLoginHistoryPage(data.pagination.page || 1);
+        setDevLoginHistoryTotalItems(data.pagination.totalItems || 0);
+      })
+      .catch(err => console.error("Error loading login history:", err));
+  };
+
+  const loadDevSecurityLogs = (page = devSecurityLogsPage) => {
+    fetch(`${API_BASE_URL}/developer/security-logs?page=${page}&limit=10`, { headers: getDevHeaders() })
+      .then(res => res.json())
+      .then(data => {
+        setDevSecurityLogs(data.logs || []);
+        setDevSecurityLogsTotalPages(data.pagination.totalPages || 1);
+        setDevSecurityLogsPage(data.pagination.page || 1);
+        setDevSecurityLogsTotalItems(data.pagination.totalItems || 0);
+      })
+      .catch(err => console.error("Error loading security logs:", err));
+  };
+
+  const loadDevAppLogs = (page = devAppLogsPage, type = devLogsType, search = devLogsSearch) => {
+    fetch(`${API_BASE_URL}/developer/app-logs?page=${page}&limit=20&type=${type}&search=${encodeURIComponent(search)}`, { headers: getDevHeaders() })
+      .then(res => res.json())
+      .then(data => {
+        setDevAppLogs(data.logs || []);
+        setDevAppLogsTotalPages(data.pagination.totalPages || 1);
+        setDevAppLogsPage(data.pagination.page || 1);
+        setDevAppLogsTotalItems(data.pagination.totalItems || 0);
+      })
+      .catch(err => console.error("Error loading app logs:", err));
+  };
+
+  const loadDevSystemStatus = () => {
+    fetch(`${API_BASE_URL}/developer/system-status`, { headers: getDevHeaders() })
+      .then(res => res.json())
+      .then(data => setDevSystemStatus(data))
+      .catch(err => console.error("Error loading system status:", err));
+  };
+
+  const loadDevDatabaseInfo = () => {
+    fetch(`${API_BASE_URL}/developer/database`, { headers: getDevHeaders() })
+      .then(res => res.json())
+      .then(data => setDevDatabaseInfo(data))
+      .catch(err => console.error("Error loading database stats:", err));
+  };
+
+  const loadDevAuditLogs = (page = devAuditLogsPage, type = devAuditType) => {
+    fetch(`${API_BASE_URL}/developer/audit?page=${page}&limit=10&eventType=${type}`, { headers: getDevHeaders() })
+      .then(res => res.json())
+      .then(data => {
+        setDevAuditLogs(data.logs || []);
+        setDevAuditLogsTotalPages(data.pagination.totalPages || 1);
+        setDevAuditLogsPage(data.pagination.page || 1);
+        setDevAuditLogsTotalItems(data.pagination.totalItems || 0);
+      })
+      .catch(err => console.error("Error loading audit logs:", err));
+  };
+
+  const loadDevSettings = () => {
+    fetch(`${API_BASE_URL}/developer/settings`, { headers: getDevHeaders() })
+      .then(res => res.json())
+      .then(data => setDevSettings(data))
+      .catch(err => console.error("Error loading dev settings:", err));
+  };
+
+  // Form actions
+  const handleDevSettingsSubmit = (e) => {
+    e.preventDefault();
+    setDevSettingsSuccess('');
+    setDevSettingsError('');
+    setDevActionLoading(true);
+
+    fetch(`${API_BASE_URL}/developer/settings`, {
+      method: 'POST',
+      headers: getDevHeaders(),
+      body: JSON.stringify(devSettings)
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to update system settings');
+        }
+        setDevSettingsSuccess('System settings updated successfully in database.');
+        setDevSettings(data.settings);
+      })
+      .catch(err => {
+        console.error(err);
+        setDevSettingsError(err.message);
+      })
+      .finally(() => setDevActionLoading(false));
+  };
+
+  const handleDevUserSave = (e) => {
+    e.preventDefault();
+    setDevUserFeedback(null);
+    setDevActionLoading(true);
+
+    fetch(`${API_BASE_URL}/developer/users/${devUserEdit._id}`, {
+      method: 'PUT',
+      headers: getDevHeaders(),
+      body: JSON.stringify(devUserEditForm)
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to edit user.');
+        }
+        setDevUserFeedback({ type: 'success', message: 'User updated successfully.' });
+        setDevUserEdit(null);
+        loadDevUsers(devUsersPage, devUserSearch);
+      })
+      .catch(err => {
+        console.error(err);
+        setDevUserFeedback({ type: 'error', message: err.message });
+      })
+      .finally(() => setDevActionLoading(false));
+  };
+
+  const handleDevUserSoftDelete = (id) => {
+    if (!window.confirm("Are you sure you want to soft delete this user? They will be disabled and password credentials will be removed.")) return;
+    setDevUserFeedback(null);
+    setDevActionLoading(true);
+
+    fetch(`${API_BASE_URL}/developer/users/${id}`, {
+      method: 'DELETE',
+      headers: getDevHeaders()
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to soft delete user.');
+        }
+        setDevUserFeedback({ type: 'success', message: 'User soft-deleted successfully.' });
+        loadDevUsers(devUsersPage, devUserSearch);
+      })
+      .catch(err => {
+        console.error(err);
+        setDevUserFeedback({ type: 'error', message: err.message });
+      })
+      .finally(() => setDevActionLoading(false));
+  };
+
+  const handleDevLogoutSession = (token) => {
+    if (!window.confirm("Are you sure you want to terminate this session?")) return;
+    setDevActionLoading(true);
+    setDevSessionFeedback(null);
+
+    fetch(`${API_BASE_URL}/developer/sessions/${token}`, {
+      method: 'DELETE',
+      headers: getDevHeaders()
+    })
+      .then(async res => {
+        if (res.ok) {
+          const currentToken = getSessionToken();
+          if (token === currentToken) {
+            clearSession();
+            setLoggedInUser('');
+            setAppMode('login');
+          } else {
+            setDevSessionFeedback({ type: 'success', message: 'Session terminated successfully.' });
+            loadDevSessions(devSessionsPage);
+          }
+        } else {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Failed to terminate session.');
+        }
+      })
+      .catch(err => {
+        console.error("Error logging out session:", err);
+        setDevSessionFeedback({ type: 'error', message: err.message });
+      })
+      .finally(() => setDevActionLoading(false));
+  };
+
+  const handleDevLogoutAllSessions = () => {
+    if (!window.confirm("Are you sure you want to terminate all other sessions? This will force-logout all users on all devices (except your current session).")) return;
+    setDevActionLoading(true);
+    setDevSessionFeedback(null);
+
+    fetch(`${API_BASE_URL}/developer/sessions`, {
+      method: 'DELETE',
+      headers: getDevHeaders()
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (res.ok) {
+          setDevSessionFeedback({ type: 'success', message: `Successfully terminated ${data.deletedCount} sessions.` });
+          loadDevSessions(devSessionsPage);
+        } else {
+          throw new Error(data.error || 'Failed to terminate sessions.');
+        }
+      })
+      .catch(err => {
+        console.error("Error logging out all sessions:", err);
+        setDevSessionFeedback({ type: 'error', message: err.message });
+      })
+      .finally(() => setDevActionLoading(false));
+  };
+
+  // Trigger loading functions based on view
+  useEffect(() => {
+    if (appMode !== 'developer') return;
+
+    if (devView === 'dashboard') {
+      loadDevDashboardStats();
+    } else if (devView === 'users') {
+      loadDevUsers(devUsersPage, devUserSearch);
+    } else if (devView === 'sessions') {
+      loadDevSessions(devSessionsPage);
+      loadDevLoginHistory(devLoginHistoryPage);
+    } else if (devView === 'security') {
+      loadDevSecurityLogs(devSecurityLogsPage);
+    } else if (devView === 'logs') {
+      loadDevAppLogs(devAppLogsPage, devLogsType, devLogsSearch);
+    } else if (devView === 'system') {
+      loadDevSystemStatus();
+    } else if (devView === 'database') {
+      loadDevDatabaseInfo();
+    } else if (devView === 'audit') {
+      loadDevAuditLogs(devAuditLogsPage, devAuditType);
+    } else if (devView === 'settings') {
+      loadDevSettings();
+    }
+  }, [appMode, devView, devUsersPage, devSessionsPage, devLoginHistoryPage, devSecurityLogsPage, devAppLogsPage, devLogsType, devLogsSearch, devAuditLogsPage, devAuditType]);
+
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 50);
@@ -1056,7 +1392,7 @@ function App() {
 
   // Prevent body scroll in admin mode to avoid double scrollbars
   useEffect(() => {
-    if (appMode === 'admin') {
+    if (appMode === 'admin' || appMode === 'developer') {
       document.body.classList.add('admin-body');
       document.documentElement.classList.add('admin-html');
     } else {
@@ -1074,21 +1410,51 @@ function App() {
     const handleHashChange = () => {
       const hash = window.location.hash;
       const hasSession = getSessionUser();
+      const isDevSession = hasSession && (hasSession.toLowerCase() === 'developer' || hasSession.toLowerCase().startsWith('developer@'));
 
-      if (hash === '#/superadmin') {
+      if (hash.startsWith('#/developer')) {
+        if (isDevSession) {
+          setAppMode('developer');
+          const subview = hash.split('/')[2] || 'dashboard';
+          setDevView(subview);
+        } else {
+          // If a session exists but it's not developer, go to admin dashboard
+          if (hasSession) {
+            window.location.hash = '#/admin';
+          } else {
+            window.location.hash = '#/login';
+          }
+        }
+      } else if (hash === '#/superadmin') {
         if (hasSession) {
-          window.location.hash = '#/admin';
+          if (isDevSession) {
+            window.location.hash = '#/developer/dashboard';
+          } else {
+            window.location.hash = '#/admin';
+          }
         } else {
           setAppMode('superadmin-login');
         }
       } else if (hash === '#/login' || hash === '#/branch' || hash === '#/batch') {
         if (hasSession) {
-          window.location.hash = '#/admin';
+          if (isDevSession) {
+            window.location.hash = '#/developer/dashboard';
+          } else {
+            window.location.hash = '#/admin';
+          }
         } else {
           setAppMode('login');
         }
       } else if (hash === '#/admin') {
-        setAppMode(hasSession ? 'admin' : 'login');
+        if (hasSession) {
+          if (isDevSession) {
+            window.location.hash = '#/developer/dashboard';
+          } else {
+            setAppMode('admin');
+          }
+        } else {
+          setAppMode('login');
+        }
       } else if (hash === '' || hash === '#/' || hash === '#/home') {
         setAppMode('website');
       }
@@ -1103,7 +1469,7 @@ function App() {
   // Close sidebar on view changes
   useEffect(() => {
     setIsSidebarOpen(false);
-  }, [currentView]);
+  }, [currentView, devView]);
 
   // Sync state changes back to URL hash
   useEffect(() => {
@@ -1118,8 +1484,13 @@ function App() {
       window.location.hash = '#/superadmin';
     } else if (appMode === 'admin' && currentHash !== '#/admin') {
       window.location.hash = '#/admin';
+    } else if (appMode === 'developer') {
+      const targetHash = `#/developer/${devView}`;
+      if (currentHash !== targetHash) {
+        window.location.hash = targetHash;
+      }
     }
-  }, [appMode]);
+  }, [appMode, devView]);
 
   // Helper functions to get current local date/month (avoiding UTC timezone shift issues)
   const getLocalDateString = () => {
@@ -1674,6 +2045,1121 @@ function App() {
     })
       .then(res => res.json())
       .catch(err => console.error("Error marking attendance:", err));
+  };
+
+  // --- Rebuilt Developer Panel Views ---
+  const renderDevDashboard = () => {
+    if (!devDashboardStats) {
+      return <div style={{ color: '#8e8e93', padding: '2rem' }}>Loading dashboard diagnostics...</div>;
+    }
+    const { users, database, system, recentActivity, securityAlerts } = devDashboardStats;
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        {/* Quick Stats Grid */}
+        <div className="dev-grid">
+          <div className="dev-card">
+            <div className="dev-card-title"><Users size={16} color="#5e5ce6" /> Total Users</div>
+            <div className="dev-stat-val">{users?.total || 0}</div>
+            <div className="dev-stat-lbl">Registered Accounts</div>
+          </div>
+          <div className="dev-card">
+            <div className="dev-card-title"><Activity size={16} color="#30d158" /> Active Sessions</div>
+            <div className="dev-stat-val">{users?.sessions || 0}</div>
+            <div className="dev-stat-lbl">{users?.active || 0} Online Users</div>
+          </div>
+          <div className="dev-card">
+            <div className="dev-card-title"><Database size={16} color="#bf5af2" /> Database Status</div>
+            <div className="dev-stat-val" style={{ color: database?.status === 'Connected' ? '#30d158' : '#ff453a' }}>
+              {database?.status || 'Unknown'}
+            </div>
+            <div className="dev-stat-lbl">{database?.studentsCount || 0} Students enrolled</div>
+          </div>
+          <div className="dev-card">
+            <div className="dev-card-title"><Cpu size={16} color="#0a84ff" /> Process Memory</div>
+            <div className="dev-stat-val">{system?.memoryUsage || 'N/A'}</div>
+            <div className="dev-stat-lbl">Heap memory used</div>
+          </div>
+        </div>
+
+        {/* System & Database health details */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '2rem' }}>
+          {/* Recent Audits */}
+          <div className="dev-card">
+            <div className="dev-card-header">
+              <h4 className="dev-card-title"><History size={16} color="#ff9f0a" /> Recent Operations & Audits</h4>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {recentActivity && recentActivity.length > 0 ? (
+                recentActivity.map(act => (
+                  <div key={act._id} style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                      <span style={{ fontWeight: 600, color: '#fff' }}>{act.username || 'System'}</span>
+                      <span style={{ color: '#8e8e93' }}>{new Date(act.createdAt).toLocaleString()}</span>
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#d1d1d6' }}>
+                      <span className="dev-badge dev-badge-gray" style={{ marginRight: '6px', fontSize: '0.65rem', padding: '2px 4px' }}>{act.eventType}</span>
+                      {act.description}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div style={{ color: '#8e8e93', fontSize: '0.8rem' }}>No recent admin actions.</div>
+              )}
+            </div>
+          </div>
+
+          {/* Security alerts */}
+          <div className="dev-card">
+            <div className="dev-card-header">
+              <h4 className="dev-card-title"><AlertTriangle size={16} color="#ff453a" /> Intrusion alerts & Failed Logins</h4>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {securityAlerts && securityAlerts.length > 0 ? (
+                securityAlerts.map(alert => (
+                  <div key={alert._id} style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                      <span style={{ fontWeight: 600, color: '#ff453a' }}>{alert.username || 'Unknown'}</span>
+                      <span style={{ color: '#8e8e93' }}>{new Date(alert.createdAt).toLocaleString()}</span>
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#ff9f0a' }}>
+                      <span className="dev-badge dev-badge-red" style={{ marginRight: '6px', fontSize: '0.65rem', padding: '2px 4px' }}>{alert.eventType}</span>
+                      {alert.description} (IP: {alert.ipAddress})
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div style={{ color: '#8e8e93', fontSize: '0.8rem' }}>No security warnings detected.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDevUsers = () => {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+          {/* User search */}
+          <div style={{ position: 'relative', width: '300px' }}>
+            <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#8e8e93' }} />
+            <input
+              type="text"
+              className="dev-input"
+              placeholder="Search user accounts..."
+              style={{ paddingLeft: '32px' }}
+              value={devUserSearch}
+              onChange={(e) => {
+                setDevUserSearch(e.target.value);
+                setDevUsersPage(1);
+                loadDevUsers(1, e.target.value);
+              }}
+            />
+          </div>
+          <div style={{ color: '#8e8e93', fontSize: '0.85rem' }}>
+            Found <strong>{devUsersTotalItems}</strong> registered user accounts
+          </div>
+        </div>
+
+        {devUserFeedback && (
+          <div className={`dev-banner dev-banner-${devUserFeedback.type}`}>
+            {devUserFeedback.type === 'success' ? <CheckCircle size={16} /> : <AlertTriangle size={16} />}
+            {devUserFeedback.message}
+          </div>
+        )}
+
+        <div className="dev-table-container">
+          <table className="dev-table">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Registered At</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {devUsers.length > 0 ? (
+                devUsers.map(u => (
+                  <tr key={u._id}>
+                    <td style={{ fontWeight: 600, color: '#fff' }}>{u.username}</td>
+                    <td>{u.email || 'N/A'}</td>
+                    <td>
+                      <span className={`dev-badge ${
+                        u.role === 'developer' ? 'dev-badge-blue' :
+                        u.role === 'superadmin' ? 'dev-badge-yellow' :
+                        u.role === 'branchadmin' ? 'dev-badge-green' : 'dev-badge-gray'
+                      }`}>{u.role}</span>
+                    </td>
+                    <td>
+                      <span className={`dev-badge ${u.status === 'Active' ? 'dev-badge-green' : 'dev-badge-red'}`}>{u.status || 'Active'}</span>
+                    </td>
+                    <td>{new Date(u.createdAt).toLocaleDateString()}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          className="dev-btn dev-btn-secondary"
+                          style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                          onClick={() => {
+                            setDevUserEdit(u);
+                            setDevUserEditForm({
+                              username: u.username,
+                              email: u.email || '',
+                              role: u.role,
+                              status: u.status || 'Active'
+                            });
+                          }}
+                        >
+                          Modify
+                        </button>
+                        {u.username !== 'developer' && u.username !== 'admin' && (
+                          <button
+                            className="dev-btn dev-btn-danger"
+                            style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                            onClick={() => handleDevUserSoftDelete(u._id)}
+                          >
+                            Soft Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="6" style={{ textAlign: 'center', color: '#8e8e93', padding: '2rem' }}>No user accounts found.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          {devUsersTotalPages > 1 && (
+            <div className="dev-pagination">
+              <span className="dev-pagination-info">Page {devUsersPage} of {devUsersTotalPages}</span>
+              <div className="dev-pagination-btns">
+                <button
+                  className="dev-btn dev-btn-secondary"
+                  disabled={devUsersPage === 1}
+                  onClick={() => {
+                    const prev = devUsersPage - 1;
+                    setDevUsersPage(prev);
+                    loadDevUsers(prev, devUserSearch);
+                  }}
+                >
+                  Previous
+                </button>
+                <button
+                  className="dev-btn dev-btn-secondary"
+                  disabled={devUsersPage === devUsersTotalPages}
+                  onClick={() => {
+                    const next = devUsersPage + 1;
+                    setDevUsersPage(next);
+                    loadDevUsers(next, devUserSearch);
+                  }}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Edit User Modal Overlay */}
+        {devUserEdit && (
+          <div className="modal-overlay" style={{ zIndex: 1000 }}>
+            <div className="modal-content" style={{ maxWidth: '400px', background: '#0b0b14', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <div className="panel-header">
+                <h3 className="panel-title">Modify User Settings</h3>
+                <button className="btn-icon" onClick={() => setDevUserEdit(null)}><X size={20} /></button>
+              </div>
+              <form onSubmit={handleDevUserSave} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>Username</label>
+                  <input
+                    type="text"
+                    className="dev-input"
+                    value={devUserEditForm.username}
+                    onChange={(e) => setDevUserEditForm({ ...devUserEditForm, username: e.target.value })}
+                    required
+                    disabled={devUserEdit.username === 'developer' || devUserEdit.username === 'admin'}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>Email Address</label>
+                  <input
+                    type="email"
+                    className="dev-input"
+                    value={devUserEditForm.email}
+                    onChange={(e) => setDevUserEditForm({ ...devUserEditForm, email: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>User Role</label>
+                  <select
+                    className="dev-input"
+                    value={devUserEditForm.role}
+                    onChange={(e) => setDevUserEditForm({ ...devUserEditForm, role: e.target.value })}
+                    disabled={devUserEdit.username === 'developer'}
+                  >
+                    <option value="superadmin">Super Admin</option>
+                    <option value="developer">Developer</option>
+                    <option value="branchadmin">Branch Admin</option>
+                    <option value="coordinator">Batch Inspector</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>Account Status</label>
+                  <select
+                    className="dev-input"
+                    value={devUserEditForm.status}
+                    onChange={(e) => setDevUserEditForm({ ...devUserEditForm, status: e.target.value })}
+                    disabled={devUserEdit.username === 'developer'}
+                  >
+                    <option value="Active">Active / Enabled</option>
+                    <option value="Disabled">Disabled</option>
+                    <option value="SoftDeleted">Soft Deleted</option>
+                  </select>
+                </div>
+                <div className="modal-actions" style={{ marginTop: '1rem' }}>
+                  <button type="button" className="dev-btn dev-btn-secondary" onClick={() => setDevUserEdit(null)}>Cancel</button>
+                  <button type="submit" className="dev-btn dev-btn-primary" disabled={devActionLoading}>
+                    {devActionLoading ? 'Saving...' : 'Apply Modifications'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderDevSessions = () => {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+          <h4 style={{ margin: 0, color: '#fff', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.5px' }}>Active User Sessions</h4>
+          <button
+            className="dev-btn dev-btn-danger"
+            onClick={handleDevLogoutAllSessions}
+            disabled={devActionLoading || devSessions.length <= 1}
+          >
+            Force Logout All Other Sessions
+          </button>
+        </div>
+
+        {devSessionFeedback && (
+          <div className={`dev-banner dev-banner-${devSessionFeedback.type}`}>
+            {devSessionFeedback.type === 'success' ? <CheckCircle size={16} /> : <AlertTriangle size={16} />}
+            {devSessionFeedback.message}
+          </div>
+        )}
+
+        <div className="dev-table-container">
+          <table className="dev-table">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Device/Client Details</th>
+                <th>IP Address</th>
+                <th>Login Date & Time</th>
+                <th>Active Token</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {devSessions.map(s => {
+                const currentToken = getSessionToken();
+                const isCurrent = s.token === currentToken;
+                return (
+                  <tr key={s._id} style={isCurrent ? { background: 'rgba(94, 92, 230, 0.05)' } : {}}>
+                    <td style={{ fontWeight: 600, color: isCurrent ? '#5e5ce6' : '#fff' }}>
+                      {s.username} {isCurrent && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', opacity: 0.8 }}>(You)</span>}
+                    </td>
+                    <td>{parseClientDetails(s.userAgent, s.deviceName)}</td>
+                    <td>{s.ipAddress}</td>
+                    <td>{new Date(s.createdAt).toLocaleString()}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: '0.75rem', opacity: 0.6 }}>
+                      {s.token ? s.token.substring(0, 12) + '...' : 'N/A'}
+                    </td>
+                    <td>
+                      <button
+                        className="dev-btn dev-btn-danger"
+                        style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                        disabled={devActionLoading}
+                        onClick={() => handleDevLogoutSession(s.token)}
+                      >
+                        {isCurrent ? 'Log Out' : 'Revoke'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          {devSessionsTotalPages > 1 && (
+            <div className="dev-pagination">
+              <span className="dev-pagination-info">Page {devSessionsPage} of {devSessionsTotalPages}</span>
+              <div className="dev-pagination-btns">
+                <button
+                  className="dev-btn dev-btn-secondary"
+                  disabled={devSessionsPage === 1}
+                  onClick={() => {
+                    const prev = devSessionsPage - 1;
+                    setDevSessionsPage(prev);
+                    loadDevSessions(prev);
+                  }}
+                >
+                  Previous
+                </button>
+                <button
+                  className="dev-btn dev-btn-secondary"
+                  disabled={devSessionsPage === devSessionsTotalPages}
+                  onClick={() => {
+                    const next = devSessionsPage + 1;
+                    setDevSessionsPage(next);
+                    loadDevSessions(next);
+                  }}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Login History */}
+        <div>
+          <h4 style={{ margin: '0 0 1rem 0', color: '#fff', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.5px' }}>Device Login History</h4>
+          <div className="dev-table-container">
+            <table className="dev-table">
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Device / Client</th>
+                  <th>IP Address</th>
+                  <th>Status</th>
+                  <th>Timestamp</th>
+                </tr>
+              </thead>
+              <tbody>
+                {devLoginHistory.length > 0 ? (
+                  devLoginHistory.map(h => (
+                    <tr key={h._id}>
+                      <td style={{ fontWeight: 600, color: '#fff' }}>{h.username}</td>
+                      <td>{parseClientDetails(h.userAgent, h.deviceName)}</td>
+                      <td>{h.ipAddress}</td>
+                      <td>
+                        <span className={`dev-badge ${h.status === 'Success' ? 'dev-badge-green' : 'dev-badge-red'}`}>{h.status}</span>
+                      </td>
+                      <td>{new Date(h.createdAt).toLocaleString()}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="5" style={{ textAlign: 'center', color: '#8e8e93', padding: '2rem' }}>No login attempts catalogued.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+
+            {devLoginHistoryTotalPages > 1 && (
+              <div className="dev-pagination">
+                <span className="dev-pagination-info">Page {devLoginHistoryPage} of {devLoginHistoryTotalPages}</span>
+                <div className="dev-pagination-btns">
+                  <button
+                    className="dev-btn dev-btn-secondary"
+                    disabled={devLoginHistoryPage === 1}
+                    onClick={() => {
+                      const prev = devLoginHistoryPage - 1;
+                      setDevLoginHistoryPage(prev);
+                      loadDevLoginHistory(prev);
+                    }}
+                  >
+                    Previous
+                  </button>
+                  <button
+                    className="dev-btn dev-btn-secondary"
+                    disabled={devLoginHistoryPage === devLoginHistoryTotalPages}
+                    onClick={() => {
+                      const next = devLoginHistoryPage + 1;
+                      setDevLoginHistoryPage(next);
+                      loadDevLoginHistory(next);
+                    }}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDevSecurity = () => {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <h4 style={{ margin: 0, color: '#fff', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.5px' }}>Security Audit & Intrusion Log</h4>
+        <div className="dev-table-container">
+          <table className="dev-table">
+            <thead>
+              <tr>
+                <th>Event Type</th>
+                <th>Operator</th>
+                <th>Event Description</th>
+                <th>IP Address</th>
+                <th>Client Agent</th>
+                <th>Timestamp</th>
+              </tr>
+            </thead>
+            <tbody>
+              {devSecurityLogs.length > 0 ? (
+                devSecurityLogs.map(l => (
+                  <tr key={l._id}>
+                    <td>
+                      <span className={`dev-badge ${
+                        l.eventType === 'FailedLogin' ? 'dev-badge-red' :
+                        l.eventType === 'RoleChange' ? 'dev-badge-yellow' :
+                        l.eventType === 'SystemConfigUpdate' ? 'dev-badge-blue' : 'dev-badge-gray'
+                      }`}>{l.eventType}</span>
+                    </td>
+                    <td style={{ fontWeight: 600, color: '#fff' }}>{l.username || 'System'}</td>
+                    <td>{l.description}</td>
+                    <td>{l.ipAddress}</td>
+                    <td style={{ fontSize: '0.75rem', opacity: 0.7 }} title={l.userAgent}>
+                      {parseClientDetails(l.userAgent, null)}
+                    </td>
+                    <td>{new Date(l.createdAt).toLocaleString()}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="6" style={{ textAlign: 'center', color: '#8e8e93', padding: '2rem' }}>No security events logged.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          {devSecurityLogsTotalPages > 1 && (
+            <div className="dev-pagination">
+              <span className="dev-pagination-info">Page {devSecurityLogsPage} of {devSecurityLogsTotalPages}</span>
+              <div className="dev-pagination-btns">
+                <button
+                  className="dev-btn dev-btn-secondary"
+                  disabled={devSecurityLogsPage === 1}
+                  onClick={() => {
+                    const prev = devSecurityLogsPage - 1;
+                    setDevSecurityLogsPage(prev);
+                    loadDevSecurityLogs(prev);
+                  }}
+                >
+                  Previous
+                </button>
+                <button
+                  className="dev-btn dev-btn-secondary"
+                  disabled={devSecurityLogsPage === devSecurityLogsTotalPages}
+                  onClick={() => {
+                    const next = devSecurityLogsPage + 1;
+                    setDevSecurityLogsPage(next);
+                    loadDevSecurityLogs(next);
+                  }}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderDevLogs = () => {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        {/* Filter Toolbar */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.85rem', color: '#8e8e93' }}>Level:</span>
+            <select
+              className="dev-input"
+              style={{ width: '130px', padding: '0.35rem 0.55rem' }}
+              value={devLogsType}
+              onChange={(e) => {
+                setDevLogsType(e.target.value);
+                setDevAppLogsPage(1);
+                loadDevAppLogs(1, e.target.value, devLogsSearch);
+              }}
+            >
+              <option value="all">All Logs</option>
+              <option value="info">Info Logs</option>
+              <option value="warn">Warn Logs</option>
+              <option value="error">Error Logs</option>
+              <option value="auth">Auth Logs</option>
+              <option value="api">API Logs</option>
+            </select>
+            <span style={{ fontSize: '0.85rem', color: '#8e8e93', marginLeft: '10px' }}>Search:</span>
+            <input
+              type="text"
+              className="dev-input"
+              placeholder="Search console logs..."
+              style={{ width: '250px', padding: '0.35rem 0.55rem' }}
+              value={devLogsSearch}
+              onChange={(e) => {
+                setDevLogsSearch(e.target.value);
+                setDevAppLogsPage(1);
+                loadDevAppLogs(1, devLogsType, e.target.value);
+              }}
+            />
+          </div>
+          <div style={{ color: '#8e8e93', fontSize: '0.85rem' }}>
+            Terminal Buffer Size: <strong>{devAppLogsTotalItems}</strong> records
+          </div>
+        </div>
+
+        {/* Retro style terminal panel */}
+        <div className="terminal-window">
+          <div className="terminal-header">
+            <div className="terminal-dots">
+              <span className="terminal-dot red"></span>
+              <span className="terminal-dot yellow"></span>
+              <span className="terminal-dot green"></span>
+            </div>
+            <span style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: '#8e8e93' }}>console-feed@masterfit: ~</span>
+          </div>
+          <div className="terminal-body">
+            {devAppLogs.length > 0 ? (
+              devAppLogs.map((log, idx) => (
+                <div key={idx} className="terminal-row">
+                  <span className="terminal-timestamp">[{new Date(log.timestamp).toLocaleTimeString()}]</span>
+                  <span className={`terminal-badge ${log.type || 'info'}`}>{log.type || 'info'}</span>
+                  <span className={`terminal-msg ${log.type || 'info'}`}>{log.message}</span>
+                </div>
+              ))
+            ) : (
+              <div style={{ color: '#8e8e93', fontStyle: 'italic', textAlign: 'center', marginTop: '4rem' }}>
+                -- Log stream is empty. Try triggering API endpoints to log events. --
+              </div>
+            )}
+          </div>
+
+          {devAppLogsTotalPages > 1 && (
+            <div className="dev-pagination" style={{ background: '#020205', borderColor: 'rgba(255,255,255,0.05)' }}>
+              <span className="dev-pagination-info">Page {devAppLogsPage} of {devAppLogsTotalPages}</span>
+              <div className="dev-pagination-btns">
+                <button
+                  className="dev-btn dev-btn-secondary"
+                  disabled={devAppLogsPage === 1}
+                  onClick={() => {
+                    const prev = devAppLogsPage - 1;
+                    setDevAppLogsPage(prev);
+                    loadDevAppLogs(prev, devLogsType, devLogsSearch);
+                  }}
+                >
+                  Previous
+                </button>
+                <button
+                  className="dev-btn dev-btn-secondary"
+                  disabled={devAppLogsPage === devAppLogsTotalPages}
+                  onClick={() => {
+                    const next = devAppLogsPage + 1;
+                    setDevAppLogsPage(next);
+                    loadDevAppLogs(next, devLogsType, devLogsSearch);
+                  }}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderDevSystem = () => {
+    if (!devSystemStatus) {
+      return <div style={{ color: '#8e8e93', padding: '2rem' }}>Acquiring system resource statuses...</div>;
+    }
+    const { databaseStatus, activeUsers, totalSessions, os: systemOs, process: systemProcess } = devSystemStatus;
+
+    // Calculate OS load percentages (load avg)
+    const load1 = systemOs?.cpuUsage && systemOs.cpuUsage[0] ? Math.round(systemOs.cpuUsage[0] * 100) : 12;
+    const load5 = systemOs?.cpuUsage && systemOs.cpuUsage[1] ? Math.round(systemOs.cpuUsage[1] * 100) : 8;
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        <h4 style={{ margin: 0, color: '#fff', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.5px' }}>System Diagnostics & Host Performance</h4>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '2rem' }}>
+          {/* Node Process Metrics */}
+          <div className="dev-card">
+            <div className="dev-card-header">
+              <h4 className="dev-card-title"><Cpu size={16} color="#bf5af2" /> Node.js Server Process</h4>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <span style={{ fontSize: '0.8rem', color: '#8e8e93' }}>Process Runtime Uptime</span>
+                <div style={{ fontSize: '1.25rem', fontWeight: 600, color: '#fff', marginTop: '4px' }}>
+                  {Math.floor(systemProcess?.uptime / 3600)}h {Math.floor((systemProcess?.uptime % 3600) / 60)}m {Math.floor(systemProcess?.uptime % 60)}s
+                </div>
+              </div>
+
+              <div className="dev-progress-container">
+                <div className="dev-progress-lbl">
+                  <span>RSS Memory Allocation</span>
+                  <span>{systemProcess?.memoryUsage?.rss}</span>
+                </div>
+                <div className="dev-progress-bar">
+                  <div className="dev-progress-fill fill-purple" style={{ width: '35%' }}></div>
+                </div>
+              </div>
+
+              <div className="dev-progress-container">
+                <div className="dev-progress-lbl">
+                  <span>Heap Used / Heap Total</span>
+                  <span>{systemProcess?.memoryUsage?.heapUsed} / {systemProcess?.memoryUsage?.heapTotal}</span>
+                </div>
+                <div className="dev-progress-bar">
+                  <div className="dev-progress-fill fill-purple" style={{ width: '55%' }}></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* OS Environment Metrics */}
+          <div className="dev-card">
+            <div className="dev-card-header">
+              <h4 className="dev-card-title"><HardDrive size={16} color="#0a84ff" /> Operating System & Host VM</h4>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '0.8rem' }}>
+                <div>
+                  <span style={{ color: '#8e8e93' }}>Platform OS</span>
+                  <div style={{ fontWeight: 600, color: '#fff', fontSize: '0.95rem', marginTop: '4px' }}>{systemOs?.platform} ({systemOs?.release})</div>
+                </div>
+                <div>
+                  <span style={{ color: '#8e8e93' }}>Host System Uptime</span>
+                  <div style={{ fontWeight: 600, color: '#fff', fontSize: '0.95rem', marginTop: '4px' }}>
+                    {Math.floor(systemOs?.uptime / 86400)}d {Math.floor((systemOs?.uptime % 86400) / 3600)}h
+                  </div>
+                </div>
+              </div>
+
+              <div className="dev-progress-container">
+                <div className="dev-progress-lbl">
+                  <span>CPU Load Average (1m / 5m)</span>
+                  <span>{load1}% / {load5}%</span>
+                </div>
+                <div className="dev-progress-bar">
+                  <div className="dev-progress-fill fill-blue" style={{ width: `${Math.max(5, load1)}%` }}></div>
+                </div>
+              </div>
+
+              <div className="dev-progress-container">
+                <div className="dev-progress-lbl">
+                  <span>Free Memory / Total Memory</span>
+                  <span>{systemOs?.freeMemory} Free of {systemOs?.totalMemory}</span>
+                </div>
+                <div className="dev-progress-bar">
+                  <div className="dev-progress-fill fill-blue" style={{ width: '45%' }}></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDevDatabase = () => {
+    if (!devDatabaseInfo) {
+      return <div style={{ color: '#8e8e93', padding: '2rem' }}>Retrieving collection sizes and raw MongoDB stats...</div>;
+    }
+    const { databaseName, dataSize, storageSize, collectionsCount, objectsCount, pingLatencyMs, collections } = devDatabaseInfo;
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        {/* Core Stats */}
+        <div className="dev-grid">
+          <div className="dev-card">
+            <div className="dev-card-title">Database Name</div>
+            <div className="dev-stat-val" style={{ fontSize: '1.75rem' }}>{databaseName}</div>
+            <div className="dev-stat-lbl">MongoDB Database</div>
+          </div>
+          <div className="dev-card">
+            <div className="dev-card-title">Total Size / Storage</div>
+            <div className="dev-stat-val" style={{ fontSize: '1.75rem' }}>{dataSize} / {storageSize}</div>
+            <div className="dev-stat-lbl">Storage utilization</div>
+          </div>
+          <div className="dev-card">
+            <div className="dev-card-title">Record Objects Count</div>
+            <div className="dev-stat-val" style={{ fontSize: '1.75rem' }}>{objectsCount} docs</div>
+            <div className="dev-stat-lbl">In {collectionsCount} collections</div>
+          </div>
+          <div className="dev-card">
+            <div className="dev-card-title">Ping Response Latency</div>
+            <div className="dev-stat-val" style={{ fontSize: '1.75rem', color: pingLatencyMs > 100 ? '#ff9f0a' : '#30d158' }}>{pingLatencyMs} ms</div>
+            <div className="dev-stat-lbl">Ping response latency</div>
+          </div>
+        </div>
+
+        {/* Collections detailed list */}
+        <div>
+          <h4 style={{ margin: '0 0 1rem 0', color: '#fff', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.5px' }}>Collection Statistics & Index Mappings</h4>
+          <div className="dev-table-container">
+            <table className="dev-table">
+              <thead>
+                <tr>
+                  <th>Collection Name</th>
+                  <th>Document Count</th>
+                  <th>Data Size</th>
+                  <th>Storage Size</th>
+                  <th>Index Count</th>
+                  <th>Mapped Indexes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {collections && collections.map(col => (
+                  <tr key={col.name}>
+                    <td style={{ fontWeight: 600, color: '#fff' }}>{col.name}</td>
+                    <td>{col.count}</td>
+                    <td>{col.size}</td>
+                    <td>{col.storageSize}</td>
+                    <td>{col.indexCount}</td>
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.75rem' }}>
+                        {col.indexes && col.indexes.map(idx => (
+                          <div key={idx.name} style={{ background: 'rgba(255,255,255,0.02)', padding: '2px 6px', borderRadius: '3px', border: '1px solid rgba(255,255,255,0.04)', display: 'inline-block', width: 'fit-content' }}>
+                            <span style={{ fontWeight: 600, color: '#bf5af2' }}>{idx.name}</span>
+                            {idx.unique && <span style={{ marginLeft: '4px', color: '#ff9f0a', fontWeight: 'bold' }}>(unique)</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDevAudit = () => {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        {/* Toolbar filter */}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <span style={{ fontSize: '0.85rem', color: '#8e8e93' }}>Filter Event:</span>
+          <select
+            className="dev-input"
+            style={{ width: '200px', padding: '0.35rem 0.55rem' }}
+            value={devAuditType}
+            onChange={(e) => {
+              setDevAuditType(e.target.value);
+              setDevAuditLogsPage(1);
+              loadDevAuditLogs(1, e.target.value);
+            }}
+          >
+            <option value="">All Events (No logins)</option>
+            <option value="DeveloperAudit">Developer audits</option>
+            <option value="SystemConfigUpdate">System configs</option>
+            <option value="RoleChange">Role changes</option>
+            <option value="UserStatusUpdate">Account updates</option>
+            <option value="SessionTermination">Session expiries</option>
+          </select>
+          <div style={{ flex: 1 }}></div>
+          <div style={{ color: '#8e8e93', fontSize: '0.85rem' }}>
+            Catalogued Events: <strong>{devAuditLogsTotalItems}</strong> records
+          </div>
+        </div>
+
+        <div className="dev-table-container">
+          <table className="dev-table">
+            <thead>
+              <tr>
+                <th>Event Type</th>
+                <th>Operator User</th>
+                <th>Operation Details</th>
+                <th>IP Address</th>
+                <th>Date & Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {devAuditLogs.length > 0 ? (
+                devAuditLogs.map(l => (
+                  <tr key={l._id}>
+                    <td>
+                      <span className={`dev-badge ${
+                        l.eventType === 'DeveloperAudit' ? 'dev-badge-purple' :
+                        l.eventType === 'SystemConfigUpdate' ? 'dev-badge-blue' :
+                        l.eventType === 'RoleChange' ? 'dev-badge-yellow' : 'dev-badge-gray'
+                      }`}>{l.eventType}</span>
+                    </td>
+                    <td style={{ fontWeight: 600, color: '#fff' }}>{l.username || 'System'}</td>
+                    <td>{l.description}</td>
+                    <td>{l.ipAddress}</td>
+                    <td>{new Date(l.createdAt).toLocaleString()}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="5" style={{ textAlign: 'center', color: '#8e8e93', padding: '2rem' }}>No audit trail actions recorded.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          {devAuditLogsTotalPages > 1 && (
+            <div className="dev-pagination">
+              <span className="dev-pagination-info">Page {devAuditLogsPage} of {devAuditLogsTotalPages}</span>
+              <div className="dev-pagination-btns">
+                <button
+                  className="dev-btn dev-btn-secondary"
+                  disabled={devAuditLogsPage === 1}
+                  onClick={() => {
+                    const prev = devAuditLogsPage - 1;
+                    setDevAuditLogsPage(prev);
+                    loadDevAuditLogs(prev, devAuditType);
+                  }}
+                >
+                  Previous
+                </button>
+                <button
+                  className="dev-btn dev-btn-secondary"
+                  disabled={devAuditLogsPage === devAuditLogsTotalPages}
+                  onClick={() => {
+                    const next = devAuditLogsPage + 1;
+                    setDevAuditLogsPage(next);
+                    loadDevAuditLogs(next, devAuditType);
+                  }}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderDevSettings = () => {
+    return (
+      <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <h4 style={{ margin: 0, color: '#fff', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.5px' }}>Database-backed System Configurations</h4>
+        
+        {devSettingsSuccess && (
+          <div className="dev-banner dev-banner-success">
+            <CheckCircle size={16} />
+            {devSettingsSuccess}
+          </div>
+        )}
+
+        {devSettingsError && (
+          <div className="dev-banner dev-banner-error">
+            <AlertTriangle size={16} />
+            {devSettingsError}
+          </div>
+        )}
+
+        <form onSubmit={handleDevSettingsSubmit} className="dev-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* Maintenance Mode */}
+          <div className="form-group" style={{ margin: 0 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', color: '#fff' }}>
+              <input
+                type="checkbox"
+                checked={devSettings.maintenanceMode || false}
+                onChange={(e) => setDevSettings({ ...devSettings, maintenanceMode: e.target.checked })}
+                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+              />
+              System Maintenance Mode (Restricts access to developer role only)
+            </label>
+          </div>
+
+          {/* Session Timeout */}
+          <div className="form-group" style={{ margin: 0 }}>
+            <label>Auto-logout Inactivity Session Timeout (Minutes)</label>
+            <input
+              type="number"
+              className="dev-input"
+              value={devSettings.sessionTimeoutMinutes || ''}
+              onChange={(e) => setDevSettings({ ...devSettings, sessionTimeoutMinutes: parseInt(e.target.value, 10) || 0 })}
+              required
+              min="1"
+            />
+          </div>
+
+          {/* Minimum Password Length */}
+          <div className="form-group" style={{ margin: 0 }}>
+            <label>Minimum Password Character Limit (Rules check)</label>
+            <input
+              type="number"
+              className="dev-input"
+              value={devSettings.minPasswordLength || ''}
+              onChange={(e) => setDevSettings({ ...devSettings, minPasswordLength: parseInt(e.target.value, 10) || 0 })}
+              required
+              min="4"
+              max="32"
+            />
+          </div>
+
+          {/* Failed Login Threshold */}
+          <div className="form-group" style={{ margin: 0 }}>
+            <label>Failed Login Attempt Lockout Threshold</label>
+            <input
+              type="number"
+              className="dev-input"
+              value={devSettings.failedLoginThreshold || ''}
+              onChange={(e) => setDevSettings({ ...devSettings, failedLoginThreshold: parseInt(e.target.value, 10) || 0 })}
+              required
+              min="1"
+            />
+          </div>
+
+          {/* Failed Login Block Duration */}
+          <div className="form-group" style={{ margin: 0 }}>
+            <label>Intruder Lockout Duration (Minutes)</label>
+            <input
+              type="number"
+              className="dev-input"
+              value={devSettings.failedLoginBlockTimeMinutes || ''}
+              onChange={(e) => setDevSettings({ ...devSettings, failedLoginBlockTimeMinutes: parseInt(e.target.value, 10) || 0 })}
+              required
+              min="1"
+            />
+          </div>
+
+          {/* Log Retention Limit */}
+          <div className="form-group" style={{ margin: 0 }}>
+            <label>Maximum Application Logs Buffer retention limit</label>
+            <input
+              type="number"
+              className="dev-input"
+              value={devSettings.logRetentionLimit || ''}
+              onChange={(e) => setDevSettings({ ...devSettings, logRetentionLimit: parseInt(e.target.value, 10) || 0 })}
+              required
+              min="10"
+              max="10000"
+            />
+          </div>
+
+          <div style={{ marginTop: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.03)', paddingTop: '1.25rem', textAlign: 'right' }}>
+            <button type="submit" className="dev-btn dev-btn-primary" disabled={devActionLoading}>
+              {devActionLoading ? 'Saving...' : 'Apply Configurations'}
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  };
+
+  const renderDeveloperPanel = () => {
+    return (
+      <div className="dashboard-container developer-panel">
+        
+        {/* Developer Sidebar */}
+        <aside className="dev-sidebar">
+          <div className="dev-sidebar-header">
+            <div className="dev-sidebar-logo">
+              <Shield size={20} color="#5e5ce6" /> <span>MASTER</span><span>FIT</span><span>•</span><span>DEV</span>
+            </div>
+          </div>
+          <nav className="dev-nav">
+            <a className={`dev-nav-item ${devView === 'dashboard' ? 'active' : ''}`} onClick={() => setDevView('dashboard')}>
+              <Cpu className="dev-nav-icon" /> <span>Dev Dashboard</span>
+            </a>
+            <a className={`dev-nav-item ${devView === 'users' ? 'active' : ''}`} onClick={() => setDevView('users')}>
+              <Users className="dev-nav-icon" /> <span>User Accounts</span>
+            </a>
+            <a className={`dev-nav-item ${devView === 'sessions' ? 'active' : ''}`} onClick={() => setDevView('sessions')}>
+              <Key className="dev-nav-icon" /> <span>Sessions & Devices</span>
+            </a>
+            <a className={`dev-nav-item ${devView === 'security' ? 'active' : ''}`} onClick={() => setDevView('security')}>
+              <AlertTriangle className="dev-nav-icon" /> <span>Security Events</span>
+            </a>
+            <a className={`dev-nav-item ${devView === 'logs' ? 'active' : ''}`} onClick={() => setDevView('logs')}>
+              <Terminal className="dev-nav-icon" /> <span>Console Logs</span>
+            </a>
+            <a className={`dev-nav-item ${devView === 'system' ? 'active' : ''}`} onClick={() => setDevView('system')}>
+              <HardDrive className="dev-nav-icon" /> <span>System Monitoring</span>
+            </a>
+            <a className={`dev-nav-item ${devView === 'database' ? 'active' : ''}`} onClick={() => setDevView('database')}>
+              <Database className="dev-nav-icon" /> <span>Database Catalog</span>
+            </a>
+            <a className={`dev-nav-item ${devView === 'audit' ? 'active' : ''}`} onClick={() => setDevView('audit')}>
+              <History className="dev-nav-icon" /> <span>Audit Trail</span>
+            </a>
+            <a className={`dev-nav-item ${devView === 'settings' ? 'active' : ''}`} onClick={() => setDevView('settings')}>
+              <Settings className="dev-nav-icon" /> <span>System Settings</span>
+            </a>
+          </nav>
+          <div className="dev-sidebar-footer">
+            <a className="dev-nav-item" style={{ padding: '0.75rem 0', color: '#ff453a' }} onClick={() => {
+              const token = getSessionToken();
+              if (token) {
+                fetch(`${API_BASE_URL}/logout`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ token })
+                }).catch(err => console.error(err));
+              }
+              clearSession();
+              setLoggedInUser('');
+              setAppMode('superadmin-login');
+            }}>
+              <LogOut className="dev-nav-icon" style={{ color: '#ff453a' }} /> <span>Console Logout</span>
+            </a>
+          </div>
+        </aside>
+
+        {/* Developer Main Area */}
+        <main className="dev-main">
+          
+          {/* Header */}
+          <header className="dev-header">
+            <h1 className="dev-header-title">
+              {devView === 'dashboard' && 'Developer Control Dashboard'}
+              {devView === 'users' && 'User Accounts Administrator'}
+              {devView === 'sessions' && 'Active Session & Device Manager'}
+              {devView === 'security' && 'Security Center Operations'}
+              {devView === 'logs' && 'In-Memory Application Logs'}
+              {devView === 'system' && 'Performance & Resource Monitoring'}
+              {devView === 'database' && 'MongoDB Collection Catalog'}
+              {devView === 'audit' && 'System Operations Audit Trail'}
+              {devView === 'settings' && 'System Configuration Settings'}
+            </h1>
+            <div className="dev-user-pill">
+              <span style={{ color: '#8e8e93' }}>Role: Developer</span>
+              <div className="dev-user-avatar">D</div>
+              <span style={{ fontWeight: 600 }}>{loggedInUser}</span>
+            </div>
+          </header>
+
+          {/* Body */}
+          <div className="dev-body">
+            {devView === 'dashboard' && renderDevDashboard()}
+            {devView === 'users' && renderDevUsers()}
+            {devView === 'sessions' && renderDevSessions()}
+            {devView === 'security' && renderDevSecurity()}
+            {devView === 'logs' && renderDevLogs()}
+            {devView === 'system' && renderDevSystem()}
+            {devView === 'database' && renderDevDatabase()}
+            {devView === 'audit' && renderDevAudit()}
+            {devView === 'settings' && renderDevSettings()}
+          </div>
+        </main>
+      </div>
+    );
   };
 
   // --- Public Website View ---
@@ -4841,6 +6327,10 @@ function App() {
 
   if (appMode === 'superadmin-login') {
     return renderSuperAdminLogin();
+  }
+
+  if (appMode === 'developer') {
+    return renderDeveloperPanel();
   }
 
 

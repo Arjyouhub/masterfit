@@ -6,11 +6,18 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import crypto from 'crypto';
+import helmet from 'helmet';
+import mongoSanitize from 'express-mongo-sanitize';
+import os from 'os';
 
 import Student from './models/Student.js';
 import Attendance from './models/Attendance.js';
 import Credential from './models/Credential.js';
 import Session from './models/Session.js';
+import User from './models/User.js';
+import LoginHistory from './models/LoginHistory.js';
+import SecurityLog from './models/SecurityLog.js';
+import SystemSetting from './models/SystemSetting.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,19 +29,67 @@ if (fs.existsSync(envPath)) {
   dotenv.config();
 }
 
-// Password Hashing Helper Functions
+// Console logs in-memory buffer for developer diagnostics
+const appLogs = [];
+
+let cachedSettings = {
+  maintenanceMode: false,
+  sessionTimeoutMinutes: 60,
+  minPasswordLength: 6,
+  failedLoginThreshold: 5,
+  failedLoginBlockTimeMinutes: 15,
+  logRetentionLimit: 1000
+};
+
+function addLog(type, message) {
+  appLogs.push({ type, message, timestamp: new Date() });
+  const limit = cachedSettings.logRetentionLimit || 1000;
+  if (appLogs.length > limit) {
+    appLogs.shift();
+  }
+}
+const originalLog = console.log;
+console.log = (...args) => {
+  addLog('info', args.join(' '));
+  originalLog(...args);
+};
+const originalError = console.error;
+console.error = (...args) => {
+  addLog('error', args.join(' '));
+  originalError(...args);
+};
+
+// Password Hashing Helper Functions (Upgraded to 210,000 iterations with backwards compatibility)
+const CURRENT_ITERATIONS = 210000;
+
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-  return `${salt}:${hash}`;
+  const hash = crypto.pbkdf2Sync(password, salt, CURRENT_ITERATIONS, 64, 'sha512').toString('hex');
+  return `pbkdf2:${CURRENT_ITERATIONS}:${salt}:${hash}`;
 }
 
 function verifyPassword(password, storedHash) {
   if (!storedHash) return false;
+  
+  // Backwards compatibility for plain-text passwords
   if (!storedHash.includes(':')) {
-    return password === storedHash; // Backwards compatibility for plain-text passwords
+    return password === storedHash;
   }
-  const [salt, hash] = storedHash.split(':');
+  
+  const parts = storedHash.split(':');
+  
+  // Upgraded pbkdf2 format: pbkdf2:iterations:salt:hash
+  if (parts[0] === 'pbkdf2') {
+    const iterations = parseInt(parts[1], 10);
+    const salt = parts[2];
+    const hash = parts[3];
+    if (isNaN(iterations) || !salt || !hash) return false;
+    const checkHash = crypto.pbkdf2Sync(password, salt, iterations, 64, 'sha512').toString('hex');
+    return hash === checkHash;
+  }
+  
+  // Old format: salt:hash (with 1000 iterations)
+  const [salt, hash] = parts;
   const checkHash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
   return hash === checkHash;
 }
@@ -113,20 +168,250 @@ function decryptAttendanceRecords(records) {
   return decrypted;
 }
 
+// Helper to retrieve custom batch schedule
+async function getBatchSchedule(batchId) {
+  if (!batchId) return null;
+  const defaults = {
+    batch1: 'Mon-Thu',
+    batch2: 'Tue-Fri',
+    batch3: 'Wed-Sat'
+  };
+  const key = String(batchId).toLowerCase().trim();
+  if (defaults[key]) {
+    return defaults[key];
+  }
+  const creds = await Credential.findOne({ configType: 'main' }).lean();
+  if (creds && creds.customBatches) {
+    const custom = creds.customBatches.find(b => String(b.id).toLowerCase().trim() === key);
+    if (custom) return custom.schedule;
+  }
+  return null;
+}
+
+// Helper to extract role and details from username
+function getAuthDetails(username) {
+  if (!username) return { role: null, branch: null, batch: null };
+  const cleanUsername = String(username).toLowerCase().trim();
+  if (cleanUsername === 'developer' || cleanUsername.startsWith('developer@')) {
+    const parts = cleanUsername.split('@');
+    return { role: 'developer', branch: parts[1] || 'all', batch: 'all' };
+  }
+  if (!cleanUsername.includes('@')) {
+    return { role: 'superadmin', branch: 'all', batch: 'all' };
+  }
+  const [userPart, branchPart] = cleanUsername.split('@');
+  if (userPart === 'admin') {
+    return { role: 'branchadmin', branch: branchPart, batch: 'all' };
+  }
+  return { role: 'coordinator', branch: branchPart, batch: userPart };
+}
+
+// Authentication Middleware
+const authenticateSession = async (req, res, next) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    let token = (authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null) || req.query.token || req.body.token;
+
+    if (!token || typeof token !== 'string') {
+      return res.status(401).json({ error: 'Authentication token is required' });
+    }
+
+    // Coerce to string to prevent object injection queries in Session.findOne
+    token = String(token).trim();
+
+    const session = await Session.findOne({ token }).lean();
+    if (!session) {
+      return res.status(401).json({ error: 'Invalid or expired session' });
+    }
+
+    // --- ENFORCE SESSION TIMEOUT ---
+    const maxAgeMs = (cachedSettings.sessionTimeoutMinutes || 60) * 60 * 1000;
+    const ageMs = Date.now() - new Date(session.updatedAt || session.createdAt).getTime();
+    if (ageMs > maxAgeMs) {
+      await Session.deleteOne({ token });
+      return res.status(401).json({ error: 'Session expired due to inactivity. Please log in again.' });
+    }
+    // Update session last activity
+    await Session.updateOne({ token }, { updatedAt: new Date() });
+
+    // --- ENFORCE MAINTENANCE MODE ---
+    if (cachedSettings.maintenanceMode) {
+      const { role } = getAuthDetails(session.username);
+      if (role !== 'developer') {
+        return res.status(503).json({ error: 'System is undergoing scheduled maintenance. Access is restricted to developers.' });
+      }
+    }
+
+    req.user = session;
+    next();
+  } catch (err) {
+    res.status(500).json({ error: 'Authentication error: ' + err.message });
+  }
+};
+
+// Role Authorization Middleware
+const authorizeRoles = (...roles) => {
+  return (req, res, next) => {
+    const { role } = getAuthDetails(req.user.username);
+    if (!roles.includes(role)) {
+      return res.status(403).json({ error: 'Access denied: insufficient permissions' });
+    }
+    next();
+  };
+};
+
+// Developer Auth Guard Middleware
+const authorizeDeveloper = (req, res, next) => {
+  const { role } = getAuthDetails(req.user.username);
+  if (role !== 'developer') {
+    return res.status(403).json({ error: 'Access denied: Developer privilege required' });
+  }
+  next();
+};
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Security Middlewares
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false
+}));
+app.use(mongoSanitize());
+
 app.use((req, res, next) => {
-  let logUrl = req.url;
-  // Redact token in query parameters to prevent exposing session tokens in terminal logs
-  logUrl = logUrl.replace(/([\?&]token=)[^&]+/g, '$1[REDACTED]');
-  console.log(`[${new Date().toISOString()}] ${req.method} ${logUrl}`);
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    let logUrl = req.originalUrl || req.url;
+    // Redact token in query parameters to prevent exposing session tokens in terminal logs
+    logUrl = logUrl.replace(/([\?&]token=)[^&]+/g, '$1[REDACTED]');
+    
+    const logMsg = `${req.method} ${logUrl} - ${res.statusCode} (${duration}ms) - IP: ${req.ip}`;
+    
+    if (res.statusCode >= 400) {
+      addLog('error', logMsg);
+    } else if (logUrl.includes('/api/login') || logUrl.includes('/api/session/verify') || logUrl.includes('/api/developer/sessions')) {
+      addLog('auth', logMsg);
+    } else if (logUrl.startsWith('/api')) {
+      addLog('api', logMsg);
+    } else {
+      addLog('info', logMsg);
+    }
+    
+    originalLog(`[${new Date().toISOString()}] ${logMsg}`);
+  });
   next();
 });
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+// Startup User Sync & Seed Routine
+async function syncUsersAndSeed() {
+  try {
+    const creds = await Credential.findOne({ configType: 'main' });
+    if (!creds) {
+      console.log('No credentials config document found to sync users.');
+      return;
+    }
+
+    const getEntries = (obj) => {
+      if (!obj) return [];
+      if (obj instanceof Map) {
+        return Array.from(obj.entries());
+      }
+      return Object.entries(obj);
+    };
+
+    const upsertUser = async (username, password, role, branch = '', batch = '') => {
+      const uClean = username.toLowerCase().trim();
+      const existing = await User.findOne({ username: uClean });
+      if (!existing) {
+        await new User({
+          username: uClean,
+          password,
+          role,
+          branch,
+          batch,
+          status: 'Active'
+        }).save();
+        console.log(`[Sync] Created User account for ${uClean} (Role: ${role})`);
+      } else {
+        if (existing.password !== password) {
+          existing.password = password;
+          // Maintain active state on password reset
+          if (existing.status === 'SoftDeleted') {
+            existing.status = 'Active';
+          }
+          await existing.save();
+          console.log(`[Sync] Updated password for User ${uClean}`);
+        }
+      }
+    };
+
+    // 1. Sync Superadmins
+    const adminEntries = getEntries(creds.adminCredentials);
+    for (const [user, pass] of adminEntries) {
+      if (pass) {
+        const role = user.toLowerCase().trim() === 'developer' ? 'developer' : 'superadmin';
+        await upsertUser(user, pass, role);
+      }
+    }
+
+    // 2. Sync Branch Coordinators
+    const branchEntries = getEntries(creds.branchCredentials);
+    for (const [br, info] of branchEntries) {
+      if (info && info.password) {
+        const username = info.username || `admin@${br}`;
+        await upsertUser(username, info.password, 'branchadmin', br);
+      }
+    }
+
+    // 3. Sync Batch Coordinators
+    const batchEntries = getEntries(creds.batchCredentials);
+    for (const [key, info] of batchEntries) {
+      if (info && info.password) {
+        const parts = key.split('_');
+        const br = parts[0];
+        const bt = parts[1] || '';
+        const username = info.username || `${bt}@${br}`;
+        await upsertUser(username, info.password, 'coordinator', br, bt);
+      }
+    }
+
+    // 4. Seed Developer
+    const devClean = 'developer';
+    const devUser = await User.findOne({ username: devClean });
+    if (!devUser) {
+      const devPassPlain = process.env.DEV_PASSWORD || 'devpass123';
+      const devPassHash = hashPassword(devPassPlain);
+      
+      await new User({
+        username: devClean,
+        password: devPassHash,
+        role: 'developer',
+        status: 'Active'
+      }).save();
+
+      if (creds.adminCredentials instanceof Map) {
+        creds.adminCredentials.set(devClean, devPassHash);
+      } else {
+        creds.adminCredentials[devClean] = devPassHash;
+      }
+      creds.markModified('adminCredentials');
+      await creds.save();
+
+      console.log(`\n======================================================`);
+      console.log(`[SEED] Created default Developer account:`);
+      console.log(`Username: developer`);
+      console.log(`Password: ${devPassPlain}`);
+      console.log(`======================================================\n`);
+    }
+  } catch (err) {
+    console.error('Error during User synchronization:', err);
+  }
+}
 
 // Startup Password Migration Function
 async function migratePlaintextPasswords() {
@@ -158,7 +443,7 @@ async function migratePlaintextPasswords() {
     // 1. Admin Credentials
     const adminEntries = getEntries(creds.adminCredentials);
     for (const [user, pass] of adminEntries) {
-      if (pass && !pass.includes(':')) {
+      if (pass && !pass.startsWith('pbkdf2:') && !pass.includes(':')) {
         console.log(`Migrating plaintext password for admin: ${user}`);
         setValue(creds.adminCredentials, user, hashPassword(pass));
         updated = true;
@@ -168,7 +453,7 @@ async function migratePlaintextPasswords() {
     // 2. Branch Credentials
     const branchEntries = getEntries(creds.branchCredentials);
     for (const [br, info] of branchEntries) {
-      if (info && info.password && !info.password.includes(':')) {
+      if (info && info.password && !info.password.startsWith('pbkdf2:') && !info.password.includes(':')) {
         console.log(`Migrating plaintext password for branch coordinator: ${br}`);
         const newInfo = { ...info, password: hashPassword(info.password) };
         setValue(creds.branchCredentials, br, newInfo);
@@ -179,7 +464,7 @@ async function migratePlaintextPasswords() {
     // 3. Batch Credentials
     const batchEntries = getEntries(creds.batchCredentials);
     for (const [bt, info] of batchEntries) {
-      if (info && info.password && !info.password.includes(':')) {
+      if (info && info.password && !info.password.startsWith('pbkdf2:') && !info.password.includes(':')) {
         console.log(`Migrating plaintext password for batch coordinator: ${bt}`);
         const newInfo = { ...info, password: hashPassword(info.password) };
         setValue(creds.batchCredentials, bt, newInfo);
@@ -192,7 +477,7 @@ async function migratePlaintextPasswords() {
       creds.markModified('branchCredentials');
       creds.markModified('batchCredentials');
       await creds.save();
-      console.log('Plaintext passwords successfully migrated to secure hashes in MongoDB Atlas.');
+      console.log('Plaintext passwords successfully migrated to secure hashes in MongoDB.');
     } else {
       console.log('All database passwords are already securely hashed.');
     }
@@ -224,44 +509,102 @@ async function migrateDefaultRates() {
   }
 }
 
-// Connect to MongoDB Atlas
-console.log('Connecting to MongoDB URI:', process.env.MONGO_URI);
+// Load system settings cache from MongoDB
+async function loadSettingsCache() {
+  try {
+    let settings = await SystemSetting.findOne({ configKey: 'main' });
+    if (!settings) {
+      settings = await new SystemSetting({ configKey: 'main' }).save();
+    }
+    cachedSettings = settings.toObject();
+    console.log('[Settings Cache] Loaded from database:', cachedSettings);
+  } catch (err) {
+    console.error('[Settings Cache] Failed to load settings:', err);
+  }
+}
+
+// Connect to MongoDB Atlas (Sanitize printed URI log for security)
+const sanitizedMongoUri = (process.env.MONGO_URI || '').replace(/:([^:@]+)@/, ': [REDACTED] @');
+console.log('Connecting to MongoDB URI:', sanitizedMongoUri);
 mongoose.connect(process.env.MONGO_URI, { dbName: 'attendance' })
   .then(async () => {
     console.log('Successfully connected to MongoDB Atlas');
+    await loadSettingsCache();
     await migratePlaintextPasswords();
     await migrateDefaultRates();
+    await syncUsersAndSeed();
   })
   .catch(err => console.error('MongoDB connection error:', err));
 
-// Credentials seeding removed - relies entirely on existing database values.
-
 // Routes
-// 1. Get all students (excl. photo for memory optimization)
-app.get('/api/students', async (req, res) => {
+
+// 1. Get all students (excl. photo for memory optimization, scoped by user permissions)
+app.get('/api/students', authenticateSession, async (req, res) => {
   try {
-    const students = await Student.find({}).select('-photo').lean();
+    const { role, branch, batch } = getAuthDetails(req.user.username);
+    let filter = {};
+    if (role !== 'superadmin' && role !== 'developer') {
+      filter.branch = new RegExp(`^${branch}$`, 'i');
+    }
+    if (role === 'coordinator') {
+      const schedule = await getBatchSchedule(batch);
+      if (schedule) {
+        filter.schedule = schedule;
+      }
+    }
+    const students = await Student.find(filter).select('-photo').lean();
     res.json(students.map(decryptStudent));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 1.1. Get student photo by ID (on-demand)
-app.get('/api/students/:id/photo', async (req, res) => {
+// 1.1. Get student photo by ID (on-demand, scoped by user permissions)
+app.get('/api/students/:id/photo', authenticateSession, async (req, res) => {
   try {
     const { id } = req.params;
-    const student = await Student.findOne({ id: Number(id) }).select('photo').lean();
-    if (!student) return res.status(404).json({ error: 'Student not found' });
+    const { role, branch, batch } = getAuthDetails(req.user.username);
+    let filter = { id: Number(id) };
+    if (role !== 'superadmin' && role !== 'developer') {
+      filter.branch = new RegExp(`^${branch}$`, 'i');
+    }
+    if (role === 'coordinator') {
+      const schedule = await getBatchSchedule(batch);
+      if (schedule) {
+        filter.schedule = schedule;
+      }
+    }
+    const student = await Student.findOne(filter).select('photo').lean();
+    if (!student) return res.status(404).json({ error: 'Student not found or unauthorized' });
     res.json({ photo: decrypt(student.photo) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 2. Create student
-app.post('/api/students', async (req, res) => {
+// 2. Create student (scoped validation)
+app.post('/api/students', authenticateSession, async (req, res) => {
   try {
+    const { role, branch } = getAuthDetails(req.user.username);
+    
+    // Validate request body branch
+    if (role !== 'superadmin' && role !== 'developer') {
+      if (!req.body.branch || String(req.body.branch).toLowerCase().trim() !== branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Unauthorized: cannot enroll student in another branch' });
+      }
+    }
+
+    // Input Validation
+    if (!req.body.name || typeof req.body.name !== 'string' || !req.body.name.trim()) {
+      return res.status(400).json({ error: 'Valid student name is required' });
+    }
+    if (req.body.age === undefined || isNaN(Number(req.body.age))) {
+      return res.status(400).json({ error: 'Valid student age is required' });
+    }
+    if (!req.body.phone || typeof req.body.phone !== 'string' || !req.body.phone.trim()) {
+      return res.status(400).json({ error: 'Valid phone number is required' });
+    }
+
     const encryptedBody = encryptStudentData(req.body);
     const newStudent = new Student(encryptedBody);
     const saved = await newStudent.save();
@@ -271,40 +614,104 @@ app.post('/api/students', async (req, res) => {
   }
 });
 
-// 3. Update student
-app.put('/api/students/:id', async (req, res) => {
+// 3. Update student (scoped verification)
+app.put('/api/students/:id', authenticateSession, async (req, res) => {
   try {
     const { id } = req.params;
+    const { role, branch } = getAuthDetails(req.user.username);
+    
+    const student = await Student.findOne({ id: Number(id) });
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    
+    if (role !== 'superadmin' && role !== 'developer') {
+      if (student.branch.toLowerCase().trim() !== branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Unauthorized: cannot modify student in another branch' });
+      }
+      if (req.body.branch && String(req.body.branch).toLowerCase().trim() !== branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Unauthorized: cannot move student to another branch' });
+      }
+    }
+
+    // Input Validation
+    if (req.body.name !== undefined && (typeof req.body.name !== 'string' || !req.body.name.trim())) {
+      return res.status(400).json({ error: 'Student name must be a non-empty string' });
+    }
+
     const encryptedBody = encryptStudentData(req.body);
     const updated = await Student.findOneAndUpdate({ id: Number(id) }, encryptedBody, { new: true });
-    if (!updated) return res.status(404).json({ error: 'Student not found' });
     res.json(decryptStudent(updated));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-// 4. Delete student
-app.delete('/api/students/:id', async (req, res) => {
+// 4. Delete student (scoped verification)
+app.delete('/api/students/:id', authenticateSession, async (req, res) => {
   try {
     const { id } = req.params;
-    const deleted = await Student.findOneAndDelete({ id: Number(id) });
-    if (!deleted) return res.status(404).json({ error: 'Student not found' });
+    const { role, branch } = getAuthDetails(req.user.username);
+    
+    const student = await Student.findOne({ id: Number(id) });
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    
+    if (role !== 'superadmin' && role !== 'developer') {
+      if (student.branch.toLowerCase().trim() !== branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Unauthorized to delete student in another branch' });
+      }
+    }
+
+    await Student.findOneAndDelete({ id: Number(id) });
     res.json({ message: 'Student deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 5. Get all attendance records (using lean for memory efficiency)
-app.get('/api/attendance', async (req, res) => {
+// 5. Get all attendance records (current year by default for optimization, scoped by branch/batch)
+app.get('/api/attendance', authenticateSession, async (req, res) => {
   try {
-    const records = await Attendance.find({}).lean();
+    const { role, branch, batch } = getAuthDetails(req.user.username);
+    
+    const currentYear = new Date().getFullYear();
+    let queryYear = currentYear;
+    if (req.query.year) {
+      const parsedYear = parseInt(req.query.year, 10);
+      if (!isNaN(parsedYear)) queryYear = parsedYear;
+    }
+    
+    const records = await Attendance.find({
+      date: { $gte: `${queryYear}-01-01`, $lte: `${queryYear}-12-31` }
+    }).lean();
+    
+    let allowedStudentIds = null;
+    if (role !== 'superadmin' && role !== 'developer') {
+      let studentFilter = { branch: new RegExp(`^${branch}$`, 'i') };
+      if (role === 'coordinator') {
+        const schedule = await getBatchSchedule(batch);
+        if (schedule) {
+          studentFilter.schedule = schedule;
+        }
+      }
+      const students = await Student.find(studentFilter).select('id').lean();
+      allowedStudentIds = new Set(students.map(s => String(s.id)));
+    }
+    
     const attendanceMap = {};
     records.forEach(record => {
       const plainRecords = record.records instanceof Map ? Object.fromEntries(record.records) : record.records;
       const decryptedRecords = decryptAttendanceRecords(plainRecords);
-      attendanceMap[record.date] = decryptedRecords;
+      
+      let filteredRecords = decryptedRecords;
+      if (allowedStudentIds) {
+        filteredRecords = {};
+        Object.keys(decryptedRecords).forEach(studentId => {
+          if (allowedStudentIds.has(studentId)) {
+            filteredRecords[studentId] = decryptedRecords[studentId];
+          }
+        });
+      }
+      
+      attendanceMap[record.date] = filteredRecords;
     });
     res.json(attendanceMap);
   } catch (err) {
@@ -312,133 +719,197 @@ app.get('/api/attendance', async (req, res) => {
   }
 });
 
-// 6. Save daily attendance
-app.post('/api/attendance', async (req, res) => {
+// 6. Save daily attendance (merged securely by branch/batch scope to prevent overwriting other branch records)
+app.post('/api/attendance', authenticateSession, async (req, res) => {
   try {
     const { date, records } = req.body;
     if (!date) return res.status(400).json({ error: 'Date is required' });
+    if (!records || typeof records !== 'object') {
+      return res.status(400).json({ error: 'Records map is required' });
+    }
     
-    const encryptedRecords = encryptAttendanceRecords(records);
-    const updated = await Attendance.findOneAndUpdate(
-      { date },
-      { date, records: encryptedRecords },
-      { new: true, upsert: true }
-    );
-    res.json(updated);
+    const { role, branch, batch } = getAuthDetails(req.user.username);
+    
+    let studentFilter = {};
+    if (role !== 'superadmin' && role !== 'developer') {
+      studentFilter.branch = new RegExp(`^${branch}$`, 'i');
+      if (role === 'coordinator') {
+        const schedule = await getBatchSchedule(batch);
+        if (schedule) {
+          studentFilter.schedule = schedule;
+        }
+      }
+    }
+    
+    let attendanceDoc = await Attendance.findOne({ date });
+    if (!attendanceDoc) {
+      attendanceDoc = new Attendance({ date, records: {} });
+    }
+
+    const existingPlainRecords = attendanceDoc.records instanceof Map 
+      ? Object.fromEntries(attendanceDoc.records) 
+      : attendanceDoc.records;
+    const decryptedExisting = decryptAttendanceRecords(existingPlainRecords);
+    
+    const finalDecryptedRecords = { ...decryptedExisting };
+
+    if (role === 'superadmin' || role === 'developer') {
+      Object.keys(records).forEach(studentId => {
+        finalDecryptedRecords[studentId] = records[studentId];
+      });
+    } else {
+      const allowedStudents = await Student.find(studentFilter).select('id').lean();
+      const allowedIds = new Set(allowedStudents.map(s => String(s.id)));
+
+      allowedIds.forEach(idStr => {
+        if (records[idStr] !== undefined && records[idStr] !== null && records[idStr] !== 'none') {
+          finalDecryptedRecords[idStr] = records[idStr];
+        } else {
+          delete finalDecryptedRecords[idStr];
+        }
+      });
+    }
+
+    const encryptedRecords = encryptAttendanceRecords(finalDecryptedRecords);
+    
+    attendanceDoc.records = new Map(Object.entries(encryptedRecords));
+    attendanceDoc.markModified('records');
+    
+    const saved = await attendanceDoc.save();
+    res.json(saved);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-// 7. Login validation
+// 7. Login validation (linked to User model authentication & audits)
 app.post('/api/login', async (req, res) => {
   try {
     const { loginType, username, password, branch, batch, deviceName } = req.body;
     
-    const creds = await Credential.findOne({ configType: 'main' });
-    if (!creds) {
-      return res.status(500).json({ error: 'Credentials document not found' });
+    if (typeof username !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ error: 'Username and password must be strings' });
     }
 
     const enteredUser = username.toLowerCase().trim();
 
-    if (loginType === 'superadmin') {
-      const storedPasswordHash = creds.adminCredentials instanceof Map 
-        ? creds.adminCredentials.get(enteredUser) 
-        : creds.adminCredentials[enteredUser];
-        
-      if (storedPasswordHash && verifyPassword(password, storedPasswordHash)) {
-        const token = crypto.randomBytes(32).toString('hex');
-        await new Session({
-          username: enteredUser,
-          token,
-          ipAddress: req.ip,
-          userAgent: req.headers['user-agent'],
-          deviceName
-        }).save();
-        return res.json({ success: true, username: enteredUser, token });
-      }
-      return res.status(401).json({ success: false, error: 'Invalid admin username or password' });
-    } else if (loginType === 'coordinator') {
-      let isValid = false;
-      let fullUsername = '';
-
-      if (batch === 'admin') {
-        const storedCreds = creds.branchCredentials instanceof Map 
-          ? creds.branchCredentials.get(branch) 
-          : creds.branchCredentials[branch];
-          
-        if (storedCreds) {
-          const expectedUser1 = 'admin';
-          const expectedUser2 = `admin@${branch}`;
-          const customUser = (storedCreds.username || '').toLowerCase().trim();
-          
-          const isUserValid = enteredUser === expectedUser1 || enteredUser === expectedUser2 || (customUser && enteredUser === customUser);
-          const isPasswordValid = verifyPassword(password, storedCreds.password);
-          
-          if (isUserValid && isPasswordValid) {
-            isValid = true;
-            fullUsername = `admin@${branch}`;
-          }
-        }
-      } else {
-        const branchBatchKey = `${branch}_${batch}`;
-        let storedCreds = creds.batchCredentials instanceof Map 
-          ? creds.batchCredentials.get(branchBatchKey) 
-          : creds.batchCredentials[branchBatchKey];
-          
-        if (!storedCreds) {
-          storedCreds = creds.batchCredentials instanceof Map 
-            ? creds.batchCredentials.get(batch) 
-            : creds.batchCredentials[batch];
-        }
-          
-        if (storedCreds) {
-          const expectedUser1 = batch;
-          const expectedUser2 = `${batch}@${branch}`;
-          const customUser = (storedCreds.username || '').toLowerCase().trim();
-          
-          const isUserValid = enteredUser === expectedUser1 || enteredUser === expectedUser2 || (customUser && enteredUser === customUser);
-          const isPasswordValid = verifyPassword(password, storedCreds.password);
-          
-          if (isUserValid && isPasswordValid) {
-            isValid = true;
-            fullUsername = `${batch}@${branch}`;
-          }
-        }
-      }
-
-      if (isValid) {
-        const token = crypto.randomBytes(32).toString('hex');
-        await new Session({
-          username: fullUsername,
-          token,
-          ipAddress: req.ip,
-          userAgent: req.headers['user-agent'],
-          deviceName
-        }).save();
-        return res.json({ success: true, username: fullUsername, token });
-      }
-      return res.status(401).json({ success: false, error: 'Invalid username or password for selected branch and batch' });
+    // --- ENFORCE MAINTENANCE MODE ON LOGIN ---
+    if (cachedSettings.maintenanceMode && enteredUser !== 'developer') {
+      return res.status(503).json({ success: false, error: 'System is under maintenance. Login is currently locked.' });
     }
 
-    return res.status(400).json({ success: false, error: 'Invalid login type' });
+    // --- BRUTE FORCE LOCKOUT GUARD ---
+    const blockTimeMs = (cachedSettings.failedLoginBlockTimeMinutes || 15) * 60 * 1000;
+    const failedCount = await SecurityLog.countDocuments({
+      eventType: 'FailedLogin',
+      username: enteredUser,
+      createdAt: { $gte: new Date(Date.now() - blockTimeMs) }
+    });
+    if (failedCount >= (cachedSettings.failedLoginThreshold || 5) && enteredUser !== 'developer') {
+      return res.status(429).json({
+        success: false,
+        error: `Too many failed login attempts. Account is locked. Please try again in ${cachedSettings.failedLoginBlockTimeMinutes} minutes.`
+      });
+    }
+
+    const user = await User.findOne({ username: enteredUser });
+    if (!user) {
+      await new LoginHistory({
+        username: enteredUser,
+        status: 'Failed',
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+        deviceName
+      }).save();
+
+      await new SecurityLog({
+        eventType: 'FailedLogin',
+        username: enteredUser,
+        description: `Failed login attempt: account username not found.`,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent']
+      }).save();
+
+      return res.status(401).json({ success: false, error: 'Invalid username or password' });
+    }
+
+    if (user.status === 'Disabled') {
+      return res.status(403).json({ success: false, error: 'Your account has been disabled by the administrator.' });
+    }
+    if (user.status === 'SoftDeleted') {
+      return res.status(401).json({ success: false, error: 'Invalid username or password' });
+    }
+
+    if (verifyPassword(password, user.password)) {
+      const isSuper = loginType === 'superadmin' && (user.role === 'superadmin' || user.role === 'developer');
+      const isCoord = loginType === 'coordinator' && (user.role === 'branchadmin' || user.role === 'coordinator');
+
+      if (!isSuper && !isCoord) {
+        return res.status(401).json({ success: false, error: 'Unauthorized login type for this account' });
+      }
+
+      const token = crypto.randomBytes(32).toString('hex');
+      await new Session({
+        username: user.username,
+        token,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+        deviceName
+      }).save();
+
+      await new LoginHistory({
+        username: user.username,
+        status: 'Success',
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+        deviceName
+      }).save();
+
+      return res.json({ success: true, username: user.username, token });
+    }
+
+    // Password verification failed
+    await new LoginHistory({
+      username: user.username,
+      status: 'Failed',
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+      deviceName
+    }).save();
+
+    await new SecurityLog({
+      eventType: 'FailedLogin',
+      username: user.username,
+      description: `Failed login attempt: invalid password.`,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    }).save();
+
+    return res.status(401).json({ success: false, error: 'Invalid username or password' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Session verification endpoint
+// Session verification endpoint (safe string token parse)
 app.get('/api/session/verify', async (req, res) => {
   try {
-    const { token } = req.query;
-    if (!token) return res.status(400).json({ success: false, error: 'Token is required' });
+    let { token } = req.query;
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ success: false, error: 'Token is required and must be a string' });
+    }
+    
+    token = String(token).trim();
     
     const session = await Session.findOne({ token }).lean();
     if (session) {
-      return res.json({ success: true, username: session.username });
+      // Validate user status
+      const user = await User.findOne({ username: session.username }).lean();
+      if (user && user.status === 'Active') {
+        return res.json({ success: true, username: session.username });
+      }
     }
-    return res.status(401).json({ success: false, error: 'Session expired or invalid' });
+    return res.status(401).json({ success: false, error: 'Session expired, disabled, or invalid' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -447,8 +918,9 @@ app.get('/api/session/verify', async (req, res) => {
 // Logout endpoint
 app.post('/api/logout', async (req, res) => {
   try {
-    const { token } = req.body;
-    if (token) {
+    let { token } = req.body;
+    if (token && typeof token === 'string') {
+      token = String(token).trim();
       await Session.deleteOne({ token });
     }
     res.json({ success: true });
@@ -457,21 +929,21 @@ app.post('/api/logout', async (req, res) => {
   }
 });
 
-// Get all active sessions (Super Admin only)
-app.get('/api/sessions', async (req, res) => {
+// Get all active sessions (Super Admin only, limit count to 100 to prevent out of memory)
+app.get('/api/sessions', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
   try {
-    const sessions = await Session.find({}).sort({ loginTime: -1 }).lean();
+    const sessions = await Session.find({}).sort({ loginTime: -1 }).limit(100).lean();
     res.json(sessions);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Terminate all sessions (with optional 'except' parameter to keep current session)
-app.delete('/api/sessions', async (req, res) => {
+// Terminate all sessions (Super Admin only)
+app.delete('/api/sessions', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
   try {
-    const { except } = req.query;
-    const filter = except ? { token: { $ne: except } } : {};
+    let { except } = req.query;
+    const filter = except && typeof except === 'string' ? { token: { $ne: String(except).trim() } } : {};
     const result = await Session.deleteMany(filter);
     res.json({ success: true, deletedCount: result.deletedCount });
   } catch (err) {
@@ -479,11 +951,14 @@ app.delete('/api/sessions', async (req, res) => {
   }
 });
 
-// Terminate/Force Logout a session
-app.delete('/api/sessions/:token', async (req, res) => {
+// Terminate/Force Logout a session (Super Admin only)
+app.delete('/api/sessions/:token', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
   try {
-    const { token } = req.params;
-    await Session.deleteOne({ token });
+    let { token } = req.params;
+    if (token && typeof token === 'string') {
+      token = String(token).trim();
+      await Session.deleteOne({ token });
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -598,8 +1073,8 @@ async function sendOTPMedia(phone, otp) {
 app.post('/api/superadmin/forgot-password/send-otp', async (req, res) => {
   try {
     const { username, phone } = req.body;
-    if (!username || !phone) {
-      return res.status(400).json({ success: false, error: 'Username and phone number are required' });
+    if (!username || !phone || typeof username !== 'string' || typeof phone !== 'string') {
+      return res.status(400).json({ success: false, error: 'Username and phone number are required strings' });
     }
 
     const enteredUser = username.toLowerCase().trim();
@@ -628,14 +1103,16 @@ app.post('/api/superadmin/forgot-password/send-otp', async (req, res) => {
     };
 
     console.log(`\n======================================================`);
-    console.log(`[OTP SERVICE] Sent OTP ${otp} to 9633380198 for user '${enteredUser}'`);
+    console.log(`[OTP SERVICE] Sent OTP to 9633380198 for user '${enteredUser}'`);
     console.log(`======================================================\n`);
 
     const sentReal = await sendOTPMedia(phone, otp);
     const responseData = { success: true };
     if (!sentReal) {
-      responseData.message = 'OTP logged to server console (Configure FAST2SMS_API_KEY or CALLMEBOT_API_KEY in .env for real SMS/WhatsApp)';
-      responseData.debugOtp = otp;
+      responseData.message = 'OTP logged to server console';
+      if (process.env.NODE_ENV !== 'production') {
+        responseData.debugOtp = otp;
+      }
     } else {
       responseData.message = 'OTP sent to your phone successfully';
     }
@@ -650,8 +1127,8 @@ app.post('/api/superadmin/forgot-password/send-otp', async (req, res) => {
 app.post('/api/superadmin/forgot-password/verify-otp', async (req, res) => {
   try {
     const { username, otp } = req.body;
-    if (!username || !otp) {
-      return res.status(400).json({ success: false, error: 'Username and OTP are required' });
+    if (!username || !otp || typeof username !== 'string' || typeof otp !== 'string') {
+      return res.status(400).json({ success: false, error: 'Username and OTP are required strings' });
     }
 
     const enteredUser = username.toLowerCase().trim();
@@ -680,8 +1157,8 @@ app.post('/api/superadmin/forgot-password/verify-otp', async (req, res) => {
 app.post('/api/superadmin/forgot-password/reset', async (req, res) => {
   try {
     const { username, otp, newPassword } = req.body;
-    if (!username || !otp || !newPassword) {
-      return res.status(400).json({ success: false, error: 'Username, OTP, and new password are required' });
+    if (!username || !otp || !newPassword || typeof username !== 'string' || typeof otp !== 'string' || typeof newPassword !== 'string') {
+      return res.status(400).json({ success: false, error: 'Username, OTP, and new password are required strings' });
     }
 
     const enteredUser = username.toLowerCase().trim();
@@ -700,6 +1177,11 @@ app.post('/api/superadmin/forgot-password/reset', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid OTP code' });
     }
 
+    // --- ENFORCE PASSWORD LENGTH ---
+    if (newPassword.length < (cachedSettings.minPasswordLength || 6)) {
+      return res.status(400).json({ success: false, error: `Password must be at least ${cachedSettings.minPasswordLength || 6} characters long.` });
+    }
+
     // OTP verified, now reset the password
     const creds = await Credential.findOne({ configType: 'main' });
     if (!creds) {
@@ -715,6 +1197,7 @@ app.post('/api/superadmin/forgot-password/reset', async (req, res) => {
 
     creds.markModified('adminCredentials');
     await creds.save();
+    await syncUsersAndSeed();
 
     delete otpStore[enteredUser];
 
@@ -725,8 +1208,8 @@ app.post('/api/superadmin/forgot-password/reset', async (req, res) => {
   }
 });
 
-// Get raw credentials (unmasked database values)
-app.get('/api/credentials/raw', async (req, res) => {
+// Get raw credentials (unmasked database values - Super Admin only)
+app.get('/api/credentials/raw', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
   try {
     const creds = await Credential.findOne({ configType: 'main' }).lean();
     if (!creds) {
@@ -738,8 +1221,8 @@ app.get('/api/credentials/raw', async (req, res) => {
   }
 });
 
-// 8. Get credentials (passwords masked for security)
-app.get('/api/credentials', async (req, res) => {
+// Get credentials (passwords masked for security - Super Admin and Developer)
+app.get('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
   try {
     const creds = await Credential.findOne({ configType: 'main' }).lean();
     if (!creds) {
@@ -768,8 +1251,8 @@ app.get('/api/credentials', async (req, res) => {
   }
 });
 
-// 9. Update credentials (auto-hashes new passwords)
-app.put('/api/credentials', async (req, res) => {
+// Update credentials (auto-hashes new passwords - Super Admin only)
+app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
   try {
     const body = { ...req.body };
 
@@ -782,17 +1265,21 @@ app.put('/api/credentials', async (req, res) => {
     if (body.adminCredentials) {
       for (const [user, pass] of Object.entries(body.adminCredentials)) {
         if (pass === '••••••' && credsDoc) {
-          // Password wasn't modified, restore the existing hash
           const oldHash = credsDoc.adminCredentials instanceof Map 
             ? credsDoc.adminCredentials.get(user) 
             : credsDoc.adminCredentials[user];
           body.adminCredentials[user] = oldHash;
-        } else if (pass && !pass.includes(':')) {
-          body.adminCredentials[user] = hashPassword(pass);
+        } else if (pass) {
+          // --- ENFORCE PASSWORD LENGTH ---
+          if (pass.length < (cachedSettings.minPasswordLength || 6)) {
+            return res.status(400).json({ error: `Admin password must be at least ${cachedSettings.minPasswordLength || 6} characters.` });
+          }
+          if (!String(pass).startsWith('pbkdf2:')) {
+            body.adminCredentials[user] = hashPassword(pass);
+          }
         }
       }
       
-      // Update the Mongoose Map and handle deletions
       const bodyKeys = Object.keys(body.adminCredentials);
       for (const key of Array.from(credsDoc.adminCredentials.keys())) {
         if (!bodyKeys.includes(key)) {
@@ -813,13 +1300,18 @@ app.put('/api/credentials', async (req, res) => {
               ? credsDoc.branchCredentials.get(br)?.password
               : credsDoc.branchCredentials[br]?.password;
             creds.password = oldHash;
-          } else if (!creds.password.includes(':')) {
-            creds.password = hashPassword(creds.password);
+          } else {
+            // --- ENFORCE PASSWORD LENGTH ---
+            if (creds.password.length < (cachedSettings.minPasswordLength || 6)) {
+              return res.status(400).json({ error: `Branch password must be at least ${cachedSettings.minPasswordLength || 6} characters.` });
+            }
+            if (!String(creds.password).startsWith('pbkdf2:')) {
+              creds.password = hashPassword(creds.password);
+            }
           }
         }
       }
 
-      // Update the Mongoose Map and handle deletions
       const bodyKeys = Object.keys(body.branchCredentials);
       for (const key of Array.from(credsDoc.branchCredentials.keys())) {
         if (!bodyKeys.includes(key)) {
@@ -840,13 +1332,18 @@ app.put('/api/credentials', async (req, res) => {
               ? credsDoc.batchCredentials.get(bt)?.password
               : credsDoc.batchCredentials[bt]?.password;
             creds.password = oldHash;
-          } else if (!creds.password.includes(':')) {
-            creds.password = hashPassword(creds.password);
+          } else {
+            // --- ENFORCE PASSWORD LENGTH ---
+            if (creds.password.length < (cachedSettings.minPasswordLength || 6)) {
+              return res.status(400).json({ error: `Batch password must be at least ${cachedSettings.minPasswordLength || 6} characters.` });
+            }
+            if (!String(creds.password).startsWith('pbkdf2:')) {
+              creds.password = hashPassword(creds.password);
+            }
           }
         }
       }
 
-      // Update the Mongoose Map and handle deletions
       const bodyKeys = Object.keys(body.batchCredentials);
       for (const key of Array.from(credsDoc.batchCredentials.keys())) {
         if (!bodyKeys.includes(key)) {
@@ -883,7 +1380,6 @@ app.put('/api/credentials', async (req, res) => {
       if (!credsDoc.coupons) {
         credsDoc.coupons = new Map();
       }
-      // Update the Mongoose Map and handle deletions
       const bodyKeys = Object.keys(body.coupons);
       for (const key of Array.from(credsDoc.coupons.keys())) {
         if (!bodyKeys.includes(key)) {
@@ -897,11 +1393,708 @@ app.put('/api/credentials', async (req, res) => {
     }
 
     await credsDoc.save();
+    
+    // Automatically synchronize user collection
+    await syncUsersAndSeed();
+    
     res.json(credsDoc);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
+
+
+// ==========================================
+// --- PROTECTED DEVELOPER API ROUTER ---
+// ==========================================
+
+const developerRouter = express.Router();
+developerRouter.use(authenticateSession);
+developerRouter.use(authorizeDeveloper);
+
+// 1. User Management - View Users (paginated and searchable)
+developerRouter.get('/users', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const search = String(req.query.search || '').trim();
+    
+    const query = {};
+    if (search) {
+      query.username = new RegExp(search, 'i');
+    }
+    
+    const count = await User.countDocuments(query);
+    const users = await User.find(query)
+      .select('-password')
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+      
+    res.json({
+      users,
+      pagination: {
+        page,
+        limit,
+        totalItems: count,
+        totalPages: Math.ceil(count / limit)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Edit user (change username, email, role, status)
+developerRouter.put('/users/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { username, email, role, status } = req.body;
+    
+    const userToEdit = await User.findById(id);
+    if (!userToEdit) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const modifierUsername = req.user.username;
+    let auditDesc = `Updated user ${userToEdit.username}: `;
+    
+    const oldUsername = userToEdit.username;
+    const oldRole = userToEdit.role;
+    const oldBranch = userToEdit.branch;
+    const oldBatch = userToEdit.batch;
+    let changed = false;
+
+    if (username && username.toLowerCase().trim() !== userToEdit.username) {
+      const uClean = username.toLowerCase().trim();
+      const duplicate = await User.findOne({ username: uClean });
+      if (duplicate) {
+        return res.status(400).json({ error: 'Username already exists' });
+      }
+      auditDesc += `username changed to ${uClean}; `;
+      userToEdit.username = uClean;
+      changed = true;
+    }
+    
+    if (email !== undefined && email !== userToEdit.email) {
+      auditDesc += `email changed to ${email}; `;
+      userToEdit.email = email;
+      changed = true;
+    }
+    
+    if (role && role !== userToEdit.role) {
+      auditDesc += `role changed to ${role}; `;
+      userToEdit.role = role;
+      changed = true;
+      
+      await new SecurityLog({
+        eventType: 'RoleChange',
+        username: modifierUsername,
+        description: `Role of user ${userToEdit.username} changed to ${role}`,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent']
+      }).save();
+    }
+    
+    if (status && status !== userToEdit.status) {
+      auditDesc += `status changed to ${status}; `;
+      userToEdit.status = status;
+      changed = true;
+      
+      await new SecurityLog({
+        eventType: 'UserStatusUpdate',
+        username: modifierUsername,
+        description: `Status of user ${userToEdit.username} changed to ${status}`,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent']
+      }).save();
+    }
+
+    if (changed) {
+      await userToEdit.save();
+
+      // Sync to Credential model
+      const creds = await Credential.findOne({ configType: 'main' });
+      if (creds) {
+        let password = userToEdit.password;
+        
+        // Remove from old place in creds
+        if (oldRole === 'superadmin' || oldRole === 'developer') {
+          if (creds.adminCredentials instanceof Map) {
+            password = creds.adminCredentials.get(oldUsername) || password;
+            creds.adminCredentials.delete(oldUsername);
+          } else {
+            password = creds.adminCredentials[oldUsername] || password;
+            delete creds.adminCredentials[oldUsername];
+          }
+        } else if (oldRole === 'branchadmin') {
+          const key = oldBranch;
+          if (key) {
+            const entry = creds.branchCredentials instanceof Map ? creds.branchCredentials.get(key) : creds.branchCredentials[key];
+            if (entry) {
+              password = entry.password || password;
+              if (creds.branchCredentials instanceof Map) {
+                creds.branchCredentials.delete(key);
+              } else {
+                delete creds.branchCredentials[key];
+              }
+            }
+          }
+        } else if (oldRole === 'coordinator') {
+          const key = `${oldBranch}_${oldBatch}`;
+          const entry = creds.batchCredentials instanceof Map ? creds.batchCredentials.get(key) : creds.batchCredentials[key];
+          if (entry) {
+            password = entry.password || password;
+            if (creds.batchCredentials instanceof Map) {
+              creds.batchCredentials.delete(key);
+            } else {
+              delete creds.batchCredentials[key];
+            }
+          }
+        }
+
+        // Add to new place in creds if not soft-deleted
+        if (userToEdit.status !== 'SoftDeleted') {
+          const newUsername = userToEdit.username;
+          const newRole = userToEdit.role;
+          const newBranch = userToEdit.branch || oldBranch || 'Kuttiady';
+          const newBatch = userToEdit.batch || oldBatch || 'batch1';
+
+          if (newRole === 'superadmin' || newRole === 'developer') {
+            if (creds.adminCredentials instanceof Map) {
+              creds.adminCredentials.set(newUsername, password);
+            } else {
+              creds.adminCredentials[newUsername] = password;
+            }
+          } else if (newRole === 'branchadmin') {
+            const key = newBranch;
+            const newEntry = { username: newUsername, password };
+            if (creds.branchCredentials instanceof Map) {
+              creds.branchCredentials.set(key, newEntry);
+            } else {
+              creds.branchCredentials[key] = newEntry;
+            }
+          } else if (newRole === 'coordinator') {
+            const key = `${newBranch}_${newBatch}`;
+            const newEntry = { username: newUsername, password };
+            if (creds.batchCredentials instanceof Map) {
+              creds.batchCredentials.set(key, newEntry);
+            } else {
+              creds.batchCredentials[key] = newEntry;
+            }
+          }
+        }
+
+        creds.markModified('adminCredentials');
+        creds.markModified('branchCredentials');
+        creds.markModified('batchCredentials');
+        await creds.save();
+      }
+
+      await new SecurityLog({
+        eventType: 'DeveloperAudit',
+        username: modifierUsername,
+        description: auditDesc,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent']
+      }).save();
+    }
+
+    res.json(userToEdit);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Soft Delete User
+developerRouter.delete('/users/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userToEdit = await User.findById(id);
+    if (!userToEdit) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    userToEdit.status = 'SoftDeleted';
+    await userToEdit.save();
+    
+    // Sync to Credential model by removing the user entry
+    const creds = await Credential.findOne({ configType: 'main' });
+    if (creds) {
+      const uName = userToEdit.username;
+      const uRole = userToEdit.role;
+      const uBranch = userToEdit.branch;
+      const uBatch = userToEdit.batch;
+      
+      if (uRole === 'superadmin' || uRole === 'developer') {
+        if (creds.adminCredentials instanceof Map) {
+          creds.adminCredentials.delete(uName);
+        } else {
+          delete creds.adminCredentials[uName];
+        }
+      } else if (uRole === 'branchadmin') {
+        const key = uBranch;
+        if (key) {
+          if (creds.branchCredentials instanceof Map) {
+            creds.branchCredentials.delete(key);
+          } else {
+            delete creds.branchCredentials[key];
+          }
+        }
+      } else if (uRole === 'coordinator') {
+        const key = `${uBranch}_${uBatch}`;
+        if (creds.batchCredentials instanceof Map) {
+          creds.batchCredentials.delete(key);
+        } else {
+          delete creds.batchCredentials[key];
+        }
+      }
+      
+      creds.markModified('adminCredentials');
+      creds.markModified('branchCredentials');
+      creds.markModified('batchCredentials');
+      await creds.save();
+    }
+
+    await new SecurityLog({
+      eventType: 'UserStatusUpdate',
+      username: req.user.username,
+      description: `Soft-deleted user ${userToEdit.username}`,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    }).save();
+    
+    res.json({ success: true, message: 'User soft-deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Session Management - View active sessions (paginated)
+developerRouter.get('/sessions', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    
+    const count = await Session.countDocuments();
+    const sessions = await Session.find()
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+      
+    res.json({
+      sessions,
+      pagination: {
+        page,
+        limit,
+        totalItems: count,
+        totalPages: Math.ceil(count / limit)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Logout specific session
+developerRouter.delete('/sessions/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+    await Session.deleteOne({ token });
+    
+    await new SecurityLog({
+      eventType: 'SessionTermination',
+      username: req.user.username,
+      description: `Terminated active session token.`,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    }).save();
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Logout all sessions (except current)
+developerRouter.delete('/sessions', async (req, res) => {
+  try {
+    const currentToken = req.user.token;
+    const result = await Session.deleteMany({ token: { $ne: currentToken } });
+    
+    await new SecurityLog({
+      eventType: 'SessionTermination',
+      username: req.user.username,
+      description: `Terminated all active sessions except current session (Deleted: ${result.deletedCount}).`,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    }).save();
+
+    res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Login history (paginated)
+developerRouter.get('/login-history', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    
+    const count = await LoginHistory.countDocuments();
+    const history = await LoginHistory.find()
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+      
+    res.json({
+      history,
+      pagination: {
+        page,
+        limit,
+        totalItems: count,
+        totalPages: Math.ceil(count / limit)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. System Monitoring
+developerRouter.get('/system-status', async (req, res) => {
+  try {
+    const dbStatus = mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected';
+    const activeUsersCount = await Session.distinct('username');
+    const totalSessionsCount = await Session.countDocuments();
+    
+    const freeMemBytes = os.freemem();
+    const totalMemBytes = os.totalmem();
+    const processMem = process.memoryUsage();
+    
+    res.json({
+      databaseStatus: dbStatus,
+      activeUsers: activeUsersCount.length,
+      totalSessions: totalSessionsCount,
+      os: {
+        platform: os.platform(),
+        release: os.release(),
+        uptime: os.uptime(),
+        freeMemory: Math.round(freeMemBytes / (1024 * 1024)) + ' MB',
+        totalMemory: Math.round(totalMemBytes / (1024 * 1024)) + ' MB',
+        cpuUsage: os.loadavg()
+      },
+      process: {
+        uptime: process.uptime(),
+        memoryUsage: {
+          rss: Math.round(processMem.rss / (1024 * 1024)) + ' MB',
+          heapTotal: Math.round(processMem.heapTotal / (1024 * 1024)) + ' MB',
+          heapUsed: Math.round(processMem.heapUsed / (1024 * 1024)) + ' MB'
+        }
+      },
+      apiStatus: 'Healthy'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Security Center logs (paginated)
+developerRouter.get('/security-logs', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    
+    const count = await SecurityLog.countDocuments();
+    const logs = await SecurityLog.find()
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+      
+    res.json({
+      logs,
+      pagination: {
+        page,
+        limit,
+        totalItems: count,
+        totalPages: Math.ceil(count / limit)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// 5. Developer Tools - Application logs (Searchable, filterable, and paginated)
+developerRouter.get('/app-logs', async (req, res) => {
+  try {
+    const { type, search, page = 1, limit = 50 } = req.query;
+    let filtered = appLogs;
+    
+    if (type && type !== 'all') {
+      filtered = filtered.filter(l => l.type === type);
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      filtered = filtered.filter(l => l.message.toLowerCase().includes(q));
+    }
+    
+    const count = filtered.length;
+    const p = Math.max(1, parseInt(page, 10));
+    const lim = Math.min(100, Math.max(1, parseInt(limit, 10)));
+    
+    // Reverse chronological order
+    const sorted = [...filtered].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    const paginated = sorted.slice((p - 1) * lim, p * lim);
+    
+    res.json({
+      logs: paginated,
+      pagination: {
+        page: p,
+        limit: lim,
+        totalItems: count,
+        totalPages: Math.ceil(count / lim)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Database statistics (document count benchmarks)
+developerRouter.get('/db-stats', async (req, res) => {
+  try {
+    const studentCount = await Student.countDocuments();
+    const attendanceCount = await Attendance.countDocuments();
+    const userCount = await User.countDocuments();
+    const sessionCount = await Session.countDocuments();
+    const loginHistoryCount = await LoginHistory.countDocuments();
+    const securityLogCount = await SecurityLog.countDocuments();
+    
+    res.json({
+      students: studentCount,
+      attendance: attendanceCount,
+      users: userCount,
+      sessions: sessionCount,
+      loginHistory: loginHistoryCount,
+      securityLogs: securityLogCount
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Dashboard stats
+developerRouter.get('/dashboard-stats', async (req, res) => {
+  try {
+    const totalUsers = await User.countDocuments();
+    const activeUsers = (await Session.distinct('username')).length;
+    const totalSessions = await Session.countDocuments();
+    const dbStatus = mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected';
+    
+    // Recent activity (audit logs)
+    const recentActivity = await SecurityLog.find({ eventType: { $ne: 'FailedLogin' } })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .lean();
+      
+    // Security alerts (failed logins)
+    const securityAlerts = await SecurityLog.find({ eventType: 'FailedLogin' })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .lean();
+      
+    const studentCount = await Student.countDocuments();
+    const attendanceCount = await Attendance.countDocuments();
+    const processMem = process.memoryUsage();
+    
+    res.json({
+      users: {
+        total: totalUsers,
+        active: activeUsers,
+        sessions: totalSessions
+      },
+      database: {
+        status: dbStatus,
+        studentsCount: studentCount,
+        attendanceCount: attendanceCount
+      },
+      system: {
+        uptime: process.uptime(),
+        memoryUsage: Math.round(processMem.heapUsed / (1024 * 1024)) + ' MB',
+        health: 'Healthy'
+      },
+      recentActivity,
+      securityAlerts
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Full database stats, collection sizes, and indexes info
+developerRouter.get('/database', async (req, res) => {
+  try {
+    const db = mongoose.connection.db;
+    const stats = await db.command({ dbStats: 1 });
+    
+    const collections = ['students', 'attendances', 'credentials', 'sessions', 'users', 'loginhistories', 'securitylogs'];
+    const collectionsData = [];
+    
+    const startPing = Date.now();
+    await db.command({ ping: 1 });
+    const pingLatencyMs = Date.now() - startPing;
+    
+    for (const collName of collections) {
+      try {
+        const collStats = await db.command({ collStats: collName });
+        const indexes = await db.collection(collName).listIndexes().toArray();
+        
+        collectionsData.push({
+          name: collName,
+          count: collStats.count,
+          size: Math.round(collStats.size / 1024) + ' KB',
+          storageSize: Math.round(collStats.storageSize / 1024) + ' KB',
+          avgObjSize: Math.round(collStats.avgObjSize) + ' bytes',
+          indexCount: collStats.nindexes,
+          indexSizes: collStats.indexSizes,
+          indexes: indexes.map(idx => ({
+            name: idx.name,
+            key: idx.key,
+            unique: !!idx.unique
+          }))
+        });
+      } catch (collErr) {
+        const count = await db.collection(collName).countDocuments();
+        collectionsData.push({
+          name: collName,
+          count,
+          size: 'N/A',
+          storageSize: 'N/A',
+          avgObjSize: 'N/A',
+          indexCount: 0,
+          indexSizes: {},
+          indexes: []
+        });
+      }
+    }
+    
+    res.json({
+      databaseName: stats.db,
+      collectionsCount: stats.collections,
+      objectsCount: stats.objects,
+      dataSize: Math.round(stats.dataSize / (1024 * 1024)) + ' MB',
+      storageSize: Math.round(stats.storageSize / (1024 * 1024)) + ' MB',
+      indexesCount: stats.indexes,
+      indexSize: Math.round(stats.indexSize / (1024 * 1024)) + ' MB',
+      pingLatencyMs,
+      collections: collectionsData
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Audit route (user updates, config changes)
+developerRouter.get('/audit', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const eventType = req.query.eventType;
+    
+    const query = { eventType: { $ne: 'FailedLogin' } };
+    if (eventType) {
+      query.eventType = eventType;
+    }
+    
+    const count = await SecurityLog.countDocuments(query);
+    const logs = await SecurityLog.find(query)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+      
+    res.json({
+      logs,
+      pagination: {
+        page,
+        limit,
+        totalItems: count,
+        totalPages: Math.ceil(count / limit)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Developer settings GET
+developerRouter.get('/settings', (req, res) => {
+  res.json(cachedSettings);
+});
+
+// Developer settings POST
+developerRouter.post('/settings', async (req, res) => {
+  try {
+    const { maintenanceMode, sessionTimeoutMinutes, minPasswordLength, failedLoginThreshold, failedLoginBlockTimeMinutes, logRetentionLimit } = req.body;
+    
+    // Validate inputs
+    if (sessionTimeoutMinutes !== undefined && (isNaN(sessionTimeoutMinutes) || sessionTimeoutMinutes <= 0)) {
+      return res.status(400).json({ error: 'Session Timeout must be a positive number.' });
+    }
+    if (minPasswordLength !== undefined && (isNaN(minPasswordLength) || minPasswordLength < 4 || minPasswordLength > 32)) {
+      return res.status(400).json({ error: 'Minimum password length must be between 4 and 32 characters.' });
+    }
+    if (failedLoginThreshold !== undefined && (isNaN(failedLoginThreshold) || failedLoginThreshold <= 0)) {
+      return res.status(400).json({ error: 'Failed Login Threshold must be a positive number.' });
+    }
+    if (failedLoginBlockTimeMinutes !== undefined && (isNaN(failedLoginBlockTimeMinutes) || failedLoginBlockTimeMinutes <= 0)) {
+      return res.status(400).json({ error: 'Failed Login Block Duration must be a positive number.' });
+    }
+    if (logRetentionLimit !== undefined && (isNaN(logRetentionLimit) || logRetentionLimit <= 0 || logRetentionLimit > 10000)) {
+      return res.status(400).json({ error: 'Log retention limit must be a positive number up to 10,000.' });
+    }
+
+    let settings = await SystemSetting.findOne({ configKey: 'main' });
+    if (!settings) {
+      settings = new SystemSetting({ configKey: 'main' });
+    }
+    
+    if (maintenanceMode !== undefined) settings.maintenanceMode = !!maintenanceMode;
+    if (sessionTimeoutMinutes !== undefined) settings.sessionTimeoutMinutes = parseInt(sessionTimeoutMinutes, 10);
+    if (minPasswordLength !== undefined) settings.minPasswordLength = parseInt(minPasswordLength, 10);
+    if (failedLoginThreshold !== undefined) settings.failedLoginThreshold = parseInt(failedLoginThreshold, 10);
+    if (failedLoginBlockTimeMinutes !== undefined) settings.failedLoginBlockTimeMinutes = parseInt(failedLoginBlockTimeMinutes, 10);
+    if (logRetentionLimit !== undefined) settings.logRetentionLimit = parseInt(logRetentionLimit, 10);
+    
+    await settings.save();
+    cachedSettings = settings.toObject();
+    
+    if (appLogs.length > cachedSettings.logRetentionLimit) {
+      appLogs.splice(0, appLogs.length - cachedSettings.logRetentionLimit);
+    }
+    
+    await new SecurityLog({
+      eventType: 'SystemConfigUpdate',
+      username: req.user.username,
+      description: `Developer updated system configuration options in database.`,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    }).save();
+    
+    res.json({ success: true, settings: cachedSettings });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.use('/api/developer', developerRouter);
+
 app.listen(PORT, () => {
   console.log(`Express server is running on port ${PORT}`);
 });
