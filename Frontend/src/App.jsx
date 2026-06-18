@@ -22,6 +22,42 @@ const API_BASE_URL = window.location.hostname === 'localhost' || window.location
   ? 'http://localhost:5000/api'
   : 'https://masterfit-dfz7.onrender.com/api';
 
+// Global Fetch Interceptor to automatically append Authorization token
+const originalFetch = window.fetch;
+window.fetch = function (url, options = {}) {
+  const token = localStorage.getItem('umai_session_token') || (() => {
+    const cookies = document.cookie.split(';');
+    for (let i = 0; i < cookies.length; i++) {
+      const cookie = cookies[i].trim();
+      if (cookie.startsWith('umai_session_token=')) {
+        return cookie.substring('umai_session_token='.length);
+      }
+    }
+    return '';
+  })();
+
+  if (token && typeof url === 'string' && url.startsWith(API_BASE_URL)) {
+    if (!options.headers) {
+      options.headers = {};
+    }
+    if (options.headers instanceof Headers) {
+      if (!options.headers.has('Authorization')) {
+        options.headers.set('Authorization', `Bearer ${token}`);
+      }
+    } else if (Array.isArray(options.headers)) {
+      const hasAuth = options.headers.some(([key]) => key.toLowerCase() === 'authorization');
+      if (!hasAuth) {
+        options.headers.push(['Authorization', `Bearer ${token}`]);
+      }
+    } else {
+      if (!options.headers['Authorization'] && !options.headers['authorization']) {
+        options.headers['Authorization'] = `Bearer ${token}`;
+      }
+    }
+  }
+  return originalFetch(url, options);
+};
+
 
 function App() {
   const navigate = useNavigate();
