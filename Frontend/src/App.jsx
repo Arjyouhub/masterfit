@@ -849,15 +849,17 @@ function App() {
   useEffect(() => {
     if (loggedInUser) {
       if (isBatchAdminUser(loggedInUser)) {
-        const activeBatch = batchOptions.find(b => loggedInUser.toLowerCase().startsWith(b.id.toLowerCase()));
+        const activeBatch = batchOptions.find(b => b.id.toLowerCase() === userBatch.toLowerCase());
         if (activeBatch) {
           setBatchFilter(activeBatch.schedule);
+        } else {
+          setBatchFilter('All');
         }
       } else {
         setBatchFilter('All');
       }
     }
-  }, [loggedInUser, batchOptions]);
+  }, [loggedInUser, userBatch, batchOptions]);
 
   // Verify session validity periodically in the background (every 10 seconds)
   useEffect(() => {
@@ -1927,9 +1929,11 @@ function App() {
     const matchesBatch = batchFilter === 'All' || 
       (s.schedule && batchFilter && s.schedule.toLowerCase().trim() === batchFilter.toLowerCase().trim());
 
-    const activeBatch = batchOptions.find(b => loggedInUser && loggedInUser.toLowerCase().startsWith(b.id.toLowerCase()));
-    if (activeBatch) {
-      return matchesSearch && matchesBranch && matchesStatus && matchesBatch && s.schedule === activeBatch.schedule;
+    if (userRole === 'coordinator') {
+      const activeBatch = batchOptions.find(b => b.id.toLowerCase() === userBatch.toLowerCase());
+      if (activeBatch) {
+        return matchesSearch && matchesBranch && matchesStatus && matchesBatch && s.schedule === activeBatch.schedule;
+      }
     }
 
     return matchesSearch && matchesBranch && matchesStatus && matchesBatch;
@@ -1978,7 +1982,7 @@ function App() {
     const student = {
       id: students.length > 0 ? Math.max(...students.map(s => s.id)) + 1 : 1,
       ...newStudent,
-      branch: (loggedInUser && loggedInUser.startsWith('batch'))
+      branch: (userRole === 'coordinator' || userRole === 'branchadmin')
         ? defaultBranch
         : ((isAdminUser(loggedInUser) || appMode === 'login' || appMode === 'superadmin-login') ? newStudent.branch : defaultBranch),
       status: "Active",
@@ -4361,7 +4365,7 @@ function App() {
             </div>
           </div>
 
-          <div className="filter-row" style={{ marginBottom: (!loggedInUser || !loggedInUser.startsWith('batch')) ? '0.75rem' : '1.5rem', marginTop: '1.25rem', paddingBottom: '0.25rem' }}>
+          <div className="filter-row" style={{ marginBottom: (!userRole || userRole !== 'coordinator') ? '0.75rem' : '1.5rem', marginTop: '1.25rem', paddingBottom: '0.25rem' }}>
             <span style={{ color: 'var(--color-text-muted)', width: '80px', fontSize: '0.85rem' }}>Time:</span>
             <button className={`btn-small ${feeBatchFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('All')}>All</button>
             <button className={`btn-small ${feeBatchFilter === 'Morning' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Morning')}>Morning</button>

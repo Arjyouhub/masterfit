@@ -494,7 +494,7 @@ async function syncUsersAndSeed() {
       if (info && info.password) {
         const parts = key.split('_');
         const br = parts[0];
-        const bt = parts[1] || '';
+        const bt = parts.slice(1).join('_');
         const username = info.username || `${bt}@${br}`;
         await upsertUser(username, info.password, 'coordinator', br, bt);
       }
