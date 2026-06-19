@@ -48,6 +48,96 @@ function addLog(type, message) {
     appLogs.shift();
   }
 }
+
+// IP & User Agent Helpers for Proxy-aware Audits
+const getClientIp = (req) => {
+  // Cloudflare Connecting IP
+  let ip = req.headers['cf-connecting-ip'];
+  
+  // X-Forwarded-For (can be comma-separated list of IPs)
+  if (!ip && req.headers['x-forwarded-for']) {
+    const ips = req.headers['x-forwarded-for'].split(',');
+    ip = ips[0].trim();
+  }
+  
+  // X-Real-IP
+  if (!ip && req.headers['x-real-ip']) {
+    ip = req.headers['x-real-ip'];
+  }
+  
+  // Express req.ip fallback
+  if (!ip) {
+    ip = req.ip || req.connection?.remoteAddress || '';
+  }
+  
+  // Clean loopbacks
+  if (ip === '::1' || ip === '::ffff:127.0.0.1') {
+    ip = '127.0.0.1';
+  }
+  
+  return ip;
+};
+
+const parseUserAgent = (ua) => {
+  if (!ua) return { deviceType: 'Unknown', osName: 'Unknown OS', osVersion: '', browserName: 'Unknown Browser', browserVersion: '' };
+  
+  let deviceType = 'Desktop';
+  let osName = 'Unknown OS';
+  let osVersion = '';
+  let browserName = 'Unknown Browser';
+  let browserVersion = '';
+
+  // Device Type
+  if (/mobile/i.test(ua)) {
+    deviceType = 'Mobile';
+  } else if (/tablet|ipad/i.test(ua)) {
+    deviceType = 'Tablet';
+  }
+  
+  // OS Detection
+  if (/windows/i.test(ua)) {
+    osName = 'Windows';
+    const match = ua.match(/Windows NT ([\d.]+)/);
+    if (match) osVersion = match[1];
+  } else if (/macintosh/i.test(ua)) {
+    osName = 'macOS';
+    const match = ua.match(/Mac OS X ([\d_]+)/);
+    if (match) osVersion = match[1].replace(/_/g, '.');
+  } else if (/android/i.test(ua)) {
+    osName = 'Android';
+    const match = ua.match(/Android ([\d.]+)/);
+    if (match) osVersion = match[1];
+    deviceType = 'Mobile';
+  } else if (/iphone|ipad|ipod/i.test(ua)) {
+    osName = 'iOS';
+    const match = ua.match(/OS ([\d_]+)/);
+    if (match) osVersion = match[1].replace(/_/g, '.');
+    deviceType = /ipad/i.test(ua) ? 'Tablet' : 'Mobile';
+  } else if (/linux/i.test(ua)) {
+    osName = 'Linux';
+  }
+
+  // Browser Detection
+  if (/edg/i.test(ua)) {
+    browserName = 'Edge';
+    const match = ua.match(/Edg\/([\d.]+)/);
+    if (match) browserVersion = match[1];
+  } else if (/chrome/i.test(ua) && !/chromium/i.test(ua)) {
+    browserName = 'Chrome';
+    const match = ua.match(/Chrome\/([\d.]+)/);
+    if (match) browserVersion = match[1];
+  } else if (/firefox/i.test(ua)) {
+    browserName = 'Firefox';
+    const match = ua.match(/Firefox\/([\d.]+)/);
+    if (match) browserVersion = match[1];
+  } else if (/safari/i.test(ua) && !/chrome/i.test(ua)) {
+    browserName = 'Safari';
+    const match = ua.match(/Version\/([\d.]+)/);
+    if (match) browserVersion = match[1];
+  }
+
+  return { deviceType, osName, osVersion, browserName, browserVersion };
+};
 const originalLog = console.log;
 console.log = (...args) => {
   addLog('info', args.join(' '));
@@ -234,15 +324,26 @@ const authenticateSession = async (req, res, next) => {
     // Update session last activity
     await Session.updateOne({ token }, { updatedAt: new Date() });
 
+    // Fetch the User details from the database User collection to get DB-driven role, branch, and batch
+    const userDoc = await User.findOne({ username: session.username.toLowerCase().trim() }).lean();
+    if (!userDoc) {
+      return res.status(401).json({ error: 'Associated user account not found.' });
+    }
+
+    req.user = {
+      ...session,
+      role: userDoc.role,
+      branch: userDoc.branch,
+      batch: userDoc.batch
+    };
+
     // --- ENFORCE MAINTENANCE MODE ---
     if (cachedSettings.maintenanceMode) {
-      const { role } = getAuthDetails(session.username);
-      if (role !== 'developer') {
+      if (req.user.role !== 'developer') {
         return res.status(503).json({ error: 'System is undergoing scheduled maintenance. Access is restricted to developers.' });
       }
     }
 
-    req.user = session;
     next();
   } catch (err) {
     res.status(500).json({ error: 'Authentication error: ' + err.message });
@@ -252,8 +353,7 @@ const authenticateSession = async (req, res, next) => {
 // Role Authorization Middleware
 const authorizeRoles = (...roles) => {
   return (req, res, next) => {
-    const { role } = getAuthDetails(req.user.username);
-    if (!roles.includes(role)) {
+    if (!roles.includes(req.user.role)) {
       return res.status(403).json({ error: 'Access denied: insufficient permissions' });
     }
     next();
@@ -262,14 +362,14 @@ const authorizeRoles = (...roles) => {
 
 // Developer Auth Guard Middleware
 const authorizeDeveloper = (req, res, next) => {
-  const { role } = getAuthDetails(req.user.username);
-  if (role !== 'developer') {
+  if (req.user.role !== 'developer') {
     return res.status(403).json({ error: 'Access denied: Developer privilege required' });
   }
   next();
 };
 
 const app = express();
+app.set('trust proxy', true);
 const PORT = process.env.PORT || 5000;
 
 // Security Middlewares
@@ -324,8 +424,12 @@ async function syncUsersAndSeed() {
       return Object.entries(obj);
     };
 
+    const activeUsernames = new Set();
+    activeUsernames.add('developer');
+
     const upsertUser = async (username, password, role, branch = '', batch = '') => {
       const uClean = username.toLowerCase().trim();
+      activeUsernames.add(uClean);
       const existing = await User.findOne({ username: uClean });
       if (!existing) {
         await new User({
@@ -338,14 +442,30 @@ async function syncUsersAndSeed() {
         }).save();
         console.log(`[Sync] Created User account for ${uClean} (Role: ${role})`);
       } else {
+        let changed = false;
         if (existing.password !== password) {
           existing.password = password;
-          // Maintain active state on password reset
-          if (existing.status === 'SoftDeleted') {
-            existing.status = 'Active';
-          }
+          changed = true;
+        }
+        if (existing.role !== role) {
+          existing.role = role;
+          changed = true;
+        }
+        if (existing.branch !== branch) {
+          existing.branch = branch;
+          changed = true;
+        }
+        if (existing.batch !== batch) {
+          existing.batch = batch;
+          changed = true;
+        }
+        if (existing.status !== 'Active') {
+          existing.status = 'Active';
+          changed = true;
+        }
+        if (changed) {
           await existing.save();
-          console.log(`[Sync] Updated password for User ${uClean}`);
+          console.log(`[Sync] Updated User account details for ${uClean}`);
         }
       }
     };
@@ -407,6 +527,16 @@ async function syncUsersAndSeed() {
       console.log(`Username: developer`);
       console.log(`Password: ${devPassPlain}`);
       console.log(`======================================================\n`);
+    }
+
+    // 5. Clean up outdated credentials from MongoDB User collection
+    const allUsers = await User.find({});
+    for (const u of allUsers) {
+      const uClean = u.username.toLowerCase().trim();
+      if (!activeUsernames.has(uClean)) {
+        await User.deleteOne({ _id: u._id });
+        console.log(`[Sync] Deleted outdated/removed User account: ${uClean}`);
+      }
     }
   } catch (err) {
     console.error('Error during User synchronization:', err);
@@ -526,7 +656,10 @@ async function loadSettingsCache() {
 // Connect to MongoDB Atlas (Sanitize printed URI log for security)
 const sanitizedMongoUri = (process.env.MONGO_URI || '').replace(/:([^:@]+)@/, ': [REDACTED] @');
 console.log('Connecting to MongoDB URI:', sanitizedMongoUri);
-mongoose.connect(process.env.MONGO_URI, { dbName: 'attendance' })
+mongoose.connect(process.env.MONGO_URI, { 
+  dbName: 'attendance',
+  maxPoolSize: 5
+})
   .then(async () => {
     console.log('Successfully connected to MongoDB Atlas');
     await loadSettingsCache();
@@ -541,7 +674,7 @@ mongoose.connect(process.env.MONGO_URI, { dbName: 'attendance' })
 // 1. Get all students (excl. photo for memory optimization, scoped by user permissions)
 app.get('/api/students', authenticateSession, async (req, res) => {
   try {
-    const { role, branch, batch } = getAuthDetails(req.user.username);
+    const { role, branch, batch } = req.user;
     let filter = {};
     if (role !== 'superadmin' && role !== 'developer') {
       filter.branch = new RegExp(`^${branch}$`, 'i');
@@ -563,7 +696,7 @@ app.get('/api/students', authenticateSession, async (req, res) => {
 app.get('/api/students/:id/photo', authenticateSession, async (req, res) => {
   try {
     const { id } = req.params;
-    const { role, branch, batch } = getAuthDetails(req.user.username);
+    const { role, branch, batch } = req.user;
     let filter = { id: Number(id) };
     if (role !== 'superadmin' && role !== 'developer') {
       filter.branch = new RegExp(`^${branch}$`, 'i');
@@ -585,7 +718,7 @@ app.get('/api/students/:id/photo', authenticateSession, async (req, res) => {
 // 2. Create student (scoped validation)
 app.post('/api/students', authenticateSession, async (req, res) => {
   try {
-    const { role, branch } = getAuthDetails(req.user.username);
+    const { role, branch } = req.user;
     
     // Validate request body branch
     if (role !== 'superadmin' && role !== 'developer') {
@@ -618,7 +751,7 @@ app.post('/api/students', authenticateSession, async (req, res) => {
 app.put('/api/students/:id', authenticateSession, async (req, res) => {
   try {
     const { id } = req.params;
-    const { role, branch } = getAuthDetails(req.user.username);
+    const { role, branch } = req.user;
     
     const student = await Student.findOne({ id: Number(id) });
     if (!student) return res.status(404).json({ error: 'Student not found' });
@@ -649,7 +782,7 @@ app.put('/api/students/:id', authenticateSession, async (req, res) => {
 app.delete('/api/students/:id', authenticateSession, async (req, res) => {
   try {
     const { id } = req.params;
-    const { role, branch } = getAuthDetails(req.user.username);
+    const { role, branch } = req.user;
     
     const student = await Student.findOne({ id: Number(id) });
     if (!student) return res.status(404).json({ error: 'Student not found' });
@@ -670,7 +803,7 @@ app.delete('/api/students/:id', authenticateSession, async (req, res) => {
 // 5. Get all attendance records (current year by default for optimization, scoped by branch/batch)
 app.get('/api/attendance', authenticateSession, async (req, res) => {
   try {
-    const { role, branch, batch } = getAuthDetails(req.user.username);
+    const { role, branch, batch } = req.user;
     
     const currentYear = new Date().getFullYear();
     let queryYear = currentYear;
@@ -728,7 +861,7 @@ app.post('/api/attendance', authenticateSession, async (req, res) => {
       return res.status(400).json({ error: 'Records map is required' });
     }
     
-    const { role, branch, batch } = getAuthDetails(req.user.username);
+    const { role, branch, batch } = req.user;
     
     let studentFilter = {};
     if (role !== 'superadmin' && role !== 'developer') {
@@ -785,17 +918,28 @@ app.post('/api/attendance', authenticateSession, async (req, res) => {
 // 7. Login validation (linked to User model authentication & audits)
 app.post('/api/login', async (req, res) => {
   try {
-    const { loginType, username, password, branch, batch, deviceName } = req.body;
+    const { loginType, username, password, branch, batch, deviceName, screenResolution } = req.body;
     
     if (typeof username !== 'string' || typeof password !== 'string') {
       return res.status(400).json({ error: 'Username and password must be strings' });
     }
 
     const enteredUser = username.toLowerCase().trim();
+    const clientIp = getClientIp(req);
+    const userAgent = req.headers['user-agent'] || '';
+    const deviceDetails = parseUserAgent(userAgent);
+    const resolution = screenResolution || 'Unknown';
 
     // --- ENFORCE MAINTENANCE MODE ON LOGIN ---
     if (cachedSettings.maintenanceMode && enteredUser !== 'developer') {
       return res.status(503).json({ success: false, error: 'System is under maintenance. Login is currently locked.' });
+    }
+
+    const user = await User.findOne({ username: enteredUser });
+
+    // --- ENFORCE ACCOUNT LOCKED STATE ---
+    if (user && user.isLocked) {
+      return res.status(423).json({ success: false, error: 'Your account is locked due to security limits. Please contact the administrator.' });
     }
 
     // --- BRUTE FORCE LOCKOUT GUARD ---
@@ -806,28 +950,33 @@ app.post('/api/login', async (req, res) => {
       createdAt: { $gte: new Date(Date.now() - blockTimeMs) }
     });
     if (failedCount >= (cachedSettings.failedLoginThreshold || 5) && enteredUser !== 'developer') {
+      if (user && !user.isLocked) {
+        user.isLocked = true;
+        await user.save();
+      }
       return res.status(429).json({
         success: false,
         error: `Too many failed login attempts. Account is locked. Please try again in ${cachedSettings.failedLoginBlockTimeMinutes} minutes.`
       });
     }
 
-    const user = await User.findOne({ username: enteredUser });
     if (!user) {
       await new LoginHistory({
         username: enteredUser,
         status: 'Failed',
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent'],
-        deviceName
+        ipAddress: clientIp,
+        userAgent,
+        deviceName: deviceName || 'Unknown Device',
+        ...deviceDetails,
+        screenResolution: resolution
       }).save();
 
       await new SecurityLog({
         eventType: 'FailedLogin',
         username: enteredUser,
         description: `Failed login attempt: account username not found.`,
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent']
+        ipAddress: clientIp,
+        userAgent
       }).save();
 
       return res.status(401).json({ success: false, error: 'Invalid username or password' });
@@ -845,6 +994,16 @@ app.post('/api/login', async (req, res) => {
       const isCoord = loginType === 'coordinator' && (user.role === 'branchadmin' || user.role === 'coordinator');
 
       if (!isSuper && !isCoord) {
+        // Log unauthorized type attempts
+        await new LoginHistory({
+          username: user.username,
+          status: 'Failed',
+          ipAddress: clientIp,
+          userAgent,
+          deviceName: deviceName || 'Unknown Device',
+          ...deviceDetails,
+          screenResolution: resolution
+        }).save();
         return res.status(401).json({ success: false, error: 'Unauthorized login type for this account' });
       }
 
@@ -852,38 +1011,64 @@ app.post('/api/login', async (req, res) => {
       await new Session({
         username: user.username,
         token,
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent'],
-        deviceName
+        ipAddress: clientIp,
+        userAgent,
+        deviceName: deviceName || 'Unknown Device',
+        ...deviceDetails,
+        screenResolution: resolution
       }).save();
 
       await new LoginHistory({
         username: user.username,
         status: 'Success',
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent'],
-        deviceName
+        ipAddress: clientIp,
+        userAgent,
+        deviceName: deviceName || 'Unknown Device',
+        sessionToken: token,
+        ...deviceDetails,
+        screenResolution: resolution
       }).save();
 
-      return res.json({ success: true, username: user.username, token });
+      // Update User stats
+      user.lastLoginAt = new Date();
+      user.loginCount = (user.loginCount || 0) + 1;
+      user.failedAttempts = 0;
+      user.failedLoginCount = 0;
+      user.isLocked = false;
+      await user.save();
+
+      return res.json({ success: true, username: user.username, token, role: user.role, branch: user.branch, batch: user.batch });
     }
 
     // Password verification failed
+    user.failedAttempts = (user.failedAttempts || 0) + 1;
+    user.failedLoginCount = (user.failedLoginCount || 0) + 1;
+    if (user.failedAttempts >= (cachedSettings.failedLoginThreshold || 5) && user.role !== 'developer') {
+      user.isLocked = true;
+    }
+    await user.save();
+
     await new LoginHistory({
       username: user.username,
       status: 'Failed',
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-      deviceName
+      ipAddress: clientIp,
+      userAgent,
+      deviceName: deviceName || 'Unknown Device',
+      ...deviceDetails,
+      screenResolution: resolution
     }).save();
 
     await new SecurityLog({
       eventType: 'FailedLogin',
       username: user.username,
       description: `Failed login attempt: invalid password.`,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent']
+      ipAddress: clientIp,
+      userAgent
     }).save();
+
+    if (user.isLocked) {
+      return res.status(423).json({ success: false, error: 'Too many failed password attempts. Your account has been locked.' });
+    }
 
     return res.status(401).json({ success: false, error: 'Invalid username or password' });
   } catch (err) {
@@ -906,7 +1091,7 @@ app.get('/api/session/verify', async (req, res) => {
       // Validate user status
       const user = await User.findOne({ username: session.username }).lean();
       if (user && user.status === 'Active') {
-        return res.json({ success: true, username: session.username });
+        return res.json({ success: true, username: session.username, role: user.role, branch: user.branch, batch: user.batch });
       }
     }
     return res.status(401).json({ success: false, error: 'Session expired, disabled, or invalid' });
@@ -921,7 +1106,25 @@ app.post('/api/logout', async (req, res) => {
     let { token } = req.body;
     if (token && typeof token === 'string') {
       token = String(token).trim();
-      await Session.deleteOne({ token });
+      const session = await Session.findOne({ token });
+      if (session) {
+        const logoutAt = new Date();
+        const duration = Math.round((logoutAt.getTime() - new Date(session.loginTime).getTime()) / 1000);
+        
+        // Update User lastLogoutAt
+        await User.updateOne(
+          { username: session.username },
+          { lastLogoutAt: logoutAt }
+        );
+
+        // Update corresponding LoginHistory record
+        await LoginHistory.updateOne(
+          { sessionToken: token, status: 'Success' },
+          { logoutAt, sessionDuration: duration }
+        );
+
+        await Session.deleteOne({ token });
+      }
     }
     res.json({ success: true });
   } catch (err) {
@@ -932,7 +1135,16 @@ app.post('/api/logout', async (req, res) => {
 // Get all active sessions (Super Admin only, limit count to 100 to prevent out of memory)
 app.get('/api/sessions', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
   try {
-    const sessions = await Session.find({}).sort({ loginTime: -1 }).limit(100).lean();
+    let query = {};
+    if (req.user.role !== 'developer') {
+      const developers = await User.find({ role: 'developer' }).select('username').lean();
+      const devUsernames = developers.map(d => d.username.toLowerCase().trim());
+      if (!devUsernames.includes('developer')) {
+        devUsernames.push('developer');
+      }
+      query = { username: { $nin: devUsernames } };
+    }
+    const sessions = await Session.find(query).sort({ loginTime: -1 }).limit(100).lean();
     res.json(sessions);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -944,6 +1156,16 @@ app.delete('/api/sessions', authenticateSession, authorizeRoles('superadmin'), a
   try {
     let { except } = req.query;
     const filter = except && typeof except === 'string' ? { token: { $ne: String(except).trim() } } : {};
+    
+    if (req.user.role !== 'developer') {
+      const developers = await User.find({ role: 'developer' }).select('username').lean();
+      const devUsernames = developers.map(d => d.username.toLowerCase().trim());
+      if (!devUsernames.includes('developer')) {
+        devUsernames.push('developer');
+      }
+      filter.username = { $nin: devUsernames };
+    }
+    
     const result = await Session.deleteMany(filter);
     res.json({ success: true, deletedCount: result.deletedCount });
   } catch (err) {
@@ -957,7 +1179,15 @@ app.delete('/api/sessions/:token', authenticateSession, authorizeRoles('superadm
     let { token } = req.params;
     if (token && typeof token === 'string') {
       token = String(token).trim();
-      await Session.deleteOne({ token });
+      const session = await Session.findOne({ token }).lean();
+      if (session) {
+        const targetUser = await User.findOne({ username: session.username.toLowerCase().trim() }).lean();
+        const isDeveloper = (targetUser && targetUser.role === 'developer') || session.username.toLowerCase().trim() === 'developer';
+        if (isDeveloper && req.user.role !== 'developer') {
+          return res.status(403).json({ error: 'Access denied: insufficient permissions to terminate developer session' });
+        }
+        await Session.deleteOne({ token });
+      }
     }
     res.json({ success: true });
   } catch (err) {
@@ -1215,7 +1445,18 @@ app.get('/api/credentials/raw', authenticateSession, authorizeRoles('superadmin'
     if (!creds) {
       return res.json({ configType: 'main', adminCredentials: {}, branchCredentials: {}, batchCredentials: {} });
     }
-    res.json(creds);
+    const safeCreds = JSON.parse(JSON.stringify(creds));
+    if (req.user.role !== 'developer' && safeCreds.adminCredentials) {
+      const developers = await User.find({ role: 'developer' }).select('username').lean();
+      const devUsernames = developers.map(d => d.username.toLowerCase().trim());
+      if (!devUsernames.includes('developer')) {
+        devUsernames.push('developer');
+      }
+      for (const devUser of devUsernames) {
+        delete safeCreds.adminCredentials[devUser];
+      }
+    }
+    res.json(safeCreds);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1229,7 +1470,18 @@ app.get('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
       return res.json({ configType: 'main', adminCredentials: {}, branchCredentials: {}, batchCredentials: {} });
     }
     
-    const safeCreds = { ...creds };
+    const safeCreds = JSON.parse(JSON.stringify(creds));
+    if (req.user.role !== 'developer' && safeCreds.adminCredentials) {
+      const developers = await User.find({ role: 'developer' }).select('username').lean();
+      const devUsernames = developers.map(d => d.username.toLowerCase().trim());
+      if (!devUsernames.includes('developer')) {
+        devUsernames.push('developer');
+      }
+      for (const devUser of devUsernames) {
+        delete safeCreds.adminCredentials[devUser];
+      }
+    }
+    
     if (safeCreds.adminCredentials) {
       for (const user of Object.keys(safeCreds.adminCredentials)) {
         safeCreds.adminCredentials[user] = '••••••';
@@ -1280,13 +1532,27 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin'), a
         }
       }
       
+      const developers = await User.find({ role: 'developer' }).select('username').lean();
+      const devUsernames = developers.map(d => d.username.toLowerCase().trim());
+      if (!devUsernames.includes('developer')) {
+        devUsernames.push('developer');
+      }
+
       const bodyKeys = Object.keys(body.adminCredentials);
       for (const key of Array.from(credsDoc.adminCredentials.keys())) {
+        const keyClean = key.toLowerCase().trim();
+        if (devUsernames.includes(keyClean) && req.user.role !== 'developer') {
+          continue; // Preserve developer account
+        }
         if (!bodyKeys.includes(key)) {
           credsDoc.adminCredentials.delete(key);
         }
       }
       for (const [user, pass] of Object.entries(body.adminCredentials)) {
+        const userClean = user.toLowerCase().trim();
+        if (devUsernames.includes(userClean) && req.user.role !== 'developer') {
+          continue; // Block non-developers from modifying developer
+        }
         credsDoc.adminCredentials.set(user, pass);
       }
       credsDoc.markModified('adminCredentials');
@@ -1439,6 +1705,103 @@ developerRouter.get('/users', async (req, res) => {
         totalItems: count,
         totalPages: Math.ceil(count / limit)
       }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Fetch detailed consolidated user profile metrics
+developerRouter.get('/users/:id/details', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findById(id).lean();
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Fetch Login History
+    const loginHistory = await LoginHistory.find({ username: user.username })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    // Fetch Device History (distinct device metrics)
+    const devices = await LoginHistory.aggregate([
+      { $match: { username: user.username } },
+      { $group: {
+          _id: {
+            deviceName: '$deviceName',
+            deviceType: '$deviceType',
+            osName: '$osName',
+            osVersion: '$osVersion',
+            browserName: '$browserName',
+            browserVersion: '$browserVersion',
+            screenResolution: '$screenResolution'
+          },
+          lastUsed: { $max: '$createdAt' }
+      }},
+      { $sort: { lastUsed: -1 } }
+    ]);
+
+    // Fetch IP History
+    const ips = await LoginHistory.aggregate([
+      { $match: { username: user.username } },
+      { $group: {
+          _id: '$ipAddress',
+          count: { $sum: 1 },
+          lastUsed: { $max: '$createdAt' }
+      }},
+      { $sort: { lastUsed: -1 } }
+    ]);
+
+    // Fetch Security / Audit logs
+    const securityLogs = await SecurityLog.find({ username: user.username })
+      .sort({ createdAt: -1 })
+      .limit(30)
+      .lean();
+
+    // Fetch Student data (if matched to student)
+    let student = null;
+    let attendanceSummary = { present: 0, absent: 0, total: 0 };
+    let feeSummary = { totalPaid: 0, payments: [] };
+
+    student = await Student.findOne({
+      $or: [
+        { email: user.email },
+        { phone: user.phone },
+        { name: user.fullName }
+      ]
+    }).lean();
+
+    if (student) {
+      // Calculate attendance
+      const attendance = await Attendance.find({ 'records.studentId': student.id }).lean();
+      let present = 0;
+      let absent = 0;
+      for (const record of attendance) {
+        const studentRec = record.records.find(r => r.studentId === student.id);
+        if (studentRec) {
+          if (studentRec.status === 'Present') present++;
+          else if (studentRec.status === 'Absent') absent++;
+        }
+      }
+      attendanceSummary = { present, absent, total: present + absent };
+
+      // Calculate fees
+      feeSummary = {
+        totalPaid: (student.payments || []).reduce((acc, curr) => acc + (curr.amount || 0), 0),
+        payments: student.payments || []
+      };
+    }
+
+    res.json({
+      user,
+      loginHistory,
+      devices: devices.map(d => ({ ...d._id, lastUsed: d.lastUsed })),
+      ips: ips.map(i => ({ ip: i._id, count: i.count, lastUsed: i.lastUsed })),
+      securityLogs,
+      student,
+      attendanceSummary,
+      feeSummary
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1603,6 +1966,136 @@ developerRouter.put('/users/:id', async (req, res) => {
     res.json(userToEdit);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// Lock/Unlock account
+developerRouter.put('/users/:id/lock', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isLocked } = req.body;
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    user.isLocked = !!isLocked;
+    if (!isLocked) {
+      user.failedAttempts = 0;
+      user.failedLoginCount = 0;
+    }
+    await user.save();
+
+    await new SecurityLog({
+      eventType: 'DeveloperAudit',
+      username: req.user.username,
+      description: `${isLocked ? 'Locked' : 'Unlocked'} user account: ${user.username}`,
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent']
+    }).save();
+
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Enable/Disable user status
+developerRouter.put('/users/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!['Active', 'Disabled'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    user.status = status;
+    await user.save();
+
+    await new SecurityLog({
+      eventType: 'DeveloperAudit',
+      username: req.user.username,
+      description: `${status === 'Active' ? 'Enabled' : 'Disabled'} user account: ${user.username}`,
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent']
+    }).save();
+
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Force Password Reset
+developerRouter.put('/users/:id/reset-password', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < (cachedSettings.minPasswordLength || 6)) {
+      return res.status(400).json({ error: `Password must be at least ${cachedSettings.minPasswordLength || 6} characters.` });
+    }
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    user.password = hashPassword(newPassword);
+    user.passwordChangedAt = new Date();
+    await user.save();
+
+    // Sync to credentials config map
+    const creds = await Credential.findOne({ configType: 'main' });
+    if (creds) {
+      if (user.role === 'superadmin' || user.role === 'developer') {
+        if (creds.adminCredentials instanceof Map) {
+          creds.adminCredentials.set(user.username, newPassword);
+        } else {
+          creds.adminCredentials[user.username] = newPassword;
+        }
+      } else if (user.role === 'branchadmin') {
+        const key = user.branch;
+        if (key) {
+          const entry = creds.branchCredentials instanceof Map ? creds.branchCredentials.get(key) : creds.branchCredentials[key];
+          if (entry) {
+            entry.password = newPassword;
+          } else {
+            const newEntry = { username: user.username, password: newPassword };
+            if (creds.branchCredentials instanceof Map) {
+              creds.branchCredentials.set(key, newEntry);
+            } else {
+              creds.branchCredentials[key] = newEntry;
+            }
+          }
+        }
+      } else if (user.role === 'coordinator') {
+        const key = `${user.branch}_${user.batch}`;
+        const entry = creds.batchCredentials instanceof Map ? creds.batchCredentials.get(key) : creds.batchCredentials[key];
+        if (entry) {
+          entry.password = newPassword;
+        } else {
+          const newEntry = { username: user.username, password: newPassword };
+          if (creds.batchCredentials instanceof Map) {
+            creds.batchCredentials.set(key, newEntry);
+          } else {
+            creds.batchCredentials[key] = newEntry;
+          }
+        }
+      }
+      creds.markModified('adminCredentials');
+      creds.markModified('branchCredentials');
+      creds.markModified('batchCredentials');
+      await creds.save();
+    }
+
+    await new SecurityLog({
+      eventType: 'DeveloperAudit',
+      username: req.user.username,
+      description: `Reset password for user account: ${user.username}`,
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent']
+    }).save();
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -2088,6 +2581,377 @@ developerRouter.post('/settings', async (req, res) => {
     }).save();
     
     res.json({ success: true, settings: cachedSettings });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin Users MongoDB CRUD APIs
+app.get('/api/admins', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
+  try {
+    const admins = await User.find({
+      role: { $in: ['superadmin', 'branchadmin', 'coordinator'] },
+      status: { $ne: 'SoftDeleted' }
+    }).lean();
+
+    const enriched = [];
+    for (const adm of admins) {
+      const lastLoginLog = await LoginHistory.findOne({
+        username: adm.username,
+        status: 'Success'
+      }).sort({ createdAt: -1 }).lean();
+
+      enriched.push({
+        ...adm,
+        lastLoginLog: lastLoginLog || null
+      });
+    }
+
+    res.json(enriched);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admins', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
+  try {
+    const { username, password, role, branch, batch, fullName, phone, employeeId } = req.body;
+    if (!username || !password || !role) {
+      return res.status(400).json({ error: 'Username, password, and role are required' });
+    }
+    if (role === 'developer' && req.user.role !== 'developer') {
+      return res.status(403).json({ error: 'Access denied: cannot create developer user' });
+    }
+    const cleanUser = username.toLowerCase().trim();
+    const existing = await User.findOne({ username: cleanUser });
+    if (existing) {
+      return res.status(400).json({ error: 'Username already exists' });
+    }
+
+    const hashedPassword = hashPassword(password);
+    const newUser = new User({
+      username: cleanUser,
+      password: hashedPassword,
+      role,
+      branch: branch || '',
+      batch: batch || '',
+      fullName: fullName || '',
+      phone: phone || '',
+      employeeId: employeeId || '',
+      status: 'Active',
+      passwordChangedAt: new Date()
+    });
+    await newUser.save();
+
+    // Sync to credentials config document
+    const creds = await Credential.findOne({ configType: 'main' });
+    if (creds) {
+      if (role === 'superadmin') {
+        if (creds.adminCredentials instanceof Map) {
+          creds.adminCredentials.set(cleanUser, password);
+        } else {
+          creds.adminCredentials[cleanUser] = password;
+        }
+      } else if (role === 'branchadmin') {
+        const key = branch || 'Kuttiady';
+        const entry = { username: cleanUser, password };
+        if (creds.branchCredentials instanceof Map) {
+          creds.branchCredentials.set(key, entry);
+        } else {
+          creds.branchCredentials[key] = entry;
+        }
+      } else if (role === 'coordinator') {
+        const key = `${branch || 'Kuttiady'}_${batch || 'batch1'}`;
+        const entry = { username: cleanUser, password };
+        if (creds.batchCredentials instanceof Map) {
+          creds.batchCredentials.set(key, entry);
+        } else {
+          creds.batchCredentials[key] = entry;
+        }
+      }
+      creds.markModified('adminCredentials');
+      creds.markModified('branchCredentials');
+      creds.markModified('batchCredentials');
+      await creds.save();
+    }
+
+    await new SecurityLog({
+      eventType: 'DeveloperAudit',
+      username: req.user.username,
+      description: `Created Admin account: ${cleanUser} (Role: ${role})`,
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent']
+    }).save();
+
+    res.json(newUser);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { username, password, role, branch, batch, fullName, phone, employeeId, status, isLocked } = req.body;
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ error: 'Admin user not found' });
+
+    if (user.role === 'developer' && req.user.role !== 'developer') {
+      return res.status(403).json({ error: 'Access denied: insufficient permissions' });
+    }
+    if (role === 'developer' && req.user.role !== 'developer') {
+      return res.status(403).json({ error: 'Access denied: cannot assign developer role' });
+    }
+
+    const oldUsername = user.username;
+    const oldRole = user.role;
+    const oldBranch = user.branch;
+    const oldBatch = user.batch;
+
+    if (username && username.toLowerCase().trim() !== user.username) {
+      const cleanUser = username.toLowerCase().trim();
+      const duplicate = await User.findOne({ username: cleanUser });
+      if (duplicate) return res.status(400).json({ error: 'Username already exists' });
+      user.username = cleanUser;
+    }
+
+    if (password) {
+      user.password = hashPassword(password);
+      user.passwordChangedAt = new Date();
+    }
+
+    if (role) user.role = role;
+    if (branch !== undefined) user.branch = branch;
+    if (batch !== undefined) user.batch = batch;
+    if (fullName !== undefined) user.fullName = fullName;
+    if (phone !== undefined) user.phone = phone;
+    if (employeeId !== undefined) user.employeeId = employeeId;
+    if (status) user.status = status;
+    if (isLocked !== undefined) {
+      user.isLocked = !!isLocked;
+      if (!isLocked) {
+        user.failedAttempts = 0;
+        user.failedLoginCount = 0;
+      }
+    }
+
+    await user.save();
+
+    // Sync to credentials config document
+    const creds = await Credential.findOne({ configType: 'main' });
+    if (creds) {
+      let plainPass = password;
+      if (!plainPass) {
+        if (oldRole === 'superadmin') {
+          plainPass = creds.adminCredentials instanceof Map ? creds.adminCredentials.get(oldUsername) : creds.adminCredentials[oldUsername];
+        } else if (oldRole === 'branchadmin') {
+          const entry = creds.branchCredentials instanceof Map ? creds.branchCredentials.get(oldBranch) : creds.branchCredentials[oldBranch];
+          plainPass = entry?.password;
+        } else if (oldRole === 'coordinator') {
+          const key = `${oldBranch}_${oldBatch}`;
+          const entry = creds.batchCredentials instanceof Map ? creds.batchCredentials.get(key) : creds.batchCredentials[key];
+          plainPass = entry?.password;
+        }
+      }
+      if (!plainPass) plainPass = '123456';
+
+      // Delete old mapping
+      if (oldRole === 'superadmin') {
+        if (creds.adminCredentials instanceof Map) creds.adminCredentials.delete(oldUsername);
+        else delete creds.adminCredentials[oldUsername];
+      } else if (oldRole === 'branchadmin') {
+        if (creds.branchCredentials instanceof Map) creds.branchCredentials.delete(oldBranch);
+        else delete creds.branchCredentials[oldBranch];
+      } else if (oldRole === 'coordinator') {
+        const key = `${oldBranch}_${oldBatch}`;
+        if (creds.batchCredentials instanceof Map) creds.batchCredentials.delete(key);
+        else delete creds.batchCredentials[key];
+      }
+
+      // Insert new mapping if status is not soft-deleted
+      if (user.status !== 'SoftDeleted') {
+        const newRole = user.role;
+        const newUsername = user.username;
+        const newBranch = user.branch || 'Kuttiady';
+        const newBatch = user.batch || 'batch1';
+
+        if (newRole === 'superadmin') {
+          if (creds.adminCredentials instanceof Map) creds.adminCredentials.set(newUsername, plainPass);
+          else creds.adminCredentials[newUsername] = plainPass;
+        } else if (newRole === 'branchadmin') {
+          const entry = { username: newUsername, password: plainPass };
+          if (creds.branchCredentials instanceof Map) creds.branchCredentials.set(newBranch, entry);
+          else creds.branchCredentials[newBranch] = entry;
+        } else if (newRole === 'coordinator') {
+          const key = `${newBranch}_${newBatch}`;
+          const entry = { username: newUsername, password: plainPass };
+          if (creds.batchCredentials instanceof Map) creds.batchCredentials.set(key, entry);
+          else creds.batchCredentials[key] = entry;
+        }
+      }
+
+      creds.markModified('adminCredentials');
+      creds.markModified('branchCredentials');
+      creds.markModified('batchCredentials');
+      await creds.save();
+    }
+
+    await new SecurityLog({
+      eventType: 'DeveloperAudit',
+      username: req.user.username,
+      description: `Updated Admin account: ${user.username}`,
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent']
+    }).save();
+
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admins/:id', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ error: 'Admin user not found' });
+
+    if (user.role === 'developer' && req.user.role !== 'developer') {
+      return res.status(403).json({ error: 'Access denied: insufficient permissions' });
+    }
+
+    user.status = 'SoftDeleted';
+    await user.save();
+
+    // Delete from credentials mapping
+    const creds = await Credential.findOne({ configType: 'main' });
+    if (creds) {
+      if (user.role === 'superadmin') {
+        if (creds.adminCredentials instanceof Map) creds.adminCredentials.delete(user.username);
+        else delete creds.adminCredentials[user.username];
+      } else if (user.role === 'branchadmin') {
+        if (creds.branchCredentials instanceof Map) creds.branchCredentials.delete(user.branch);
+        else delete creds.branchCredentials[user.branch];
+      } else if (user.role === 'coordinator') {
+        const key = `${user.branch}_${user.batch}`;
+        if (creds.batchCredentials instanceof Map) creds.batchCredentials.delete(key);
+        else delete creds.batchCredentials[key];
+      }
+      creds.markModified('adminCredentials');
+      creds.markModified('branchCredentials');
+      creds.markModified('batchCredentials');
+      await creds.save();
+    }
+
+    await new SecurityLog({
+      eventType: 'DeveloperAudit',
+      username: req.user.username,
+      description: `Soft deleted Admin account: ${user.username}`,
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent']
+    }).save();
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admins/:id/details', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findById(id).lean();
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (user.role === 'developer' && req.user.role !== 'developer') {
+      return res.status(403).json({ error: 'Access denied: insufficient permissions' });
+    }
+
+    // Fetch Login History
+    const loginHistory = await LoginHistory.find({ username: user.username })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    // Fetch Device History (distinct device metrics)
+    const devices = await LoginHistory.aggregate([
+      { $match: { username: user.username } },
+      { $group: {
+          _id: {
+            deviceName: '$deviceName',
+            deviceType: '$deviceType',
+            osName: '$osName',
+            osVersion: '$osVersion',
+            browserName: '$browserName',
+            browserVersion: '$browserVersion',
+            screenResolution: '$screenResolution'
+          },
+          lastUsed: { $max: '$createdAt' }
+      }},
+      { $sort: { lastUsed: -1 } }
+    ]);
+
+    // Fetch IP History
+    const ips = await LoginHistory.aggregate([
+      { $match: { username: user.username } },
+      { $group: {
+          _id: '$ipAddress',
+          count: { $sum: 1 },
+          lastUsed: { $max: '$createdAt' }
+      }},
+      { $sort: { lastUsed: -1 } }
+    ]);
+
+    // Fetch Security / Audit logs
+    const securityLogs = await SecurityLog.find({ username: user.username })
+      .sort({ createdAt: -1 })
+      .limit(30)
+      .lean();
+
+    // Fetch Student data (if matched to student)
+    let student = null;
+    let attendanceSummary = { present: 0, absent: 0, total: 0 };
+    let feeSummary = { totalPaid: 0, payments: [] };
+
+    student = await Student.findOne({
+      $or: [
+        { email: user.email },
+        { phone: user.phone },
+        { name: user.fullName }
+      ]
+    }).lean();
+
+    if (student) {
+      // Calculate attendance
+      const attendance = await Attendance.find({ 'records.studentId': student.id }).lean();
+      let present = 0;
+      let absent = 0;
+      for (const record of attendance) {
+        const studentRec = record.records.find(r => r.studentId === student.id);
+        if (studentRec) {
+          if (studentRec.status === 'Present') present++;
+          else if (studentRec.status === 'Absent') absent++;
+        }
+      }
+      attendanceSummary = { present, absent, total: present + absent };
+
+      // Calculate fees
+      feeSummary = {
+        totalPaid: (student.payments || []).reduce((acc, curr) => acc + (curr.amount || 0), 0),
+        payments: student.payments || []
+      };
+    }
+
+    res.json({
+      user,
+      loginHistory,
+      devices: devices.map(d => ({ ...d._id, lastUsed: d.lastUsed })),
+      ips: ips.map(i => ({ ip: i._id, count: i.count, lastUsed: i.lastUsed })),
+      securityLogs,
+      student,
+      attendanceSummary,
+      feeSummary
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

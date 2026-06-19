@@ -84,10 +84,13 @@ function App() {
     return localStorage.getItem('umai_session_token') || getCookieValue('umai_session_token');
   };
 
-  const setSession = (username, token) => {
+  const setSession = (username, token, role = '', branch = '', batch = '') => {
     try {
       localStorage.setItem('umai_session_user', username);
       localStorage.setItem('umai_session_token', token);
+      localStorage.setItem('umai_session_role', role);
+      localStorage.setItem('umai_session_branch', branch);
+      localStorage.setItem('umai_session_batch', batch);
     } catch (e) {
       console.error('Failed to set localStorage session:', e);
     }
@@ -99,6 +102,9 @@ function App() {
     try {
       localStorage.removeItem('umai_session_user');
       localStorage.removeItem('umai_session_token');
+      localStorage.removeItem('umai_session_role');
+      localStorage.removeItem('umai_session_branch');
+      localStorage.removeItem('umai_session_batch');
     } catch (e) {
       console.error('Failed to clear localStorage session:', e);
     }
@@ -243,6 +249,13 @@ function App() {
   const [batchForm, setBatchForm] = useState({ branch: 'kuttiady', batch: 'batch1', newUsername: '', newPassword: '', confirmPassword: '' });
 
   const [adminCredentials, setAdminCredentials] = useState({});
+  const [editingCredential, setEditingCredential] = useState(null); // { type, key, oldUsername, username, password, displayName }
+  const [isCredentialModalOpen, setIsCredentialModalOpen] = useState(false);
+  const [credentialModalError, setCredentialModalError] = useState('');
+  const [credentialModalSuccess, setCredentialModalSuccess] = useState('');
+  const [userRole, setUserRole] = useState(() => localStorage.getItem('umai_session_role') || '');
+  const [userBranch, setUserBranch] = useState(() => localStorage.getItem('umai_session_branch') || '');
+  const [userBatch, setUserBatch] = useState(() => localStorage.getItem('umai_session_batch') || '');
   const [branches, setBranches] = useState(DEFAULT_BRANCHES);
   const [customBranches, setCustomBranches] = useState([]);
   const [customBatches, setCustomBatches] = useState([]);
@@ -250,6 +263,15 @@ function App() {
   const [newBranchForm, setNewBranchForm] = useState({ name: '', username: '', password: '', confirmPassword: '' });
   const [newBatchForm, setNewBatchForm] = useState({ name: '', schedule: '', branch: 'kuttiady', username: '', password: '', confirmPassword: '' });
   const [activeSessions, setActiveSessions] = useState([]);
+  const [adminsList, setAdminsList] = useState([]);
+  const [selectedUserDetail, setSelectedUserDetail] = useState(null);
+  const [selectedUserDetailLoading, setSelectedUserDetailLoading] = useState(false);
+  const [newAdminForm, setNewAdminForm] = useState({ username: '', password: '', confirmPassword: '', role: 'branchadmin', branch: 'Kuttiady', batch: 'batch1', fullName: '', phone: '', employeeId: '' });
+  const [adminSearchQuery, setAdminSearchQuery] = useState('');
+  const [adminRoleFilter, setAdminRoleFilter] = useState('All');
+  const [adminStatusFilter, setAdminStatusFilter] = useState('All');
+  const [editingAdmin, setEditingAdmin] = useState(null);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
 
   // Fee rate configuration states
   const [monthlyFeeRate, setMonthlyFeeRate] = useState(600);
@@ -292,7 +314,43 @@ function App() {
     if (!username) return { role: 'Unknown', branch: 'Unknown', batchName: 'Unknown' };
     
     const cleanUsername = username.toLowerCase().trim();
+
+    // Check if user exists in the loaded adminsList
+    const match = adminsList.find(a => a.username.toLowerCase().trim() === cleanUsername);
+    if (match) {
+      let roleText = 'Batch Inspector';
+      if (match.role === 'superadmin') roleText = 'Super Admin';
+      else if (match.role === 'developer') roleText = 'Developer';
+      else if (match.role === 'branchadmin') roleText = 'Branch Admin';
+
+      const branchText = match.branch ? match.branch.charAt(0).toUpperCase() + match.branch.slice(1) : 'All Branches';
+      let batchText = 'All Batches (Admin)';
+      if (match.batch) {
+        const customBatchObj = customBatches.find(cb => cb.id === match.batch);
+        batchText = customBatchObj ? customBatchObj.name : match.batch.toUpperCase();
+        if (match.batch.startsWith('batch')) {
+          const batchNumStr = match.batch.replace('batch', '');
+          if (batchNumStr && !isNaN(batchNumStr)) {
+            batchText = `Batch ${batchNumStr}`;
+          }
+        }
+      }
+
+      return {
+        role: roleText,
+        branch: branchText,
+        batchName: batchText
+      };
+    }
     
+    if (cleanUsername === 'developer') {
+      return {
+        role: 'Developer',
+        branch: 'All Branches',
+        batchName: 'All Batches (Admin)'
+      };
+    }
+
     // Super Admin check
     if (!cleanUsername.includes('@')) {
       return {
@@ -318,12 +376,12 @@ function App() {
     // Check if it's a batch coordinator
     // Find batch in batchOptions
     const batchObj = batchOptions.find(b => b.id.toLowerCase() === userPart);
-    const batchName = batchObj ? batchObj.name : userPart.charAt(0).toUpperCase() + userPart.slice(1);
+    const batchNameText = batchObj ? batchObj.name : userPart.charAt(0).toUpperCase() + userPart.slice(1);
     
     return {
       role: 'Batch Inspector',
       branch: branchName,
-      batchName: batchName
+      batchName: batchNameText
     };
   };
 
@@ -404,36 +462,17 @@ function App() {
   };
 
   const isAdminUser = (user) => {
-    if (!user) return false;
-    const usernameClean = user.toLowerCase().trim();
-    if (usernameClean.includes('@')) return false;
-
-    // Fallback while adminCredentials are loading async
-    const sessionUser = getSessionUser();
-    if (sessionUser && sessionUser.toLowerCase().trim() === usernameClean) {
-      return true;
-    }
-    return Object.keys(adminCredentials).includes(usernameClean);
+    return userRole === 'superadmin' || userRole === 'developer';
   };
 
   const isBranchAdmin = (user) => {
-    if (!user) return false;
-    const usernameClean = user.toLowerCase().trim();
-    return usernameClean.startsWith('admin@');
+    return userRole === 'branchadmin';
   };
 
   const getLoggedInUserBranch = () => {
     if (!loggedInUser) return 'All';
     if (isAdminUser(loggedInUser)) return 'All';
-    if (loggedInUser.includes('@')) {
-      const branchPart = loggedInUser.split('@')[1];
-      const match = branches.find(b => b.toLowerCase() === branchPart.toLowerCase());
-      if (match) return match;
-    }
-    if (batchOptions.some(b => b.id.toLowerCase() === loggedInUser.toLowerCase())) {
-      return 'Kuttiady';
-    }
-    return 'Kuttiady';
+    return userBranch || 'All';
   };
 
   const getFilteredBatchOptions = (branchOverride) => {
@@ -459,8 +498,7 @@ function App() {
   };
 
   const isBatchAdminUser = (user) => {
-    if (!user) return false;
-    return user.toLowerCase().trim().startsWith('batch');
+    return userRole === 'coordinator';
   };
 
   const getBatchNameFromSchedule = (schedule) => {
@@ -592,6 +630,161 @@ function App() {
         }
       })
       .catch(err => console.error('Error fetching credentials:', err));
+
+    // 4. Fetch Admins list (MongoDB-backed admin accounts)
+    const sessionToken = getSessionToken();
+    if (sessionToken) {
+      fetch(`${API_BASE_URL}/admins`)
+        .then(res => {
+          if (res.ok) return res.json();
+          throw new Error('Failed to fetch admin accounts');
+        })
+        .then(data => {
+          setAdminsList(data || []);
+        })
+    }
+  };
+
+  const handleCreateAdmin = (e) => {
+    e.preventDefault();
+    if (!newAdminForm.username || !newAdminForm.password || !newAdminForm.role) {
+      alert("Username, password, and role are required.");
+      return;
+    }
+    if (newAdminForm.password !== newAdminForm.confirmPassword) {
+      alert("Passwords do not match.");
+      return;
+    }
+
+    fetch(`${API_BASE_URL}/admins`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newAdminForm)
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to create admin account') });
+        }
+        return res.json();
+      })
+      .then(data => {
+        alert(`Admin user "${data.username}" created successfully.`);
+        setNewAdminForm({ username: '', password: '', confirmPassword: '', role: 'branchadmin', branch: 'Kuttiady', batch: 'batch1', fullName: '', phone: '', employeeId: '' });
+        setIsAdminModalOpen(false);
+        reloadAllAppData();
+      })
+      .catch(err => alert("Error: " + err.message));
+  };
+
+  const handleUpdateAdmin = (e) => {
+    e.preventDefault();
+    if (!editingAdmin) return;
+    
+    if (editingAdmin.password && editingAdmin.password !== editingAdmin.confirmPassword) {
+      alert("Passwords do not match.");
+      return;
+    }
+
+    fetch(`${API_BASE_URL}/admins/${editingAdmin._id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(editingAdmin)
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to update admin account') });
+        }
+        return res.json();
+      })
+      .then(data => {
+        alert(`Admin user "${data.username}" updated successfully.`);
+        setEditingAdmin(null);
+        reloadAllAppData();
+      })
+      .catch(err => alert("Error: " + err.message));
+  };
+
+  const handleDeleteAdmin = (id, username) => {
+    if (!window.confirm(`Are you sure you want to delete the admin user "${username}"?`)) {
+      return;
+    }
+
+    fetch(`${API_BASE_URL}/admins/${id}`, {
+      method: 'DELETE'
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to delete admin account') });
+        }
+        return res.json();
+      })
+      .then(() => {
+        alert("Admin user account deleted successfully.");
+        reloadAllAppData();
+      })
+      .catch(err => alert("Error: " + err.message));
+  };
+
+  const handleToggleAdminLock = (id, currentLocked) => {
+    fetch(`${API_BASE_URL}/admins/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isLocked: !currentLocked })
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to lock/unlock user') });
+        }
+        return res.json();
+      })
+      .then(() => {
+        reloadAllAppData();
+      })
+      .catch(err => alert("Error: " + err.message));
+  };
+
+  const handleToggleAdminStatus = (id, currentStatus) => {
+    const newStatus = currentStatus === 'Active' ? 'Inactive' : 'Active';
+    fetch(`${API_BASE_URL}/admins/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus })
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to update status') });
+        }
+        return res.json();
+      })
+      .then(() => {
+        reloadAllAppData();
+      })
+      .catch(err => alert("Error: " + err.message));
+  };
+
+  const handleFetchUserDetail = (username) => {
+    setSelectedUserDetailLoading(true);
+    // Find the user ID from adminsList
+    const adminUser = adminsList.find(a => a.username.toLowerCase().trim() === username.toLowerCase().trim());
+    const userId = adminUser ? adminUser._id : null;
+    if (!userId) {
+      alert("Could not load details: User ID not found.");
+      setSelectedUserDetailLoading(false);
+      return;
+    }
+    fetch(`${API_BASE_URL}/admins/${userId}/details`)
+      .then(res => {
+        if (!res.ok) throw new Error("Failed to fetch detailed diagnostic logs");
+        return res.json();
+      })
+      .then(data => {
+        setSelectedUserDetail(data);
+        setSelectedUserDetailLoading(false);
+      })
+      .catch(err => {
+        alert("Error: " + err.message);
+        setSelectedUserDetailLoading(false);
+      });
   };
 
   // Sync state with backend on mount
@@ -618,7 +811,10 @@ function App() {
             setLoggedInUser(data.username);
             setAppMode('admin');
             // Ensure localStorage/cookies are in sync
-            setSession(data.username, sessionToken);
+            setSession(data.username, sessionToken, data.role, data.branch, data.batch);
+            setUserRole(data.role || '');
+            setUserBranch(data.branch || '');
+            setUserBatch(data.batch || '');
           } else {
             throw new Error('Session invalid');
           }
@@ -920,6 +1116,89 @@ function App() {
         setDevUserFeedback({ type: 'error', message: err.message });
       })
       .finally(() => setDevActionLoading(false));
+  };
+
+  const handleDevUserLockToggle = (userId, currentLockState) => {
+    setDevActionLoading(true);
+    fetch(`${API_BASE_URL}/developer/users/${userId}/lock`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getDevHeaders() },
+      body: JSON.stringify({ isLocked: !currentLockState })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) throw new Error(data.error);
+        setDevUserFeedback({ type: 'success', message: `Account ${!currentLockState ? 'locked' : 'unlocked'} successfully.` });
+        loadDevUsers(devUsersPage, devUserSearch);
+        if (selectedUserDetail && selectedUserDetail.user._id === userId) {
+          handleViewUserDetail(userId);
+        }
+      })
+      .catch(err => setDevUserFeedback({ type: 'error', message: err.message }))
+      .finally(() => setDevActionLoading(false));
+  };
+
+  const handleDevUserStatusToggle = (userId, currentStatus) => {
+    const nextStatus = currentStatus === 'Active' ? 'Disabled' : 'Active';
+    setDevActionLoading(true);
+    fetch(`${API_BASE_URL}/developer/users/${userId}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getDevHeaders() },
+      body: JSON.stringify({ status: nextStatus })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) throw new Error(data.error);
+        setDevUserFeedback({ type: 'success', message: `User status set to ${nextStatus} successfully.` });
+        loadDevUsers(devUsersPage, devUserSearch);
+        if (selectedUserDetail && selectedUserDetail.user._id === userId) {
+          handleViewUserDetail(userId);
+        }
+      })
+      .catch(err => setDevUserFeedback({ type: 'error', message: err.message }))
+      .finally(() => setDevActionLoading(false));
+  };
+
+  const handleDevUserResetPassword = (userId, newPassword) => {
+    if (!newPassword || newPassword.trim().length < 6) {
+      alert("Password must be at least 6 characters.");
+      return;
+    }
+    setDevActionLoading(true);
+    fetch(`${API_BASE_URL}/developer/users/${userId}/reset-password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getDevHeaders() },
+      body: JSON.stringify({ newPassword })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) throw new Error(data.error);
+        alert("Password reset successfully!");
+        setDevUserFeedback({ type: 'success', message: 'User password reset successfully.' });
+        if (selectedUserDetail && selectedUserDetail.user._id === userId) {
+          handleViewUserDetail(userId);
+        }
+      })
+      .catch(err => alert("Failed to reset password: " + err.message))
+      .finally(() => setDevActionLoading(false));
+  };
+
+  const handleViewUserDetail = (userId) => {
+    setSelectedUserDetailLoading(true);
+    fetch(`${API_BASE_URL}/developer/users/${userId}/details`, { headers: getDevHeaders() })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to load user details');
+        return res.json();
+      })
+      .then(data => {
+        setSelectedUserDetail(data);
+        setSelectedUserDetailLoading(false);
+      })
+      .catch(err => {
+        console.error(err);
+        setSelectedUserDetailLoading(false);
+        alert(err.message);
+      });
   };
 
   const handleDevLogoutSession = (token) => {
@@ -1632,14 +1911,12 @@ function App() {
     let activeBranch = 'All';
     if (isAdminUser(loggedInUser)) {
       activeBranch = branchFilter;
-    } else if (batchOptions.some(b => b.id.toLowerCase() === loggedInUser.toLowerCase())) {
-      activeBranch = 'Kuttiady';
-    } else if (loggedInUser && loggedInUser.includes('@')) {
-      const branchPart = loggedInUser.split('@')[1];
-      activeBranch = branches.find(b => b.toLowerCase() === branchPart) || 'All';
+    } else {
+      activeBranch = getLoggedInUserBranch();
     }
 
-    const matchesBranch = activeBranch === 'All' || s.branch === activeBranch;
+    const matchesBranch = activeBranch === 'All' || 
+      (s.branch && activeBranch && s.branch.toLowerCase().trim() === activeBranch.toLowerCase().trim());
 
     // Filter by student status: Active, Inactive, or All
     const matchesStatus = statusFilter === 'All' 
@@ -1647,7 +1924,8 @@ function App() {
       : (s.status || 'Active') === statusFilter;
 
     // Filter by global batch schedule
-    const matchesBatch = batchFilter === 'All' || s.schedule === batchFilter;
+    const matchesBatch = batchFilter === 'All' || 
+      (s.schedule && batchFilter && s.schedule.toLowerCase().trim() === batchFilter.toLowerCase().trim());
 
     const activeBatch = batchOptions.find(b => loggedInUser && loggedInUser.toLowerCase().startsWith(b.id.toLowerCase()));
     if (activeBatch) {
@@ -1695,15 +1973,7 @@ function App() {
 
   const handleAddStudent = (e) => {
     e.preventDefault();
-    let defaultBranch = 'Kuttiady';
-    if (isAdminUser(loggedInUser)) {
-      defaultBranch = 'Kuttiady';
-    } else if (batchOptions.some(b => b.id.toLowerCase() === loggedInUser.toLowerCase())) {
-      defaultBranch = 'Kuttiady';
-    } else if (loggedInUser && loggedInUser.includes('@')) {
-      const branchPart = loggedInUser.split('@')[1];
-      defaultBranch = branches.find(b => b.toLowerCase() === branchPart) || 'Kuttiady';
-    }
+    let defaultBranch = getLoggedInUserBranch();
 
     const student = {
       id: students.length > 0 ? Math.max(...students.map(s => s.id)) + 1 : 1,
@@ -2221,7 +2491,13 @@ function App() {
               {devUsers.length > 0 ? (
                 devUsers.map(u => (
                   <tr key={u._id}>
-                    <td style={{ fontWeight: 600, color: '#fff' }}>{u.username}</td>
+                    <td 
+                      style={{ fontWeight: 600, color: '#30d158', cursor: 'pointer', textDecoration: 'underline' }}
+                      onClick={() => handleViewUserDetail(u._id)}
+                      title="Click to view detailed user profile & audits"
+                    >
+                      {u.username}
+                    </td>
                     <td>{u.email || 'N/A'}</td>
                     <td>
                       <span className={`dev-badge ${
@@ -2232,10 +2508,18 @@ function App() {
                     </td>
                     <td>
                       <span className={`dev-badge ${u.status === 'Active' ? 'dev-badge-green' : 'dev-badge-red'}`}>{u.status || 'Active'}</span>
+                      {u.isLocked && <span className="dev-badge dev-badge-red" style={{ marginLeft: '4px' }}>Locked</span>}
                     </td>
                     <td>{new Date(u.createdAt).toLocaleDateString()}</td>
                     <td>
                       <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          className="dev-btn dev-btn-secondary"
+                          style={{ padding: '4px 8px', fontSize: '0.75rem', backgroundColor: '#30d158', color: '#000', border: 'none' }}
+                          onClick={() => handleViewUserDetail(u._id)}
+                        >
+                          Details
+                        </button>
                         <button
                           className="dev-btn dev-btn-secondary"
                           style={{ padding: '4px 8px', fontSize: '0.75rem' }}
@@ -2369,6 +2653,229 @@ function App() {
             </div>
           </div>
         )}
+      </div>
+    );
+  };
+
+  const renderUserDetailModal = () => {
+    if (!selectedUserDetail) return null;
+    const { user, loginHistory, devices, ips, securityLogs, student, attendanceSummary, feeSummary } = selectedUserDetail;
+
+    return (
+      <div className="modal-overlay" style={{ zIndex: 1100 }}>
+        <div className="modal-content" style={{ maxWidth: '850px', width: '95%', maxHeight: '90vh', overflowY: 'auto', background: '#0b0b14', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <div className="panel-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div className="avatar" style={{ width: '48px', height: '48px', fontSize: '1.25rem', backgroundColor: '#30d158', color: '#000', fontWeight: 'bold' }}>
+                {user.fullName ? user.fullName.charAt(0).toUpperCase() : user.username.charAt(0).toUpperCase()}
+              </div>
+              <div style={{ textAlign: 'left' }}>
+                <h3 className="panel-title" style={{ fontSize: '1.2rem', margin: 0, color: '#fff' }}>{user.fullName || user.username}</h3>
+                <span style={{ color: '#8e8e93', fontSize: '0.8rem' }}>Role: <span style={{ color: '#30d158' }}>{user.role}</span> | Status: <span style={{ color: user.status === 'Active' ? '#30d158' : '#ff453a' }}>{user.status}</span></span>
+              </div>
+            </div>
+            <button className="btn-icon" onClick={() => setSelectedUserDetail(null)}><X size={24} /></button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', marginTop: '1.5rem', textAlign: 'left' }}>
+            {/* Quick Actions / Controls */}
+            <div className="dev-card" style={{ padding: '1rem', background: 'rgba(255,255,255,0.02)' }}>
+              <h4 style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Security & Account Control Operations</h4>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                <button
+                  className={`dev-btn ${user.status === 'Active' ? 'dev-btn-danger' : 'dev-btn-primary'}`}
+                  style={{ fontSize: '0.8rem', padding: '6px 12px', cursor: 'pointer' }}
+                  onClick={() => handleDevUserStatusToggle(user._id, user.status)}
+                >
+                  {user.status === 'Active' ? 'Disable Account' : 'Enable Account'}
+                </button>
+                <button
+                  className={`dev-btn ${user.isLocked ? 'dev-btn-primary' : 'dev-btn-danger'}`}
+                  style={{ fontSize: '0.8rem', padding: '6px 12px', cursor: 'pointer' }}
+                  onClick={() => handleDevUserLockToggle(user._id, user.isLocked)}
+                >
+                  {user.isLocked ? 'Unlock Account' : 'Lock Account'}
+                </button>
+                <button
+                  className="dev-btn dev-btn-secondary"
+                  style={{ fontSize: '0.8rem', padding: '6px 12px', cursor: 'pointer' }}
+                  onClick={() => {
+                    const newPass = prompt("Enter new password for this user:");
+                    if (newPass) handleDevUserResetPassword(user._id, newPass);
+                  }}
+                >
+                  Force Password Reset
+                </button>
+              </div>
+            </div>
+
+            {/* Grid of Details */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.25rem' }}>
+              {/* Personal Info */}
+              <div className="dev-card" style={{ padding: '1rem' }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Personal Details</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem' }}>
+                  <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Full Name: <strong style={{ color: '#fff', float: 'right' }}>{user.fullName || 'N/A'}</strong></div>
+                  <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Username: <strong style={{ color: '#fff', float: 'right' }}>{user.username}</strong></div>
+                  <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Email: <strong style={{ color: '#fff', float: 'right' }}>{user.email || 'N/A'}</strong></div>
+                  <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Phone: <strong style={{ color: '#fff', float: 'right' }}>{user.phone || 'N/A'}</strong></div>
+                  <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Employee/Admission ID: <strong style={{ color: '#fff', float: 'right' }}>{user.employeeId || 'N/A'}</strong></div>
+                  <div>Password Changed At: <strong style={{ color: '#fff', float: 'right' }}>{user.passwordChangedAt ? new Date(user.passwordChangedAt).toLocaleDateString() : 'Never'}</strong></div>
+                </div>
+              </div>
+
+              {/* Branch / Batch Info */}
+              <div className="dev-card" style={{ padding: '1rem' }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Branch & Batch Mapping</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem' }}>
+                  <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Branch Name: <strong style={{ color: '#fff', float: 'right' }}>{user.branch || 'N/A'}</strong></div>
+                  <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Batch Code: <strong style={{ color: '#fff', float: 'right' }}>{user.batch || 'N/A'}</strong></div>
+                  <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Account Created: <strong style={{ color: '#fff', float: 'right' }}>{new Date(user.createdAt).toLocaleDateString()}</strong></div>
+                  <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Account Locked: <strong style={{ color: user.isLocked ? '#ff453a' : '#30d158', float: 'right' }}>{user.isLocked ? 'Yes' : 'No'}</strong></div>
+                  <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Login Count: <strong style={{ color: '#fff', float: 'right' }}>{user.loginCount || 0}</strong></div>
+                  <div>Failed Attempts: <strong style={{ color: '#fff', float: 'right' }}>{user.failedAttempts || 0}</strong></div>
+                </div>
+              </div>
+
+              {/* Student Summary (if applicable) */}
+              {student && (
+                <div className="dev-card" style={{ padding: '1rem' }}>
+                  <h4 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Student Profile Summary</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem' }}>
+                    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Belt Level: <strong style={{ color: '#fff', float: 'right' }}>{student.belt}</strong></div>
+                    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Admission Number: <strong style={{ color: '#fff', float: 'right' }}>{student.admissionNo}</strong></div>
+                    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Attendance: <strong style={{ float: 'right' }}><span style={{ color: '#30d158' }}>{attendanceSummary.present}P</span> / <span style={{ color: '#ff453a' }}>{attendanceSummary.absent}A</span> ({attendanceSummary.total} Total)</strong></div>
+                    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Fees Paid: <strong style={{ color: '#30d158', float: 'right' }}>₹{feeSummary.totalPaid}</strong></div>
+                    <div>Total Payments: <strong style={{ color: '#fff', float: 'right' }}>{feeSummary.payments.length}</strong></div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Login Device History */}
+            <div className="dev-card" style={{ padding: '1.25rem' }}>
+              <h4 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Device Details History</h4>
+              <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
+                <table className="dev-table" style={{ fontSize: '0.8rem' }}>
+                  <thead>
+                    <tr>
+                      <th>Device Name</th>
+                      <th>Device Type</th>
+                      <th>Operating System</th>
+                      <th>Browser</th>
+                      <th>Resolution</th>
+                      <th>Last Active</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {devices.length > 0 ? devices.map((d, idx) => (
+                      <tr key={idx}>
+                        <td style={{ color: '#fff', fontWeight: 600 }}>{d.deviceName}</td>
+                        <td>{d.deviceType}</td>
+                        <td>{d.osName} {d.osVersion}</td>
+                        <td>{d.browserName} {d.browserVersion}</td>
+                        <td>{d.screenResolution}</td>
+                        <td>{new Date(d.lastUsed).toLocaleString()}</td>
+                      </tr>
+                    )) : <tr><td colSpan="6" style={{ textAlign: 'center', color: '#8e8e93', padding: '1rem' }}>No device records.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Login IP History */}
+            <div className="dev-card" style={{ padding: '1.25rem' }}>
+              <h4 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Client IP Address History</h4>
+              <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
+                <table className="dev-table" style={{ fontSize: '0.8rem' }}>
+                  <thead>
+                    <tr>
+                      <th>IP Address</th>
+                      <th>Login Hits</th>
+                      <th>Last Login Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ips.length > 0 ? ips.map((ipObj, idx) => (
+                      <tr key={idx}>
+                        <td style={{ fontFamily: 'monospace', color: '#30d158', fontWeight: 600 }}>{ipObj.ip || 'Unknown'}</td>
+                        <td>{ipObj.count} session(s)</td>
+                        <td>{new Date(ipObj.lastUsed).toLocaleString()}</td>
+                      </tr>
+                    )) : <tr><td colSpan="3" style={{ textAlign: 'center', color: '#8e8e93', padding: '1rem' }}>No IP address logs.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Login Activity Logs */}
+            <div className="dev-card" style={{ padding: '1.25rem' }}>
+              <h4 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.5px' }}>User Session Logs</h4>
+              <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                <table className="dev-table" style={{ fontSize: '0.8rem' }}>
+                  <thead>
+                    <tr>
+                      <th>Status</th>
+                      <th>IP Address</th>
+                      <th>Login Time</th>
+                      <th>Logout Time</th>
+                      <th>Session Duration</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loginHistory.length > 0 ? loginHistory.map((h, idx) => {
+                      const durationStr = h.sessionDuration 
+                        ? `${Math.floor(h.sessionDuration / 60)}m ${h.sessionDuration % 60}s` 
+                        : (h.status === 'Success' && !h.logoutAt) ? 'Active Session' : 'N/A';
+                      return (
+                        <tr key={idx}>
+                          <td>
+                            <span className={`dev-badge ${h.status === 'Success' ? 'dev-badge-green' : 'dev-badge-red'}`}>
+                              {h.status}
+                            </span>
+                          </td>
+                          <td style={{ fontFamily: 'monospace' }}>{h.ipAddress}</td>
+                          <td>{new Date(h.createdAt).toLocaleString()}</td>
+                          <td>{h.logoutAt ? new Date(h.logoutAt).toLocaleString() : (h.status === 'Success' ? 'Online' : 'N/A')}</td>
+                          <td>{durationStr}</td>
+                        </tr>
+                      );
+                    }) : <tr><td colSpan="5" style={{ textAlign: 'center', color: '#8e8e93', padding: '1rem' }}>No login activity history.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* User Security Logs */}
+            <div className="dev-card" style={{ padding: '1.25rem' }}>
+              <h4 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Account Security Logs</h4>
+              <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
+                <table className="dev-table" style={{ fontSize: '0.8rem' }}>
+                  <thead>
+                    <tr>
+                      <th>Event</th>
+                      <th>Description</th>
+                      <th>Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {securityLogs.length > 0 ? securityLogs.map((log, idx) => (
+                      <tr key={idx}>
+                        <td>
+                          <span className={`dev-badge ${log.eventType === 'FailedLogin' ? 'dev-badge-red' : 'dev-badge-yellow'}`}>
+                            {log.eventType}
+                          </span>
+                        </td>
+                        <td>{log.description}</td>
+                        <td>{new Date(log.createdAt).toLocaleString()}</td>
+                      </tr>
+                    )) : <tr><td colSpan="3" style={{ textAlign: 'center', color: '#8e8e93', padding: '1rem' }}>No security events logged.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
@@ -3193,6 +3700,7 @@ function App() {
             {devView === 'audit' && renderDevAudit()}
             {devView === 'settings' && renderDevSettings()}
           </div>
+          {renderUserDetailModal()}
         </main>
       </div>
     );
@@ -3749,7 +4257,7 @@ function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <h2 className="panel-title" style={{ margin: 0 }}>Fee Management</h2>
             <button className="btn-primary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }} onClick={() => {
-              const defaultBranch = isAdminUser(loggedInUser) ? 'Kuttiady' : (branches.find(b => b.toLowerCase() === (loggedInUser && loggedInUser.split('@')[1])) || 'Kuttiady');
+              const defaultBranch = getLoggedInUserBranch();
               setNewStudent(prev => ({ ...prev, branch: defaultBranch }));
               setIsAddModalOpen(true);
             }}>
@@ -4542,6 +5050,158 @@ function App() {
     );
   };
 
+  const handleSaveCredentialEdit = async (e) => {
+    e.preventDefault();
+    if (!editingCredential) return;
+
+    setCredentialModalError('');
+    setCredentialModalSuccess('');
+
+    const { type, key, oldUsername, username: formUsername, password: formPassword } = editingCredential;
+    const cleanUsername = formUsername.trim().toLowerCase();
+    if (!cleanUsername) {
+      setCredentialModalError('Username cannot be empty');
+      return;
+    }
+
+    const payload = {};
+
+    if (type === 'admin') {
+      const updatedAdmins = { ...rawCredentials.adminCredentials };
+      if (cleanUsername !== oldUsername) {
+        delete updatedAdmins[oldUsername];
+      }
+      updatedAdmins[cleanUsername] = formPassword;
+      payload.adminCredentials = updatedAdmins;
+    } else if (type === 'branch') {
+      const updatedBranches = { ...rawCredentials.branchCredentials };
+      updatedBranches[key] = {
+        username: cleanUsername,
+        password: formPassword
+      };
+      payload.branchCredentials = updatedBranches;
+    } else if (type === 'batch') {
+      const updatedBatches = { ...rawCredentials.batchCredentials };
+      updatedBatches[key] = {
+        username: cleanUsername,
+        password: formPassword
+      };
+      payload.batchCredentials = updatedBatches;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/credentials`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to update credentials');
+      }
+
+      setRawCredentials(data);
+      if (data.adminCredentials) setAdminCredentials(data.adminCredentials);
+      if (data.branchCredentials) setBranchCredentials(data.branchCredentials);
+      if (data.batchCredentials) setBatchCredentials(data.batchCredentials);
+
+      if (oldUsername.toLowerCase() === loggedInUser.toLowerCase()) {
+        setLoggedInUser(cleanUsername);
+      }
+
+      setCredentialModalSuccess('Credentials updated successfully!');
+      setTimeout(() => {
+        setIsCredentialModalOpen(false);
+        setEditingCredential(null);
+        setCredentialModalSuccess('');
+      }, 1000);
+    } catch (err) {
+      setCredentialModalError(err.message);
+    }
+  };
+
+  const renderEditCredentialModal = () => {
+    if (!isCredentialModalOpen || !editingCredential) return null;
+
+    return (
+      <div className="modal-overlay" style={{ zIndex: 1200 }}>
+        <div className="modal-content" style={{ maxWidth: '500px', width: '90%', background: '#0b0b14', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '2rem' }}>
+          <div className="panel-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 className="panel-title" style={{ color: '#fff', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+              <Lock size={20} color="var(--color-primary)" />
+              Edit Credentials
+            </h3>
+            <button className="btn-icon" onClick={() => { setIsCredentialModalOpen(false); setEditingCredential(null); }} style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer' }}><X size={24} /></button>
+          </div>
+
+          <form onSubmit={handleSaveCredentialEdit}>
+            {credentialModalError && (
+              <div style={{ color: '#ff453a', background: 'rgba(255,69,58,0.1)', padding: '10px 14px', borderRadius: '6px', marginBottom: '1.25rem', fontSize: '0.85rem' }}>
+                {credentialModalError}
+              </div>
+            )}
+            {credentialModalSuccess && (
+              <div style={{ color: '#30d158', background: 'rgba(48,209,88,0.1)', padding: '10px 14px', borderRadius: '6px', marginBottom: '1.25rem', fontSize: '0.85rem' }}>
+                {credentialModalSuccess}
+              </div>
+            )}
+
+            <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Account Type</label>
+              <div style={{ padding: '10px 12px', background: 'rgba(255,255,255,0.04)', borderRadius: '6px', color: '#fff', fontSize: '0.9rem', border: '1px solid rgba(255,255,255,0.05)' }}>
+                {editingCredential.displayName}
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Username</label>
+              <input
+                type="text"
+                className="form-control"
+                style={{ width: '100%' }}
+                required
+                value={editingCredential.username}
+                onChange={(e) => setEditingCredential({ ...editingCredential, username: e.target.value })}
+              />
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Password</label>
+              <input
+                type="password"
+                className="form-control"
+                style={{ width: '100%' }}
+                required
+                placeholder="Enter new password"
+                value={editingCredential.password}
+                onChange={(e) => setEditingCredential({ ...editingCredential, password: e.target.value })}
+              />
+              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginTop: '4px' }}>
+                Change password or leave as `••••••` to keep current password unchanged.
+              </span>
+            </div>
+
+            <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '2rem' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => { setIsCredentialModalOpen(false); setEditingCredential(null); }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn-primary"
+              >
+                Save Changes
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  };
+
   const renderCredentialsList = () => {
     const isSuper = isAdminUser(loggedInUser);
 
@@ -4590,7 +5250,7 @@ function App() {
           </h4>
           <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', marginTop: '0.5rem', lineHeight: '1.4' }}>
             This page shows all configured system accounts, their associated roles, and whether they are currently logged in (active session).
-            To edit credentials, please navigate to the <a href="#" style={{ color: 'var(--color-primary)', textDecoration: 'underline' }} onClick={(e) => { e.preventDefault(); setCurrentView('settings'); }}>Account Settings</a> page.
+            To edit credentials, please click the "Edit" button next to any user account below.
           </p>
         </div>
 
@@ -4606,6 +5266,7 @@ function App() {
                   <th>Username</th>
                   <th>Position / Role</th>
                   <th>Session Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -4623,6 +5284,26 @@ function App() {
                           ⚪ Offline
                         </span>
                       )}
+                    </td>
+                    <td data-label="Actions">
+                      <button
+                        type="button"
+                        className="btn-small"
+                        style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
+                        onClick={() => {
+                          setEditingCredential({
+                            type: 'admin',
+                            key: username,
+                            oldUsername: username,
+                            username: username,
+                            password: '••••••',
+                            displayName: `Super Admin Account (${username})`
+                          });
+                          setIsCredentialModalOpen(true);
+                        }}
+                      >
+                        Edit
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -4670,33 +5351,24 @@ function App() {
                         )}
                       </td>
                       <td data-label="Actions">
-                        {DEFAULT_BRANCHES.map(b => b.toLowerCase().trim()).includes(branchKey.toLowerCase().trim()) ? (
-                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>System Default</span>
-                        ) : (
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            <button
-                              type="button"
-                              className="btn-small"
-                              style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
-                              onClick={() => {
-                                const newName = prompt(`Enter new name for branch "${branchKey}":`, branchKey);
-                                if (newName && newName.trim() && newName.trim().toLowerCase() !== branchKey.toLowerCase()) {
-                                  handleEditCustomBranch(branchKey, newName.trim());
-                                }
-                              }}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-small"
-                              style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
-                              onClick={() => handleDeleteCustomBranch(branchKey)}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        )}
+                        <button
+                          type="button"
+                          className="btn-small"
+                          style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
+                          onClick={() => {
+                            setEditingCredential({
+                              type: 'branch',
+                              key: branchKey,
+                              oldUsername: info.username,
+                              username: info.username,
+                              password: '••••••',
+                              displayName: `Branch Inspector (${branchKey})`
+                            });
+                            setIsCredentialModalOpen(true);
+                          }}
+                        >
+                          Edit
+                        </button>
                       </td>
                     </tr>
                   ))
@@ -4764,37 +5436,24 @@ function App() {
                           )}
                         </td>
                         <td data-label="Actions">
-                          {DEFAULT_BATCH_OPTIONS.some(b => b.id === batchId) ? (
-                            <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>System Default</span>
-                          ) : (
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                              <button
-                                type="button"
-                                className="btn-small"
-                                style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
-                                onClick={() => {
-                                  const customBatchObj = customBatches.find(cb => cb.id === batchId);
-                                  const currentName = customBatchObj ? customBatchObj.name : batchNameText;
-                                  const currentSchedule = customBatchObj ? customBatchObj.schedule : '';
-                                  const newName = prompt(`Enter new name for batch:`, currentName);
-                                  if (newName === null) return;
-                                  const newSchedule = prompt(`Enter new schedule pattern:`, currentSchedule);
-                                  if (newSchedule === null) return;
-                                  handleEditCustomBatch(batchId, newName.trim(), newSchedule.trim());
-                                }}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                className="btn-small"
-                                style={{ backgroundColor: '#F44336', borderColor: '#F44336' }}
-                                onClick={() => handleDeleteCustomBatch(batchId, batchNameText)}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          )}
+                          <button
+                            type="button"
+                            className="btn-small"
+                            style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
+                            onClick={() => {
+                              setEditingCredential({
+                                type: 'batch',
+                                key: batchKey,
+                                oldUsername: info.username,
+                                username: info.username,
+                                password: '••••••',
+                                displayName: `Batch Inspector (${branchName} - ${batchNameText})`
+                              });
+                              setIsCredentialModalOpen(true);
+                            }}
+                          >
+                            Edit
+                          </button>
                         </td>
                       </tr>
                     );
@@ -4804,6 +5463,937 @@ function App() {
             </table>
           </div>
         </div>
+
+      </div>
+    );
+  };
+
+  const exportAdminsToCSV = (filteredAdmins) => {
+    const headers = [
+      "Username", "Full Name", "Email", "Phone", "Employee ID", 
+      "Role", "Branch", "Batch", "Status", "Lockout Status", 
+      "Login Count", "Last Login", "Last Logout"
+    ];
+
+    const rows = filteredAdmins.map(a => [
+      a.username,
+      a.fullName || "",
+      a.email || "",
+      a.phone || "",
+      a.employeeId || "",
+      a.role,
+      a.branch || "",
+      a.batch || "",
+      a.status,
+      a.isLocked ? "Locked" : "Unlocked",
+      a.loginCount || 0,
+      a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleString() : "Never",
+      a.lastLogoutAt ? new Date(a.lastLogoutAt).toLocaleString() : "Never"
+    ]);
+
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + [headers.join(","), ...rows.map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(","))].join("\n");
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `admins_report_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const renderBranchesPage = () => {
+    const isSuper = isAdminUser(loggedInUser);
+    if (!isSuper) {
+      return (
+        <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
+          <h3 className="panel-title" style={{ color: '#E50914' }}>Access Denied</h3>
+          <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Only super administrators can manage branches.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="branches-view-container" style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        
+        {/* Stat Cards */}
+        <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+          <div className="stat-card">
+            <div className="stat-icon-wrapper"><MapPin className="stat-icon" /></div>
+            <div className="stat-details">
+              <h3>Total Mapped Branches</h3>
+              <p className="stat-value">{branches.length}</p>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(52, 152, 219, 0.1)' }}><Users className="stat-icon" style={{ color: '#3498db' }} /></div>
+            <div className="stat-details">
+              <h3>System Default</h3>
+              <p className="stat-value" style={{ color: '#3498db' }}>{DEFAULT_BRANCHES.length}</p>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(48, 209, 88, 0.1)' }}><CheckCircle className="stat-icon" style={{ color: '#30d158' }} /></div>
+            <div className="stat-details">
+              <h3>Custom Configured</h3>
+              <p className="stat-value" style={{ color: '#30d158' }}>{customBranches.length}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Create Branch Card */}
+        <div className="panel">
+          <div className="panel-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
+            <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><MapPin size={20} color="var(--color-primary)" /> Configure New Branch Mappings</h3>
+          </div>
+          <form onSubmit={handleAddBranch}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
+              <div className="form-group">
+                <label>Branch Name (e.g. Kallachi)</label>
+                <input
+                  type="text"
+                  placeholder="Enter branch name"
+                  className="form-control"
+                  value={newBranchForm.name}
+                  onChange={(e) => setNewBranchForm(prev => ({ ...prev, name: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Inspector Username (Will default to admin@name)</label>
+                <input
+                  type="text"
+                  placeholder="admin@name"
+                  className="form-control"
+                  value={newBranchForm.name ? `admin@${newBranchForm.name.toLowerCase().trim()}` : ''}
+                  disabled
+                />
+              </div>
+              <div className="form-group">
+                <label>Admin Password</label>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  className="form-control"
+                  value={newBranchForm.password}
+                  onChange={(e) => setNewBranchForm(prev => ({ ...prev, password: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Confirm Password</label>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  className="form-control"
+                  value={newBranchForm.confirmPassword || ''}
+                  onChange={(e) => setNewBranchForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                  required
+                />
+                {newBranchPasswordError && <span style={{ color: '#ff453a', fontSize: '0.75rem', marginTop: '4px', display: 'block' }}>{newBranchPasswordError}</span>}
+              </div>
+            </div>
+            <button className="btn-primary" type="submit">Create Mapped Branch & Inspector Credentials</button>
+          </form>
+        </div>
+
+        {/* Branches Grid / List */}
+        <div className="panel">
+          <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+            <h3 className="panel-title">Active Academy Branches</h3>
+          </div>
+          <div className="table-responsive">
+            <table className="data-table responsive-table-cards">
+              <thead>
+                <tr>
+                  <th>Branch Name</th>
+                  <th>Branch Code / Key</th>
+                  <th>Credentials Account</th>
+                  <th>Students Roster</th>
+                  <th>Staff / Inspectors</th>
+                  <th>Type</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {branches.map((b) => {
+                  const bKey = b.toLowerCase();
+                  const isDefault = DEFAULT_BRANCHES.includes(b);
+                  const cred = branchCredentials[bKey];
+                  const studentCount = students.filter(s => s.branch && s.branch.toLowerCase() === bKey).length;
+                  const adminCount = adminsList.filter(a => a.branch && a.branch.toLowerCase() === bKey).length;
+                  
+                  return (
+                    <tr key={b}>
+                      <td data-label="Branch Name" style={{ fontWeight: 600, color: 'white' }}>{b}</td>
+                      <td data-label="Branch Code" style={{ fontFamily: 'monospace' }}>{bKey}</td>
+                      <td data-label="Credentials Account">
+                        {cred ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <span style={{ color: 'var(--color-primary)' }}>{cred.username}</span>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Password: {cred.password}</span>
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--color-text-muted)' }}>No Default Inspector Set</span>
+                        )}
+                      </td>
+                      <td data-label="Students Roster"><span className="badge badge-green">{studentCount} Students</span></td>
+                      <td data-label="Staff / Inspectors"><span className="badge" style={{ background: 'rgba(52, 152, 219, 0.15)', color: '#3498db' }}>{adminCount} Admin / Inspector(s)</span></td>
+                      <td data-label="Type">
+                        {isDefault ? (
+                          <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}>System Default</span>
+                        ) : (
+                          <span className="badge" style={{ background: 'rgba(48, 209, 88, 0.15)', color: '#30d158' }}>Custom Config</span>
+                        )}
+                      </td>
+                      <td data-label="Actions">
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            className="btn-outline-primary btn-small"
+                            onClick={() => {
+                              const newName = prompt(`Rename branch "${b}":`, b);
+                              if (newName && newName !== b) {
+                                handleEditCustomBranch(b, newName);
+                              }
+                            }}
+                          >
+                            Rename
+                          </button>
+                          {!isDefault && (
+                            <button
+                              className="btn-danger btn-small"
+                              onClick={() => handleDeleteCustomBranch(b)}
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    );
+  };
+
+  const renderBatchesPage = () => {
+    const isSuper = isAdminUser(loggedInUser);
+    if (!isSuper) {
+      return (
+        <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
+          <h3 className="panel-title" style={{ color: '#E50914' }}>Access Denied</h3>
+          <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Only super administrators can manage batches.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="batches-view-container" style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        
+        {/* Stat Cards */}
+        <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+          <div className="stat-card">
+            <div className="stat-icon-wrapper"><CalendarDays className="stat-icon" /></div>
+            <div className="stat-details">
+              <h3>Total Configured Batches</h3>
+              <p className="stat-value">{batchOptions.length}</p>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(52, 152, 219, 0.1)' }}><Users className="stat-icon" style={{ color: '#3498db' }} /></div>
+            <div className="stat-details">
+              <h3>System Default</h3>
+              <p className="stat-value" style={{ color: '#3498db' }}>{DEFAULT_BATCH_OPTIONS.length}</p>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(48, 209, 88, 0.1)' }}><CheckCircle className="stat-icon" style={{ color: '#30d158' }} /></div>
+            <div className="stat-details">
+              <h3>Custom Configured</h3>
+              <p className="stat-value" style={{ color: '#30d158' }}>{customBatches.length}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Add Batch Card */}
+        <div className="panel">
+          <div className="panel-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
+            <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><CalendarDays size={20} color="var(--color-primary)" /> Configure New Batch Settings</h3>
+          </div>
+          <form onSubmit={handleAddBatch}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
+              <div className="form-group">
+                <label>Batch Name (e.g. Batch 4)</label>
+                <input
+                  type="text"
+                  placeholder="Enter batch name"
+                  className="form-control"
+                  value={newBatchForm.name}
+                  onChange={(e) => setNewBatchForm(prev => ({ ...prev, name: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Schedule Pattern (e.g. Mon-Fri or Sun-Wed)</label>
+                <input
+                  type="text"
+                  placeholder="Schedule Pattern"
+                  className="form-control"
+                  value={newBatchForm.schedule}
+                  onChange={(e) => setNewBatchForm(prev => ({ ...prev, schedule: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Assigned Branch</label>
+                <select
+                  className="form-control"
+                  value={newBatchForm.branch}
+                  onChange={(e) => setNewBatchForm(prev => ({ ...prev, branch: e.target.value }))}
+                >
+                  {branches.map(b => (
+                    <option key={b} value={b.toLowerCase()}>{b}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Coordinator Password</label>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  className="form-control"
+                  value={newBatchForm.password}
+                  onChange={(e) => setNewBatchForm(prev => ({ ...prev, password: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Confirm Password</label>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  className="form-control"
+                  value={newBatchForm.confirmPassword || ''}
+                  onChange={(e) => setNewBatchForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                  required
+                />
+                {newBatchPasswordError && <span style={{ color: '#ff453a', fontSize: '0.75rem', marginTop: '4px', display: 'block' }}>{newBatchPasswordError}</span>}
+              </div>
+            </div>
+            <button className="btn-primary" type="submit">Create Configured Batch & Mapped Coordinator Account</button>
+          </form>
+        </div>
+
+        {/* Batches List Table */}
+        <div className="panel">
+          <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+            <h3 className="panel-title">Active Academy Batches</h3>
+          </div>
+          <div className="table-responsive">
+            <table className="data-table responsive-table-cards">
+              <thead>
+                <tr>
+                  <th>Batch Name</th>
+                  <th>Schedule Pattern</th>
+                  <th>Mapped Coordinator Accounts</th>
+                  <th>Students Active</th>
+                  <th>Type</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {batchOptions.map((b) => {
+                  const isDefault = DEFAULT_BATCH_OPTIONS.some(opt => opt.id === b.id);
+                  const studentCount = students.filter(s => s.batch === b.id || s.schedule === b.schedule).length;
+                  
+                  // Collect mapped credentials across branches
+                  const matchedCreds = [];
+                  for (const [key, val] of Object.entries(batchCredentials)) {
+                    if (key.endsWith(`_${b.id}`) || key === b.id) {
+                      const branchPart = key.includes('_') ? key.split('_')[0] : 'Kuttiady';
+                      matchedCreds.push({ branch: branchPart.toUpperCase(), user: val.username, pass: val.password });
+                    }
+                  }
+
+                  return (
+                    <tr key={b.id}>
+                      <td data-label="Batch Name" style={{ fontWeight: 600, color: 'white' }}>{b.name}</td>
+                      <td data-label="Schedule Pattern" style={{ color: 'var(--color-primary)' }}>{b.schedule}</td>
+                      <td data-label="Mapped Coordinator Accounts">
+                        {matchedCreds.length > 0 ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {matchedCreds.map((cred, idx) => (
+                              <div key={idx} style={{ fontSize: '0.8rem', borderBottom: idx < matchedCreds.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none', paddingBottom: '2px' }}>
+                                <span style={{ color: '#3498db', fontWeight: 500 }}>{cred.branch}</span>: {cred.user} <span style={{ color: 'var(--color-text-muted)' }}>(Pass: {cred.pass})</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--color-text-muted)' }}>No Coordinator Creds configurated</span>
+                        )}
+                      </td>
+                      <td data-label="Students Active"><span className="badge badge-green">{studentCount} Students</span></td>
+                      <td data-label="Type">
+                        {isDefault ? (
+                          <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}>System Default</span>
+                        ) : (
+                          <span className="badge" style={{ background: 'rgba(48, 209, 88, 0.15)', color: '#30d158' }}>Custom Config</span>
+                        )}
+                      </td>
+                      <td data-label="Actions">
+                        {!isDefault ? (
+                          <button
+                            className="btn-danger btn-small"
+                            onClick={() => handleDeleteCustomBatch(b.id, b.name)}
+                          >
+                            Delete
+                          </button>
+                        ) : (
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No Actions available</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    );
+  };
+
+  const renderAdminsPage = () => {
+    const isSuper = isAdminUser(loggedInUser);
+    if (!isSuper) {
+      return (
+        <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
+          <h3 className="panel-title" style={{ color: '#E50914' }}>Access Denied</h3>
+          <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Only super administrators can access admin user management.</p>
+        </div>
+      );
+    }
+
+    // Filter logic
+    const filteredAdmins = adminsList.filter(admin => {
+      // Search
+      const searchMatch = 
+        admin.username.toLowerCase().includes(adminSearchQuery.toLowerCase()) ||
+        (admin.fullName && admin.fullName.toLowerCase().includes(adminSearchQuery.toLowerCase())) ||
+        (admin.employeeId && admin.employeeId.toLowerCase().includes(adminSearchQuery.toLowerCase())) ||
+        (admin.email && admin.email.toLowerCase().includes(adminSearchQuery.toLowerCase())) ||
+        (admin.phone && admin.phone.toLowerCase().includes(adminSearchQuery.toLowerCase()));
+
+      // Role filter
+      const roleMatch = adminRoleFilter === 'All' || admin.role === adminRoleFilter;
+
+      // Status filter
+      let statusMatch = true;
+      if (adminStatusFilter === 'Active') statusMatch = admin.status === 'Active';
+      else if (adminStatusFilter === 'Inactive') statusMatch = admin.status === 'Inactive';
+      else if (adminStatusFilter === 'Locked') statusMatch = admin.isLocked;
+      else if (adminStatusFilter === 'Online') statusMatch = isUserLoggedIn(admin.username);
+      else if (adminStatusFilter === 'Offline') statusMatch = !isUserLoggedIn(admin.username);
+      else if (adminStatusFilter === 'Failed Logins') statusMatch = admin.failedAttempts > 0;
+
+      return searchMatch && roleMatch && statusMatch;
+    });
+
+    // Counts
+    const totalAdmins = adminsList.length;
+    const onlineCount = adminsList.filter(a => isUserLoggedIn(a.username)).length;
+    const lockedCount = adminsList.filter(a => a.isLocked).length;
+    const inactiveCount = adminsList.filter(a => a.status === 'Inactive').length;
+
+    return (
+      <div className="admins-view-container" style={{ maxWidth: '1100px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        
+        {/* Stat Cards */}
+        <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+          <div className="stat-card">
+            <div className="stat-icon-wrapper"><Shield className="stat-icon" /></div>
+            <div className="stat-details">
+              <h3>Admin Accounts</h3>
+              <p className="stat-value">{totalAdmins}</p>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(48, 209, 88, 0.1)' }}><Activity className="stat-icon" style={{ color: '#30d158' }} /></div>
+            <div className="stat-details">
+              <h3>Currently Online</h3>
+              <p className="stat-value" style={{ color: '#30d158' }}>{onlineCount}</p>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 69, 58, 0.1)' }}><Lock className="stat-icon" style={{ color: '#ff453a' }} /></div>
+            <div className="stat-details">
+              <h3>Locked Accounts</h3>
+              <p className="stat-value" style={{ color: '#ff453a' }}>{lockedCount}</p>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 159, 10, 0.1)' }}><AlertTriangle className="stat-icon" style={{ color: '#ff9f0a' }} /></div>
+            <div className="stat-details">
+              <h3>Inactive Status</h3>
+              <p className="stat-value" style={{ color: '#ff9f0a' }}>{inactiveCount}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Toolbar controls */}
+        <div className="panel" style={{ padding: '1.25rem' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', flex: 1, minWidth: '280px' }}>
+              <div style={{ position: 'relative', flex: 1, minWidth: '180px' }}>
+                <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+                <input
+                  type="text"
+                  placeholder="Search admin users..."
+                  className="form-control"
+                  style={{ paddingLeft: '38px', width: '100%', height: '38px' }}
+                  value={adminSearchQuery}
+                  onChange={(e) => setAdminSearchQuery(e.target.value)}
+                />
+              </div>
+              <select
+                className="form-control"
+                style={{ width: '160px', height: '38px', background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                value={adminRoleFilter}
+                onChange={(e) => setAdminRoleFilter(e.target.value)}
+              >
+                <option value="All">All Roles</option>
+                <option value="superadmin">Super Admins</option>
+                <option value="branchadmin">Branch Admins</option>
+                <option value="coordinator">Coordinators</option>
+              </select>
+              <select
+                className="form-control"
+                style={{ width: '160px', height: '38px', background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                value={adminStatusFilter}
+                onChange={(e) => setAdminStatusFilter(e.target.value)}
+              >
+                <option value="All">All Statuses</option>
+                <option value="Active">Active Status</option>
+                <option value="Inactive">Inactive Status</option>
+                <option value="Locked">Locked Accounts</option>
+                <option value="Online">Online Users</option>
+                <option value="Offline">Offline Users</option>
+                <option value="Failed Logins">Failed Logins Exist</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                className="btn-outline-primary"
+                style={{ height: '38px', padding: '0 1rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+                onClick={() => exportAdminsToCSV(filteredAdmins)}
+              >
+                <FileDown size={16} /> Export CSV
+              </button>
+              <button
+                className="btn-primary"
+                style={{ height: '38px', padding: '0 1.25rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+                onClick={() => setIsAdminModalOpen(true)}
+              >
+                <UserPlus size={16} /> Create User Account
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Admins Table */}
+        <div className="panel">
+          <div className="table-responsive">
+            <table className="data-table responsive-table-cards">
+              <thead>
+                <tr>
+                  <th>Full Name</th>
+                  <th>Role / Code</th>
+                  <th>Employee ID / Branch</th>
+                  <th>Session Status</th>
+                  <th>Account Lock</th>
+                  <th>Last Session Activity</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredAdmins.length > 0 ? filteredAdmins.map((admin) => {
+                  const online = isUserLoggedIn(admin.username);
+                  return (
+                    <tr key={admin._id}>
+                      <td data-label="Full Name">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div className="avatar" style={{ width: '32px', height: '32px', fontSize: '0.85rem', backgroundColor: online ? '#30d158' : 'rgba(255,255,255,0.08)', color: online ? '#000' : '#8e8e93', fontWeight: 'bold' }}>
+                            {admin.fullName ? admin.fullName.charAt(0).toUpperCase() : admin.username.charAt(0).toUpperCase()}
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left' }}>
+                            <span
+                              style={{ fontWeight: 600, color: '#fff', textDecoration: 'underline', cursor: 'pointer' }}
+                              onClick={() => handleFetchUserDetail(admin.username)}
+                            >
+                              {admin.fullName || admin.username}
+                            </span>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{admin.username}</span>
+                          </div>
+                        </div>
+                      </td>
+                      <td data-label="Role / Code">
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                          <span className={`badge ${admin.role === 'superadmin' ? 'badge-green' : admin.role === 'branchadmin' ? 'badge-blue' : 'badge-yellow'}`}>
+                            {admin.role === 'superadmin' ? 'Super Admin' : admin.role === 'branchadmin' ? 'Branch Admin' : 'Coordinator'}
+                          </span>
+                          {admin.batch && <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>Batch: {admin.batch}</span>}
+                        </div>
+                      </td>
+                      <td data-label="Employee ID / Branch">
+                        <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left' }}>
+                          <span style={{ color: '#fff', fontSize: '0.85rem' }}>{admin.branch || 'Global'}</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>ID: {admin.employeeId || 'N/A'}</span>
+                        </div>
+                      </td>
+                      <td data-label="Session Status">
+                        <div style={{ display: 'inline-flex', gap: '8px', alignItems: 'center' }}>
+                          <button
+                            className={`badge ${admin.status === 'Active' ? 'badge-green' : 'badge-red'}`}
+                            style={{ cursor: 'pointer', border: 'none' }}
+                            onClick={() => handleToggleAdminStatus(admin._id, admin.status)}
+                            title="Click to toggle active status"
+                          >
+                            {admin.status}
+                          </button>
+                          <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                            {online ? '🟢 Online' : '⚪ Offline'}
+                          </span>
+                        </div>
+                      </td>
+                      <td data-label="Account Lock">
+                        <button
+                          className={`badge ${admin.isLocked ? 'badge-red' : 'badge-green'}`}
+                          style={{ cursor: 'pointer', border: 'none' }}
+                          onClick={() => handleToggleAdminLock(admin._id, admin.isLocked)}
+                          title="Click to toggle lockout"
+                        >
+                          {admin.isLocked ? 'Locked' : 'Unlocked'}
+                        </button>
+                      </td>
+                      <td data-label="Last Session Activity">
+                        <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left', fontSize: '0.75rem' }}>
+                          <span style={{ color: 'var(--color-text-light)' }}>
+                            In: {admin.lastLoginAt ? new Date(admin.lastLoginAt).toLocaleString() : 'N/A'}
+                          </span>
+                          <span style={{ color: 'var(--color-text-muted)' }}>
+                            Out: {admin.lastLogoutAt ? new Date(admin.lastLogoutAt).toLocaleString() : 'N/A'}
+                          </span>
+                        </div>
+                      </td>
+                      <td data-label="Actions">
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            className="btn-outline-primary btn-small"
+                            onClick={() => setEditingAdmin(admin)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="btn-danger btn-small"
+                            onClick={() => handleDeleteAdmin(admin._id, admin.username)}
+                            disabled={admin.username.toLowerCase().trim() === loggedInUser.toLowerCase().trim()}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }) : <tr><td colSpan="7" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '2rem' }}>No admin users match the search filters.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Modal: Create Admin */}
+        {isAdminModalOpen && (
+          <div className="modal-overlay">
+            <div className="modal-content" style={{ maxWidth: '500px' }}>
+              <div className="panel-header">
+                <h2 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <UserPlus size={20} color="var(--color-primary)" /> Create Admin Account
+                </h2>
+                <button className="btn-icon" onClick={() => setIsAdminModalOpen(false)}><X size={24} /></button>
+              </div>
+              <form onSubmit={handleCreateAdmin} style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', textAlign: 'left' }}>
+                <div className="form-group">
+                  <label>Username / User ID</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. admin@perambra or coordinator_name"
+                    value={newAdminForm.username}
+                    onChange={(e) => setNewAdminForm(prev => ({ ...prev, username: e.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Full Name</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="Enter user's full name"
+                    value={newAdminForm.fullName || ''}
+                    onChange={(e) => setNewAdminForm(prev => ({ ...prev, fullName: e.target.value }))}
+                  />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div className="form-group">
+                    <label>Email Address</label>
+                    <input
+                      type="email"
+                      className="form-control"
+                      placeholder="email@example.com"
+                      value={newAdminForm.email || ''}
+                      onChange={(e) => setNewAdminForm(prev => ({ ...prev, email: e.target.value }))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Phone Number</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Phone number"
+                      value={newAdminForm.phone || ''}
+                      onChange={(e) => setNewAdminForm(prev => ({ ...prev, phone: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div className="form-group">
+                    <label>Employee ID</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Emp ID"
+                      value={newAdminForm.employeeId || ''}
+                      onChange={(e) => setNewAdminForm(prev => ({ ...prev, employeeId: e.target.value }))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>System Role</label>
+                    <select
+                      className="form-control"
+                      value={newAdminForm.role}
+                      onChange={(e) => setNewAdminForm(prev => ({ ...prev, role: e.target.value }))}
+                    >
+                      <option value="superadmin">Super Admin</option>
+                      <option value="branchadmin">Branch Admin</option>
+                      <option value="coordinator">Coordinator / Inspector</option>
+                    </select>
+                  </div>
+                </div>
+                
+                {newAdminForm.role !== 'superadmin' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div className="form-group">
+                      <label>Assigned Branch</label>
+                      <select
+                        className="form-control"
+                        value={newAdminForm.branch}
+                        onChange={(e) => setNewAdminForm(prev => ({ ...prev, branch: e.target.value }))}
+                      >
+                        {branches.map(b => (
+                          <option key={b} value={b}>{b}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {newAdminForm.role === 'coordinator' && (
+                      <div className="form-group">
+                        <label>Assigned Batch</label>
+                        <select
+                          className="form-control"
+                          value={newAdminForm.batch}
+                          onChange={(e) => setNewAdminForm(prev => ({ ...prev, batch: e.target.value }))}
+                        >
+                          {batchOptions.map(opt => (
+                            <option key={opt.id} value={opt.id}>{opt.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div className="form-group">
+                    <label>Password</label>
+                    <input
+                      type="password"
+                      className="form-control"
+                      placeholder="Password"
+                      value={newAdminForm.password}
+                      onChange={(e) => setNewAdminForm(prev => ({ ...prev, password: e.target.value }))}
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Confirm Password</label>
+                    <input
+                      type="password"
+                      className="form-control"
+                      placeholder="Confirm Password"
+                      value={newAdminForm.confirmPassword}
+                      onChange={(e) => setNewAdminForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="modal-actions" style={{ marginTop: '0.5rem' }}>
+                  <button className="btn-primary" type="submit">Create Account</button>
+                  <button className="btn-secondary" type="button" onClick={() => setIsAdminModalOpen(false)}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Edit Admin */}
+        {editingAdmin && (
+          <div className="modal-overlay">
+            <div className="modal-content" style={{ maxWidth: '500px' }}>
+              <div className="panel-header">
+                <h2 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Shield size={20} color="var(--color-primary)" /> Edit Admin Profile: {editingAdmin.username}
+                </h2>
+                <button className="btn-icon" onClick={() => setEditingAdmin(null)}><X size={24} /></button>
+              </div>
+              <form onSubmit={handleUpdateAdmin} style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', textAlign: 'left' }}>
+                <div className="form-group">
+                  <label>Full Name</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="Enter user's full name"
+                    value={editingAdmin.fullName || ''}
+                    onChange={(e) => setEditingAdmin(prev => ({ ...prev, fullName: e.target.value }))}
+                  />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div className="form-group">
+                    <label>Email Address</label>
+                    <input
+                      type="email"
+                      className="form-control"
+                      placeholder="email@example.com"
+                      value={editingAdmin.email || ''}
+                      onChange={(e) => setEditingAdmin(prev => ({ ...prev, email: e.target.value }))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Phone Number</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Phone number"
+                      value={editingAdmin.phone || ''}
+                      onChange={(e) => setEditingAdmin(prev => ({ ...prev, phone: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div className="form-group">
+                    <label>Employee ID</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Emp ID"
+                      value={editingAdmin.employeeId || ''}
+                      onChange={(e) => setEditingAdmin(prev => ({ ...prev, employeeId: e.target.value }))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>System Role</label>
+                    <select
+                      className="form-control"
+                      value={editingAdmin.role}
+                      onChange={(e) => setEditingAdmin(prev => ({ ...prev, role: e.target.value }))}
+                    >
+                      <option value="superadmin">Super Admin</option>
+                      <option value="branchadmin">Branch Admin</option>
+                      <option value="coordinator">Coordinator / Inspector</option>
+                    </select>
+                  </div>
+                </div>
+
+                {editingAdmin.role !== 'superadmin' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div className="form-group">
+                      <label>Assigned Branch</label>
+                      <select
+                        className="form-control"
+                        value={editingAdmin.branch || ''}
+                        onChange={(e) => setEditingAdmin(prev => ({ ...prev, branch: e.target.value }))}
+                      >
+                        {branches.map(b => (
+                          <option key={b} value={b}>{b}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {editingAdmin.role === 'coordinator' && (
+                      <div className="form-group">
+                        <label>Assigned Batch</label>
+                        <select
+                          className="form-control"
+                          value={editingAdmin.batch || ''}
+                          onChange={(e) => setEditingAdmin(prev => ({ ...prev, batch: e.target.value }))}
+                        >
+                          {batchOptions.map(opt => (
+                            <option key={opt.id} value={opt.id}>{opt.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '1rem', marginTop: '0.5rem' }}>
+                  <h4 style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#ff9f0a' }}>Force Reset Password (Optional)</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div className="form-group">
+                      <label>New Password</label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        placeholder="Leave blank to keep current"
+                        value={editingAdmin.password || ''}
+                        onChange={(e) => setEditingAdmin(prev => ({ ...prev, password: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Confirm Password</label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        placeholder="Confirm Password"
+                        value={editingAdmin.confirmPassword || ''}
+                        onChange={(e) => setEditingAdmin(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="modal-actions" style={{ marginTop: '0.5rem' }}>
+                  <button className="btn-primary" type="submit">Save Changes</button>
+                  <button className="btn-secondary" type="button" onClick={() => setEditingAdmin(null)}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
       </div>
     );
@@ -5857,7 +7447,10 @@ function App() {
                     if (data.success) {
                       setLoginError('');
                       setLoggedInUser(data.username);
-                      setSession(data.username, data.token);
+                      setSession(data.username, data.token, data.role, data.branch, data.batch);
+                      setUserRole(data.role || '');
+                      setUserBranch(data.branch || '');
+                      setUserBatch(data.batch || '');
                       const matchingBranch = branches.find(b => b.toLowerCase() === branchKey);
                       setBranchFilter(matchingBranch || 'All');
                       setLoginData({ username: '', password: '' });
@@ -6299,7 +7892,10 @@ function App() {
                   if (data.success) {
                     setLoginError('');
                     setLoggedInUser(data.username);
-                    setSession(data.username, data.token);
+                    setSession(data.username, data.token, data.role, data.branch, data.batch);
+                    setUserRole(data.role || '');
+                    setUserBranch(data.branch || '');
+                    setUserBatch(data.batch || '');
                     setBranchFilter('All');
                     setLoginData({ username: '', password: '' });
                     setAppMode('admin');
@@ -6451,6 +8047,9 @@ function App() {
                 {currentView === 'performance' && 'Student Performance'}
                 {currentView === 'settings' && 'Account Settings'}
                 {currentView === 'credentials-list' && 'System Accounts & Credentials'}
+                {currentView === 'branches-list' && 'Branch Management'}
+                {currentView === 'batches-list' && 'Batch Management'}
+                {currentView === 'admins-list' && 'Admin User Management'}
               </h1>
             </div>
 
@@ -6569,7 +8168,7 @@ function App() {
                 <div className="panel-header">
                   <h3 className="panel-title">Academy Roster</h3>
                   <button className="btn-primary" onClick={() => {
-                    const defaultBranch = isAdminUser(loggedInUser) ? 'Kuttiady' : (branches.find(b => b.toLowerCase() === (loggedInUser && loggedInUser.split('@')[1])) || 'Kuttiady');
+                    const defaultBranch = getLoggedInUserBranch();
                     setNewStudent(prev => ({ ...prev, branch: defaultBranch }));
                     setIsAddModalOpen(true);
                   }}>
@@ -6652,6 +8251,9 @@ function App() {
           {currentView === 'performance' && renderPerformance()}
           {currentView === 'settings' && renderSettings()}
           {currentView === 'credentials-list' && renderCredentialsList()}
+          {currentView === 'branches-list' && renderBranchesPage()}
+          {currentView === 'batches-list' && renderBatchesPage()}
+          {currentView === 'admins-list' && renderAdminsPage()}
         </div>
       </main>
 
@@ -7297,12 +8899,12 @@ function App() {
                       <option value={
                         appMode === 'login'
                           ? selectedBranchLogin
-                          : (branches.find(b => b.toLowerCase() === (loggedInUser && loggedInUser.split('@')[1])) || 'Kuttiady')
+                          : getLoggedInUserBranch()
                       }>
                         {
                           appMode === 'login'
                             ? selectedBranchLogin
-                            : (branches.find(b => b.toLowerCase() === (loggedInUser && loggedInUser.split('@')[1])) || 'Kuttiady')
+                            : getLoggedInUserBranch()
                         }
                       </option>
                     )}
@@ -7393,6 +8995,8 @@ function App() {
         </div>
       )}
 
+      {renderEditCredentialModal()}
+      {renderUserDetailModal()}
 
     </div>
   );

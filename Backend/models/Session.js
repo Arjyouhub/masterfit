@@ -6,7 +6,13 @@ const sessionSchema = new mongoose.Schema({
   loginTime: { type: Date, default: Date.now, expires: '7d' },
   ipAddress: { type: String },
   userAgent: { type: String },
-  deviceName: { type: String }
+  deviceName: { type: String },
+  deviceType: { type: String, default: 'Desktop' },
+  osName: { type: String, default: '' },
+  osVersion: { type: String, default: '' },
+  browserName: { type: String, default: '' },
+  browserVersion: { type: String, default: '' },
+  screenResolution: { type: String, default: '' }
 }, { timestamps: true });
 
 sessionSchema.index({ username: 1 });
