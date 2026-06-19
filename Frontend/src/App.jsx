@@ -5710,9 +5710,7 @@ function App() {
 
   const renderBatchesPage = () => {
     const isSuper = isAdminUser(loggedInUser);
-    const isBranchAdm = isBranchAdmin(loggedInUser);
-    const hasAccess = isSuper || isBranchAdm;
-    if (!hasAccess) {
+    if (!isSuper) {
       return (
         <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
           <h3 className="panel-title" style={{ color: '#E50914' }}>Access Denied</h3>
@@ -8115,9 +8113,6 @@ function App() {
           )}
           {isBranchAdmin(loggedInUser) && (
             <>
-              <a className={`nav-item ${currentView === 'batches-list' ? 'active' : ''}`} onClick={() => setCurrentView('batches-list')}>
-                <CalendarDays className="nav-icon" /> <span>Batches</span>
-              </a>
               <a className={`nav-item ${currentView === 'admins-list' ? 'active' : ''}`} onClick={() => setCurrentView('admins-list')}>
                 <Shield className="nav-icon" /> <span>Coordinators</span>
               </a>
