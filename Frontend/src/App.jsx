@@ -863,6 +863,28 @@ function App() {
 
   // Verify session validity periodically in the background (every 10 seconds)
   useEffect(() => {
+    if (loggedInUser) {
+      if (isBranchAdmin(loggedInUser)) {
+        const branchVal = getLoggedInUserBranch();
+        setNewAdminForm(prev => ({
+          ...prev,
+          role: 'coordinator',
+          branch: branchVal,
+          batch: 'batch1'
+        }));
+      } else {
+        setNewAdminForm(prev => ({
+          ...prev,
+          role: 'branchadmin',
+          branch: 'Kuttiady',
+          batch: 'batch1'
+        }));
+      }
+    }
+  }, [loggedInUser, isAdminModalOpen]);
+
+  // Verify session validity periodically in the background (every 10 seconds)
+  useEffect(() => {
     if (!loggedInUser) return;
 
     const interval = setInterval(() => {
@@ -5688,11 +5710,13 @@ function App() {
 
   const renderBatchesPage = () => {
     const isSuper = isAdminUser(loggedInUser);
-    if (!isSuper) {
+    const isBranchAdm = isBranchAdmin(loggedInUser);
+    const hasAccess = isSuper || isBranchAdm;
+    if (!hasAccess) {
       return (
         <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
           <h3 className="panel-title" style={{ color: '#E50914' }}>Access Denied</h3>
-          <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Only super administrators can manage batches.</p>
+          <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Only administrators can manage batches.</p>
         </div>
       );
     }
@@ -5759,11 +5783,16 @@ function App() {
                 <select
                   className="form-control"
                   value={newBatchForm.branch}
+                  disabled={!isSuper}
                   onChange={(e) => setNewBatchForm(prev => ({ ...prev, branch: e.target.value }))}
                 >
-                  {branches.map(b => (
-                    <option key={b} value={b.toLowerCase()}>{b}</option>
-                  ))}
+                  {isSuper ? (
+                    branches.map(b => (
+                      <option key={b} value={b.toLowerCase()}>{b}</option>
+                    ))
+                  ) : (
+                    <option value={getLoggedInUserBranch().toLowerCase()}>{getLoggedInUserBranch()}</option>
+                  )}
                 </select>
               </div>
               <div className="form-group">
@@ -5812,7 +5841,20 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {batchOptions.map((b) => {
+                {batchOptions.filter(b => {
+                  const isDefault = DEFAULT_BATCH_OPTIONS.some(opt => opt.id === b.id);
+                  if (isSuper) return true;
+                  
+                  const branchKey = getLoggedInUserBranch().toLowerCase();
+                  if (isDefault) {
+                    return batchCredentials[`${branchKey}_${b.id}`] !== undefined;
+                  }
+                  
+                  return Object.keys(batchCredentials).some(key => {
+                    const parts = key.split('_');
+                    return parts[0].toLowerCase() === branchKey && parts.slice(1).join('_') === b.id;
+                  });
+                }).map((b) => {
                   const isDefault = DEFAULT_BATCH_OPTIONS.some(opt => opt.id === b.id);
                   const studentCount = students.filter(s => s.batch === b.id || s.schedule === b.schedule).length;
                   
@@ -5876,17 +5918,27 @@ function App() {
 
   const renderAdminsPage = () => {
     const isSuper = isAdminUser(loggedInUser);
-    if (!isSuper) {
+    const isBranchAdm = isBranchAdmin(loggedInUser);
+    const hasAccess = isSuper || isBranchAdm;
+    if (!hasAccess) {
       return (
         <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
           <h3 className="panel-title" style={{ color: '#E50914' }}>Access Denied</h3>
-          <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Only super administrators can access admin user management.</p>
+          <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Only administrators can access admin user management.</p>
         </div>
       );
     }
 
+    const scopedAdmins = adminsList.filter(admin => {
+      if (isBranchAdm) {
+        const branchKey = getLoggedInUserBranch().toLowerCase();
+        return admin.branch && admin.branch.toLowerCase().trim() === branchKey && admin.role === 'coordinator';
+      }
+      return true;
+    });
+
     // Filter logic
-    const filteredAdmins = adminsList.filter(admin => {
+    const filteredAdmins = scopedAdmins.filter(admin => {
       // Search
       const searchMatch = 
         admin.username.toLowerCase().includes(adminSearchQuery.toLowerCase()) ||
@@ -5896,7 +5948,7 @@ function App() {
         (admin.phone && admin.phone.toLowerCase().includes(adminSearchQuery.toLowerCase()));
 
       // Role filter
-      const roleMatch = adminRoleFilter === 'All' || admin.role === adminRoleFilter;
+      const roleMatch = isBranchAdm ? true : (adminRoleFilter === 'All' || admin.role === adminRoleFilter);
 
       // Status filter
       let statusMatch = true;
@@ -5911,10 +5963,10 @@ function App() {
     });
 
     // Counts
-    const totalAdmins = adminsList.length;
-    const onlineCount = adminsList.filter(a => isUserLoggedIn(a.username)).length;
-    const lockedCount = adminsList.filter(a => a.isLocked).length;
-    const inactiveCount = adminsList.filter(a => a.status === 'Inactive').length;
+    const totalAdmins = scopedAdmins.length;
+    const onlineCount = scopedAdmins.filter(a => isUserLoggedIn(a.username)).length;
+    const lockedCount = scopedAdmins.filter(a => a.isLocked).length;
+    const inactiveCount = scopedAdmins.filter(a => a.status === 'Inactive').length;
 
     return (
       <div className="admins-view-container" style={{ maxWidth: '1100px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -6191,11 +6243,18 @@ function App() {
                     <select
                       className="form-control"
                       value={newAdminForm.role}
+                      disabled={isBranchAdm}
                       onChange={(e) => setNewAdminForm(prev => ({ ...prev, role: e.target.value }))}
                     >
-                      <option value="superadmin">Super Admin</option>
-                      <option value="branchadmin">Branch Admin</option>
-                      <option value="coordinator">Coordinator / Inspector</option>
+                      {isSuper ? (
+                        <>
+                          <option value="superadmin">Super Admin</option>
+                          <option value="branchadmin">Branch Admin</option>
+                          <option value="coordinator">Coordinator / Inspector</option>
+                        </>
+                      ) : (
+                        <option value="coordinator">Coordinator / Inspector</option>
+                      )}
                     </select>
                   </div>
                 </div>
@@ -6207,11 +6266,16 @@ function App() {
                       <select
                         className="form-control"
                         value={newAdminForm.branch}
+                        disabled={isBranchAdm}
                         onChange={(e) => setNewAdminForm(prev => ({ ...prev, branch: e.target.value }))}
                       >
-                        {branches.map(b => (
-                          <option key={b} value={b}>{b}</option>
-                        ))}
+                        {isSuper ? (
+                          branches.map(b => (
+                            <option key={b} value={b}>{b}</option>
+                          ))
+                        ) : (
+                          <option value={getLoggedInUserBranch()}>{getLoggedInUserBranch()}</option>
+                        )}
                       </select>
                     </div>
                     {newAdminForm.role === 'coordinator' && (
@@ -6222,7 +6286,16 @@ function App() {
                           value={newAdminForm.batch}
                           onChange={(e) => setNewAdminForm(prev => ({ ...prev, batch: e.target.value }))}
                         >
-                          {batchOptions.map(opt => (
+                          {batchOptions.filter(opt => {
+                            if (isSuper) return true;
+                            const branchKey = getLoggedInUserBranch().toLowerCase();
+                            const isDefault = DEFAULT_BATCH_OPTIONS.some(d => d.id === opt.id);
+                            if (isDefault) return batchCredentials[`${branchKey}_${opt.id}`] !== undefined;
+                            return Object.keys(batchCredentials).some(key => {
+                              const parts = key.split('_');
+                              return parts[0].toLowerCase() === branchKey && parts.slice(1).join('_') === opt.id;
+                            });
+                          }).map(opt => (
                             <option key={opt.id} value={opt.id}>{opt.name}</option>
                           ))}
                         </select>
@@ -6324,11 +6397,18 @@ function App() {
                     <select
                       className="form-control"
                       value={editingAdmin.role}
+                      disabled={isBranchAdm}
                       onChange={(e) => setEditingAdmin(prev => ({ ...prev, role: e.target.value }))}
                     >
-                      <option value="superadmin">Super Admin</option>
-                      <option value="branchadmin">Branch Admin</option>
-                      <option value="coordinator">Coordinator / Inspector</option>
+                      {isSuper ? (
+                        <>
+                          <option value="superadmin">Super Admin</option>
+                          <option value="branchadmin">Branch Admin</option>
+                          <option value="coordinator">Coordinator / Inspector</option>
+                        </>
+                      ) : (
+                        <option value="coordinator">Coordinator / Inspector</option>
+                      )}
                     </select>
                   </div>
                 </div>
@@ -6340,11 +6420,16 @@ function App() {
                       <select
                         className="form-control"
                         value={editingAdmin.branch || ''}
+                        disabled={isBranchAdm}
                         onChange={(e) => setEditingAdmin(prev => ({ ...prev, branch: e.target.value }))}
                       >
-                        {branches.map(b => (
-                          <option key={b} value={b}>{b}</option>
-                        ))}
+                        {isSuper ? (
+                          branches.map(b => (
+                            <option key={b} value={b}>{b}</option>
+                          ))
+                        ) : (
+                          <option value={getLoggedInUserBranch()}>{getLoggedInUserBranch()}</option>
+                        )}
                       </select>
                     </div>
                     {editingAdmin.role === 'coordinator' && (
@@ -6355,7 +6440,16 @@ function App() {
                           value={editingAdmin.batch || ''}
                           onChange={(e) => setEditingAdmin(prev => ({ ...prev, batch: e.target.value }))}
                         >
-                          {batchOptions.map(opt => (
+                          {batchOptions.filter(opt => {
+                            if (isSuper) return true;
+                            const branchKey = getLoggedInUserBranch().toLowerCase();
+                            const isDefault = DEFAULT_BATCH_OPTIONS.some(d => d.id === opt.id);
+                            if (isDefault) return batchCredentials[`${branchKey}_${opt.id}`] !== undefined;
+                            return Object.keys(batchCredentials).some(key => {
+                              const parts = key.split('_');
+                              return parts[0].toLowerCase() === branchKey && parts.slice(1).join('_') === opt.id;
+                            });
+                          }).map(opt => (
                             <option key={opt.id} value={opt.id}>{opt.name}</option>
                           ))}
                         </select>
@@ -8004,9 +8098,30 @@ function App() {
           </a>
           <div style={{ flex: 1 }}></div>
           {isAdminUser(loggedInUser) && (
-            <a className={`nav-item ${currentView === 'credentials-list' ? 'active' : ''}`} onClick={() => setCurrentView('credentials-list')}>
-              <Lock className="nav-icon" /> <span>All Credentials</span>
-            </a>
+            <>
+              <a className={`nav-item ${currentView === 'branches-list' ? 'active' : ''}`} onClick={() => setCurrentView('branches-list')}>
+                <MapPin className="nav-icon" /> <span>Branches</span>
+              </a>
+              <a className={`nav-item ${currentView === 'batches-list' ? 'active' : ''}`} onClick={() => setCurrentView('batches-list')}>
+                <CalendarDays className="nav-icon" /> <span>Batches</span>
+              </a>
+              <a className={`nav-item ${currentView === 'admins-list' ? 'active' : ''}`} onClick={() => setCurrentView('admins-list')}>
+                <Shield className="nav-icon" /> <span>Admins</span>
+              </a>
+              <a className={`nav-item ${currentView === 'credentials-list' ? 'active' : ''}`} onClick={() => setCurrentView('credentials-list')}>
+                <Lock className="nav-icon" /> <span>All Credentials</span>
+              </a>
+            </>
+          )}
+          {isBranchAdmin(loggedInUser) && (
+            <>
+              <a className={`nav-item ${currentView === 'batches-list' ? 'active' : ''}`} onClick={() => setCurrentView('batches-list')}>
+                <CalendarDays className="nav-icon" /> <span>Batches</span>
+              </a>
+              <a className={`nav-item ${currentView === 'admins-list' ? 'active' : ''}`} onClick={() => setCurrentView('admins-list')}>
+                <Shield className="nav-icon" /> <span>Coordinators</span>
+              </a>
+            </>
           )}
           {hasSettingsAccess(loggedInUser) && (
             <a className={`nav-item ${currentView === 'settings' ? 'active' : ''}`} onClick={() => setCurrentView('settings')}>
@@ -8053,7 +8168,7 @@ function App() {
                 {currentView === 'credentials-list' && 'System Accounts & Credentials'}
                 {currentView === 'branches-list' && 'Branch Management'}
                 {currentView === 'batches-list' && 'Batch Management'}
-                {currentView === 'admins-list' && 'Admin User Management'}
+                {currentView === 'admins-list' && (isBranchAdmin(loggedInUser) ? 'Coordinator Accounts' : 'Admin User Management')}
               </h1>
             </div>
 

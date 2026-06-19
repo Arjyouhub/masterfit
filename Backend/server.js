@@ -2587,12 +2587,20 @@ developerRouter.post('/settings', async (req, res) => {
 });
 
 // Admin Users MongoDB CRUD APIs
-app.get('/api/admins', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
+app.get('/api/admins', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
   try {
-    const admins = await User.find({
-      role: { $in: ['superadmin', 'branchadmin', 'coordinator'] },
+    const { role, branch } = req.user;
+    let query = {
       status: { $ne: 'SoftDeleted' }
-    }).lean();
+    };
+    if (role === 'branchadmin') {
+      query.branch = new RegExp(`^${branch}$`, 'i');
+      query.role = 'coordinator';
+    } else {
+      query.role = { $in: ['superadmin', 'branchadmin', 'coordinator'] };
+    }
+
+    const admins = await User.find(query).lean();
 
     const enriched = [];
     for (const adm of admins) {
@@ -2613,7 +2621,7 @@ app.get('/api/admins', authenticateSession, authorizeRoles('superadmin'), async 
   }
 });
 
-app.post('/api/admins', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
+app.post('/api/admins', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
   try {
     const { username, password, role, branch, batch, fullName, phone, employeeId } = req.body;
     if (!username || !password || !role) {
@@ -2622,6 +2630,18 @@ app.post('/api/admins', authenticateSession, authorizeRoles('superadmin'), async
     if (role === 'developer' && req.user.role !== 'developer') {
       return res.status(403).json({ error: 'Access denied: cannot create developer user' });
     }
+    
+    // Strict scoping for branch admins
+    const { role: userRole, branch: userBranch } = req.user;
+    if (userRole === 'branchadmin') {
+      if (role !== 'coordinator') {
+        return res.status(403).json({ error: 'Access denied: Branch admins can only create coordinators.' });
+      }
+      if (!branch || String(branch).toLowerCase().trim() !== userBranch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot create coordinator for another branch.' });
+      }
+    }
+
     const cleanUser = username.toLowerCase().trim();
     const existing = await User.findOne({ username: cleanUser });
     if (existing) {
@@ -2689,7 +2709,7 @@ app.post('/api/admins', authenticateSession, authorizeRoles('superadmin'), async
   }
 });
 
-app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
+app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
   try {
     const { id } = req.params;
     const { username, password, role, branch, batch, fullName, phone, employeeId, status, isLocked } = req.body;
@@ -2701,6 +2721,19 @@ app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin'), as
     }
     if (role === 'developer' && req.user.role !== 'developer') {
       return res.status(403).json({ error: 'Access denied: cannot assign developer role' });
+    }
+
+    // Strict scoping for branch admins
+    if (req.user.role === 'branchadmin') {
+      if (user.role !== 'coordinator' || user.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot modify admin/coordinator from another branch or role.' });
+      }
+      if (role && role !== 'coordinator') {
+        return res.status(403).json({ error: 'Access denied: Cannot change coordinator to another role.' });
+      }
+      if (branch && branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot change coordinator branch.' });
+      }
     }
 
     const oldUsername = user.username;
@@ -2810,7 +2843,7 @@ app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin'), as
   }
 });
 
-app.delete('/api/admins/:id', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
+app.delete('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
   try {
     const { id } = req.params;
     const user = await User.findById(id);
@@ -2818,6 +2851,13 @@ app.delete('/api/admins/:id', authenticateSession, authorizeRoles('superadmin'),
 
     if (user.role === 'developer' && req.user.role !== 'developer') {
       return res.status(403).json({ error: 'Access denied: insufficient permissions' });
+    }
+
+    // Strict scoping for branch admins
+    if (req.user.role === 'branchadmin') {
+      if (user.role !== 'coordinator' || user.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot delete admin/coordinator from another branch or role.' });
+      }
     }
 
     user.status = 'SoftDeleted';
@@ -2857,7 +2897,7 @@ app.delete('/api/admins/:id', authenticateSession, authorizeRoles('superadmin'),
   }
 });
 
-app.get('/api/admins/:id/details', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
+app.get('/api/admins/:id/details', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
   try {
     const { id } = req.params;
     const user = await User.findById(id).lean();
@@ -2865,6 +2905,13 @@ app.get('/api/admins/:id/details', authenticateSession, authorizeRoles('superadm
 
     if (user.role === 'developer' && req.user.role !== 'developer') {
       return res.status(403).json({ error: 'Access denied: insufficient permissions' });
+    }
+
+    // Strict scoping for branch admins
+    if (req.user.role === 'branchadmin') {
+      if (user.role !== 'coordinator' || user.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot view details of admin/coordinator from another branch or role.' });
+      }
     }
 
     // Fetch Login History
