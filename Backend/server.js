@@ -18,6 +18,7 @@ import User from './models/User.js';
 import LoginHistory from './models/LoginHistory.js';
 import SecurityLog from './models/SecurityLog.js';
 import SystemSetting from './models/SystemSetting.js';
+import HelpReport from './models/HelpReport.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,7 +34,8 @@ if (fs.existsSync(envPath)) {
 const appLogs = [];
 
 let cachedSettings = {
-  maintenanceMode: false,
+  maintenanceMode: 'none', // 'none' | 'all' | 'branch' | 'batch' | 'admin'
+  systemAlertMessage: '',
   sessionTimeoutMinutes: 60,
   minPasswordLength: 6,
   failedLoginThreshold: 5,
@@ -338,9 +340,29 @@ const authenticateSession = async (req, res, next) => {
     };
 
     // --- ENFORCE MAINTENANCE MODE ---
-    if (cachedSettings.maintenanceMode) {
-      if (req.user.role !== 'developer') {
-        return res.status(503).json({ error: 'System is undergoing scheduled maintenance. Access is restricted to developers.' });
+    if (cachedSettings.maintenanceMode && cachedSettings.maintenanceMode !== 'none') {
+      let active = true;
+      if (cachedSettings.maintenanceStart && cachedSettings.maintenanceEnd) {
+        const now = new Date();
+        const start = new Date(cachedSettings.maintenanceStart);
+        const end = new Date(cachedSettings.maintenanceEnd);
+        active = now >= start && now <= end;
+      }
+      
+      if (active) {
+        const mode = cachedSettings.maintenanceMode;
+        const userRole = req.user.role;
+        if (userRole !== 'developer') {
+          if (mode === 'all') {
+            return res.status(503).json({ error: 'System is undergoing scheduled maintenance. Access is restricted to developers.' });
+          } else if (mode === 'admin' && ['superadmin', 'branchadmin', 'coordinator'].includes(userRole)) {
+            return res.status(503).json({ error: 'Admin portals are undergoing maintenance. Access is temporarily restricted.' });
+          } else if (mode === 'branch' && userRole === 'branchadmin') {
+            return res.status(503).json({ error: 'Branch Admin portal is undergoing maintenance. Access is restricted.' });
+          } else if (mode === 'batch' && userRole === 'coordinator') {
+            return res.status(503).json({ error: 'Coordinator portal is undergoing maintenance. Access is restricted.' });
+          }
+        }
       }
     }
 
@@ -646,7 +668,33 @@ async function loadSettingsCache() {
     if (!settings) {
       settings = await new SystemSetting({ configKey: 'main' }).save();
     }
+    
+    let needsUpdate = false;
+    let mode = settings.maintenanceMode;
+    if (mode === true || mode === 'true') {
+      settings.maintenanceMode = 'all';
+      needsUpdate = true;
+    } else if (mode === false || mode === 'false' || !mode) {
+      settings.maintenanceMode = 'none';
+      needsUpdate = true;
+    }
+    
+    if (needsUpdate) {
+      await settings.save();
+      console.log('[Settings Cache] Legacy maintenanceMode corrected and saved to database.');
+    }
+    
     cachedSettings = settings.toObject();
+    
+    if (!cachedSettings.systemAlertMessage) {
+      cachedSettings.systemAlertMessage = '';
+    }
+    if (!cachedSettings.maintenanceStart) {
+      cachedSettings.maintenanceStart = null;
+    }
+    if (!cachedSettings.maintenanceEnd) {
+      cachedSettings.maintenanceEnd = null;
+    }
     console.log('[Settings Cache] Loaded from database:', cachedSettings);
   } catch (err) {
     console.error('[Settings Cache] Failed to load settings:', err);
@@ -915,6 +963,83 @@ app.post('/api/attendance', authenticateSession, async (req, res) => {
   }
 });
 
+// Submit a help report / ticket (accessible to any logged-in user)
+app.post('/api/help-reports', authenticateSession, async (req, res) => {
+  try {
+    const { issueDescription, deviceName, userAgent } = req.body;
+    if (!issueDescription || !issueDescription.trim()) {
+      return res.status(400).json({ error: 'Issue description is required' });
+    }
+
+    const username = req.user.username;
+    const role = req.user.role || '';
+    const branch = req.user.branch || '';
+    const batch = req.user.batch || '';
+    const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+
+    const newReport = new HelpReport({
+      username,
+      role,
+      branch,
+      batch,
+      issueDescription: issueDescription.trim(),
+      deviceName: deviceName || 'Unknown Device',
+      userAgent: userAgent || req.headers['user-agent'] || '',
+      ipAddress,
+      status: 'Pending'
+    });
+
+    const savedReport = await newReport.save();
+    res.status(201).json({ success: true, report: savedReport });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Fetch help reports/tickets submitted by the logged-in user
+app.get('/api/help-reports', authenticateSession, async (req, res) => {
+  try {
+    const reports = await HelpReport.find({ username: req.user.username })
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(reports);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Public endpoint to check system maintenance status & alerts
+app.get('/api/system/maintenance', async (req, res) => {
+  try {
+    const now = new Date();
+    let isUpcoming = false;
+    let isActive = false;
+    
+    if (cachedSettings.maintenanceMode && cachedSettings.maintenanceMode !== 'none') {
+      if (cachedSettings.maintenanceStart && cachedSettings.maintenanceEnd) {
+        const start = new Date(cachedSettings.maintenanceStart);
+        const end = new Date(cachedSettings.maintenanceEnd);
+        isUpcoming = now < start;
+        isActive = now >= start && now <= end;
+      } else {
+        isActive = true;
+      }
+    }
+
+    res.json({
+      maintenanceMode: cachedSettings.maintenanceMode || 'none',
+      maintenanceStart: cachedSettings.maintenanceStart || null,
+      maintenanceEnd: cachedSettings.maintenanceEnd || null,
+      isMaintenanceUpcoming: isUpcoming,
+      isMaintenanceActive: isActive,
+      systemAlertMessage: cachedSettings.systemAlertMessage || ''
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 // 7. Login validation (linked to User model authentication & audits)
 app.post('/api/login', async (req, res) => {
   try {
@@ -930,12 +1055,33 @@ app.post('/api/login', async (req, res) => {
     const deviceDetails = parseUserAgent(userAgent);
     const resolution = screenResolution || 'Unknown';
 
-    // --- ENFORCE MAINTENANCE MODE ON LOGIN ---
-    if (cachedSettings.maintenanceMode && enteredUser !== 'developer') {
-      return res.status(503).json({ success: false, error: 'System is under maintenance. Login is currently locked.' });
-    }
-
     const user = await User.findOne({ username: enteredUser });
+
+    // --- ENFORCE MAINTENANCE MODE ON LOGIN ---
+    if (cachedSettings.maintenanceMode && cachedSettings.maintenanceMode !== 'none' && enteredUser !== 'developer') {
+      let active = true;
+      if (cachedSettings.maintenanceStart && cachedSettings.maintenanceEnd) {
+        const now = new Date();
+        const start = new Date(cachedSettings.maintenanceStart);
+        const end = new Date(cachedSettings.maintenanceEnd);
+        active = now >= start && now <= end;
+      }
+      
+      if (active) {
+        const mode = cachedSettings.maintenanceMode;
+        const userRole = user ? user.role : '';
+        
+        if (mode === 'all') {
+          return res.status(503).json({ success: false, error: 'System is under maintenance. Login is currently locked.' });
+        } else if (mode === 'admin' && ['superadmin', 'branchadmin', 'coordinator'].includes(userRole)) {
+          return res.status(503).json({ success: false, error: 'Admin portal login is currently under maintenance.' });
+        } else if (mode === 'branch' && userRole === 'branchadmin') {
+          return res.status(503).json({ success: false, error: 'Branch Admin portal login is currently under maintenance.' });
+        } else if (mode === 'batch' && userRole === 'coordinator') {
+          return res.status(503).json({ success: false, error: 'Coordinator portal login is currently under maintenance.' });
+        }
+      }
+    }
 
     // --- ENFORCE ACCOUNT LOCKED STATE ---
     if (user && user.isLocked) {
@@ -1439,7 +1585,7 @@ app.post('/api/superadmin/forgot-password/reset', async (req, res) => {
 });
 
 // Get raw credentials (unmasked database values - Super Admin only)
-app.get('/api/credentials/raw', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
+app.get('/api/credentials/raw', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
   try {
     const creds = await Credential.findOne({ configType: 'main' }).lean();
     if (!creds) {
@@ -1504,7 +1650,7 @@ app.get('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
 });
 
 // Update credentials (auto-hashes new passwords - Super Admin only)
-app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin'), async (req, res) => {
+app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
   try {
     const body = { ...req.body };
 
@@ -2534,7 +2680,7 @@ developerRouter.get('/settings', (req, res) => {
 // Developer settings POST
 developerRouter.post('/settings', async (req, res) => {
   try {
-    const { maintenanceMode, sessionTimeoutMinutes, minPasswordLength, failedLoginThreshold, failedLoginBlockTimeMinutes, logRetentionLimit } = req.body;
+    const { maintenanceMode, maintenanceStart, maintenanceEnd, systemAlertMessage, sessionTimeoutMinutes, minPasswordLength, failedLoginThreshold, failedLoginBlockTimeMinutes, logRetentionLimit } = req.body;
     
     // Validate inputs
     if (sessionTimeoutMinutes !== undefined && (isNaN(sessionTimeoutMinutes) || sessionTimeoutMinutes <= 0)) {
@@ -2558,7 +2704,10 @@ developerRouter.post('/settings', async (req, res) => {
       settings = new SystemSetting({ configKey: 'main' });
     }
     
-    if (maintenanceMode !== undefined) settings.maintenanceMode = !!maintenanceMode;
+    if (maintenanceMode !== undefined) settings.maintenanceMode = String(maintenanceMode);
+    if (maintenanceStart !== undefined) settings.maintenanceStart = maintenanceStart ? new Date(maintenanceStart) : null;
+    if (maintenanceEnd !== undefined) settings.maintenanceEnd = maintenanceEnd ? new Date(maintenanceEnd) : null;
+    if (systemAlertMessage !== undefined) settings.systemAlertMessage = String(systemAlertMessage).trim();
     if (sessionTimeoutMinutes !== undefined) settings.sessionTimeoutMinutes = parseInt(sessionTimeoutMinutes, 10);
     if (minPasswordLength !== undefined) settings.minPasswordLength = parseInt(minPasswordLength, 10);
     if (failedLoginThreshold !== undefined) settings.failedLoginThreshold = parseInt(failedLoginThreshold, 10);
@@ -2999,6 +3148,67 @@ app.get('/api/admins/:id/details', authenticateSession, authorizeRoles('superadm
       attendanceSummary,
       feeSummary
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Fetch all help reports (tickets) (paginated and sorted)
+developerRouter.get('/help-reports', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    
+    const count = await HelpReport.countDocuments({});
+    const reports = await HelpReport.find({})
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+      
+    res.json({
+      reports,
+      pagination: {
+        page,
+        limit,
+        totalItems: count,
+        totalPages: Math.ceil(count / limit)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update help report status (Pending/Resolved)
+developerRouter.put('/help-reports/:id/status', async (req, res) => {
+  try {
+    const { status, developerReply } = req.body;
+    if (!['Pending', 'Resolved'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+    const updateData = { status };
+    if (status === 'Resolved') {
+      updateData.developerReply = developerReply || '';
+      updateData.resolvedAt = new Date();
+    } else {
+      updateData.developerReply = '';
+      updateData.resolvedAt = null;
+    }
+    const updated = await HelpReport.findByIdAndUpdate(req.params.id, updateData, { new: true });
+    if (!updated) return res.status(404).json({ error: 'Help report not found' });
+    res.json({ success: true, report: updated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a help report
+developerRouter.delete('/help-reports/:id', async (req, res) => {
+  try {
+    const deleted = await HelpReport.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Help report not found' });
+    res.json({ success: true, message: 'Help report deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -158,12 +158,12 @@ function App() {
   const [devUserSearch, setDevUserSearch] = useState('');
   const [devUserEdit, setDevUserEdit] = useState(null);
   const [devUserEditForm, setDevUserEditForm] = useState({ username: '', email: '', role: '', status: '' });
-  
+
   const [devSessions, setDevSessions] = useState([]);
   const [devSessionsPage, setDevSessionsPage] = useState(1);
   const [devSessionsTotalPages, setDevSessionsTotalPages] = useState(1);
   const [devSessionsTotalItems, setDevSessionsTotalItems] = useState(0);
-  
+
   const [devLoginHistory, setDevLoginHistory] = useState([]);
   const [devLoginHistoryPage, setDevLoginHistoryPage] = useState(1);
   const [devLoginHistoryTotalPages, setDevLoginHistoryTotalPages] = useState(1);
@@ -173,37 +173,66 @@ function App() {
   const [devSecurityLogsPage, setDevSecurityLogsPage] = useState(1);
   const [devSecurityLogsTotalPages, setDevSecurityLogsTotalPages] = useState(1);
   const [devSecurityLogsTotalItems, setDevSecurityLogsTotalItems] = useState(0);
-  
+
   const [devAppLogs, setDevAppLogs] = useState([]);
   const [devAppLogsPage, setDevAppLogsPage] = useState(1);
   const [devAppLogsTotalPages, setDevAppLogsTotalPages] = useState(1);
   const [devAppLogsTotalItems, setDevAppLogsTotalItems] = useState(0);
   const [devLogsType, setDevLogsType] = useState('all');
   const [devLogsSearch, setDevLogsSearch] = useState('');
-  
+
   const [devSystemStatus, setDevSystemStatus] = useState(null);
   const [devDatabaseInfo, setDevDatabaseInfo] = useState(null);
-  
+
   const [devAuditLogs, setDevAuditLogs] = useState([]);
   const [devAuditLogsPage, setDevAuditLogsPage] = useState(1);
   const [devAuditLogsTotalPages, setDevAuditLogsTotalPages] = useState(1);
   const [devAuditLogsTotalItems, setDevAuditLogsTotalItems] = useState(0);
   const [devAuditType, setDevAuditType] = useState('');
-  
+
   const [devSettings, setDevSettings] = useState({
-    maintenanceMode: false,
+    maintenanceMode: 'none',
+    maintenanceStart: null,
+    maintenanceEnd: null,
     sessionTimeoutMinutes: 30,
     minPasswordLength: 6,
     failedLoginThreshold: 5,
     failedLoginBlockTimeMinutes: 15,
     logRetentionLimit: 1000
   });
-  
+
   const [devSettingsSuccess, setDevSettingsSuccess] = useState('');
   const [devSettingsError, setDevSettingsError] = useState('');
   const [devActionLoading, setDevActionLoading] = useState(false);
   const [devSessionFeedback, setDevSessionFeedback] = useState(null);
   const [devUserFeedback, setDevUserFeedback] = useState(null);
+
+  // Help Modal & Submission States
+  const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
+  const [helpDescription, setHelpDescription] = useState('');
+  const [isSubmittingHelp, setIsSubmittingHelp] = useState(false);
+  const [helpSubmitFeedback, setHelpSubmitFeedback] = useState(null);
+  const [helpModalTab, setHelpModalTab] = useState('new');
+  const [userHelpReports, setUserHelpReports] = useState([]);
+  const [loadingUserHelpReports, setLoadingUserHelpReports] = useState(false);
+  const [isSystemUnderMaintenance, setIsSystemUnderMaintenance] = useState(false);
+  const [isMaintenanceUpcoming, setIsMaintenanceUpcoming] = useState(false);
+  const [maintenanceStart, setMaintenanceStart] = useState(null);
+  const [maintenanceEnd, setMaintenanceEnd] = useState(null);
+  const [systemAlertMessage, setSystemAlertMessage] = useState('');
+
+  // Developer resolving ticket modal states
+  const [devResolvingTicketId, setDevResolvingTicketId] = useState(null);
+  const [devResolutionReply, setDevResolutionReply] = useState('');
+
+  // Developer Help Report List States
+  const [devHelpReports, setDevHelpReports] = useState([]);
+  const [devHelpReportsPage, setDevHelpReportsPage] = useState(1);
+  const [devHelpReportsTotalPages, setDevHelpReportsTotalPages] = useState(1);
+  const [devHelpReportsTotalItems, setDevHelpReportsTotalItems] = useState(0);
+  const [devHelpReportsLoading, setDevHelpReportsLoading] = useState(false);
+
+
 
   const [loggedInUser, setLoggedInUser] = useState(() => {
     return getSessionUser() || '';
@@ -249,6 +278,8 @@ function App() {
   const [batchForm, setBatchForm] = useState({ branch: 'kuttiady', batch: 'batch1', newUsername: '', newPassword: '', confirmPassword: '' });
 
   const [adminCredentials, setAdminCredentials] = useState({});
+  const [mappingSubTab, setMappingSubTab] = useState('credentials');
+  const [rawCredentialsError, setRawCredentialsError] = useState('');
   const [editingCredential, setEditingCredential] = useState(null); // { type, key, oldUsername, username, password, displayName }
   const [isCredentialModalOpen, setIsCredentialModalOpen] = useState(false);
   const [credentialModalError, setCredentialModalError] = useState('');
@@ -312,7 +343,7 @@ function App() {
 
   const getSessionDetails = (username) => {
     if (!username) return { role: 'Unknown', branch: 'Unknown', batchName: 'Unknown' };
-    
+
     const cleanUsername = username.toLowerCase().trim();
 
     // Check if user exists in the loaded adminsList
@@ -342,7 +373,7 @@ function App() {
         batchName: batchText
       };
     }
-    
+
     if (cleanUsername === 'developer') {
       return {
         role: 'Developer',
@@ -359,12 +390,12 @@ function App() {
         batchName: 'All Batches (Admin)'
       };
     }
-    
+
     const [userPart, branchPart] = cleanUsername.split('@');
-    
+
     // Format branch name (capitalize first letter)
     const branchName = branchPart.charAt(0).toUpperCase() + branchPart.slice(1);
-    
+
     if (userPart === 'admin') {
       return {
         role: 'Branch Admin',
@@ -372,12 +403,12 @@ function App() {
         batchName: 'All Batches (Admin)'
       };
     }
-    
+
     // Check if it's a batch coordinator
     // Find batch in batchOptions
     const batchObj = batchOptions.find(b => b.id.toLowerCase() === userPart);
     const batchNameText = batchObj ? batchObj.name : userPart.charAt(0).toUpperCase() + userPart.slice(1);
-    
+
     return {
       role: 'Batch Inspector',
       branch: branchName,
@@ -477,7 +508,7 @@ function App() {
 
   const getFilteredBatchOptions = (branchOverride) => {
     if (!loggedInUser) return batchOptions;
-    
+
     let targetBranch = 'All';
     if (branchOverride) {
       targetBranch = branchOverride;
@@ -679,7 +710,7 @@ function App() {
   const handleUpdateAdmin = (e) => {
     e.preventDefault();
     if (!editingAdmin) return;
-    
+
     if (editingAdmin.password && editingAdmin.password !== editingAdmin.confirmPassword) {
       alert("Passwords do not match.");
       return;
@@ -941,18 +972,52 @@ function App() {
   useEffect(() => {
     if (currentView === 'credentials-list' && isAdminUser(loggedInUser)) {
       setLoadingRawCreds(true);
+      setRawCredentialsError('');
       fetch(`${API_BASE_URL}/credentials/raw`)
-        .then(res => res.json())
+        .then(res => {
+          if (!res.ok) {
+            return res.json().then(data => { throw new Error(data.error || 'Failed to load system accounts.') });
+          }
+          return res.json();
+        })
         .then(data => {
           setRawCredentials(data);
           setLoadingRawCreds(false);
         })
         .catch(err => {
           console.error('Error fetching raw credentials:', err);
+          setRawCredentialsError(err.message);
           setLoadingRawCreds(false);
         });
     }
   }, [currentView, loggedInUser]);
+
+  // Default mapping tab for non-superadmin users
+  useEffect(() => {
+    if (currentView === 'credentials-list') {
+      const isSuper = isAdminUser(loggedInUser);
+      if (!isSuper) {
+        setMappingSubTab('batches');
+      } else {
+        setMappingSubTab('credentials');
+      }
+    }
+  }, [currentView, loggedInUser]);
+
+  const toDatetimeLocal = (dateVal) => {
+    if (!dateVal) return '';
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return '';
+    const tzOffset = d.getTimezoneOffset() * 60000;
+    const localISOTime = (new Date(d.getTime() - tzOffset)).toISOString().slice(0, 16);
+    return localISOTime;
+  };
+
+  const formatMaintenanceTime = (dateStr) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    return date.toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
 
   // Developer Panel API Integrations
   const getDevHeaders = () => {
@@ -1063,6 +1128,130 @@ function App() {
       .then(res => res.json())
       .then(data => setDevSettings(data))
       .catch(err => console.error("Error loading dev settings:", err));
+  };
+
+  const loadDevHelpReports = (page = devHelpReportsPage) => {
+    setDevHelpReportsLoading(true);
+    fetch(`${API_BASE_URL}/developer/help-reports?page=${page}&limit=10`, { headers: getDevHeaders() })
+      .then(res => res.json())
+      .then(data => {
+        setDevHelpReports(data.reports || []);
+        setDevHelpReportsTotalPages(data.pagination.totalPages || 1);
+        setDevHelpReportsPage(data.pagination.page || 1);
+        setDevHelpReportsTotalItems(data.pagination.totalItems || 0);
+      })
+      .catch(err => console.error("Error loading help reports:", err))
+      .finally(() => setDevHelpReportsLoading(false));
+  };
+
+  const handleUpdateHelpStatus = (id, status, developerReply = '') => {
+    fetch(`${API_BASE_URL}/developer/help-reports/${id}/status`, {
+      method: 'PUT',
+      headers: getDevHeaders(),
+      body: JSON.stringify({ status, developerReply })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          loadDevHelpReports(devHelpReportsPage);
+        } else {
+          alert(data.error || 'Failed to update status');
+        }
+      })
+      .catch(err => console.error("Error updating status:", err));
+  };
+
+  const handleDeleteHelpReport = (id) => {
+    if (!window.confirm("Are you sure you want to delete this help report?")) return;
+    fetch(`${API_BASE_URL}/developer/help-reports/${id}`, {
+      method: 'DELETE',
+      headers: getDevHeaders()
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          loadDevHelpReports(devHelpReportsPage);
+        } else {
+          alert(data.error || 'Failed to delete report');
+        }
+      })
+      .catch(err => console.error("Error deleting report:", err));
+  };
+
+  const loadUserHelpReports = () => {
+    setLoadingUserHelpReports(true);
+    fetch(`${API_BASE_URL}/help-reports`)
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setUserHelpReports(data);
+        }
+      })
+      .catch(err => console.error("Error loading user help reports:", err))
+      .finally(() => setLoadingUserHelpReports(false));
+  };
+
+  const handleSubmitHelp = async (e) => {
+    e.preventDefault();
+    if (!helpDescription.trim()) {
+      setHelpSubmitFeedback({ type: 'error', message: 'Please describe your issue.' });
+      return;
+    }
+
+    setIsSubmittingHelp(true);
+    setHelpSubmitFeedback(null);
+
+    let devName = '';
+    if (navigator.userAgentData) {
+      try {
+        const uaData = await navigator.userAgentData.getHighEntropyValues(['model']);
+        if (uaData && uaData.model) {
+          devName = uaData.model;
+        }
+      } catch (err) {
+        console.error('Failed to get high entropy device data:', err);
+      }
+    }
+
+    if (!devName) {
+      if (navigator.platform) {
+        devName = navigator.platform;
+      } else {
+        devName = 'Web Client';
+      }
+    }
+
+    fetch(`${API_BASE_URL}/help-reports`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        issueDescription: helpDescription,
+        deviceName: devName,
+        userAgent: navigator.userAgent
+      })
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (res.ok) {
+          setHelpSubmitFeedback({ type: 'success', message: 'Your support ticket has been submitted successfully.' });
+          setHelpDescription('');
+          setTimeout(() => {
+            setIsHelpModalOpen(false);
+            setHelpSubmitFeedback(null);
+          }, 3000);
+        } else {
+          setHelpSubmitFeedback({ type: 'error', message: data.error || 'Failed to submit help ticket.' });
+        }
+      })
+      .catch((err) => {
+        console.error('Help submission error:', err);
+        setHelpSubmitFeedback({ type: 'error', message: 'Network error. Please try again.' });
+      })
+      .finally(() => {
+        setIsSubmittingHelp(false);
+      });
   };
 
   // Form actions
@@ -1305,8 +1494,10 @@ function App() {
       loadDevAuditLogs(devAuditLogsPage, devAuditType);
     } else if (devView === 'settings') {
       loadDevSettings();
+    } else if (devView === 'help-reports') {
+      loadDevHelpReports(devHelpReportsPage);
     }
-  }, [appMode, devView, devUsersPage, devSessionsPage, devLoginHistoryPage, devSecurityLogsPage, devAppLogsPage, devLogsType, devLogsSearch, devAuditLogsPage, devAuditType]);
+  }, [appMode, devView, devUsersPage, devSessionsPage, devLoginHistoryPage, devSecurityLogsPage, devAppLogsPage, devLogsType, devLogsSearch, devAuditLogsPage, devAuditType, devHelpReportsPage]);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -1315,6 +1506,107 @@ function App() {
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  // Poll system maintenance status and fetch user help tickets when modal is open
+  useEffect(() => {
+    const checkMaintenance = () => {
+      fetch(`${API_BASE_URL}/system/maintenance`)
+        .then(res => res.json())
+        .then(data => {
+          setIsSystemUnderMaintenance(!!data.isMaintenanceActive);
+          setIsMaintenanceUpcoming(!!data.isMaintenanceUpcoming);
+          setMaintenanceStart(data.maintenanceStart || null);
+          setMaintenanceEnd(data.maintenanceEnd || null);
+          setSystemAlertMessage(data.systemAlertMessage || '');
+        })
+        .catch(err => console.error("Error checking maintenance status:", err));
+    };
+
+    checkMaintenance();
+    const interval = setInterval(checkMaintenance, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (isHelpModalOpen && loggedInUser) {
+      loadUserHelpReports();
+    }
+  }, [isHelpModalOpen, loggedInUser]);
+
+  const handleUpdateBranchPassword = (e) => {
+    e.preventDefault();
+    setSettingsError('');
+    setSettingsSuccess('');
+    setBranchPasswordError('');
+
+    const br = branchForm.branch;
+    const pass = branchForm.newPassword;
+    const user = branchForm.newUsername.trim() || branchCredentials[br]?.username || `admin@${br}`;
+
+    if (pass !== branchForm.confirmPassword) {
+      setBranchPasswordError('Passwords do not match');
+      return;
+    }
+
+    const updatedBranchCreds = {
+      ...branchCredentials,
+      [br]: { username: user, password: pass }
+    };
+
+    fetch(`${API_BASE_URL}/credentials`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branchCredentials: updatedBranchCreds })
+    })
+      .then(res => res.json())
+      .then(data => {
+        setBranchCredentials(data.branchCredentials || {});
+        setSettingsSuccess(`Branch Inspector credentials for "${br.toUpperCase()}" updated successfully!`);
+        setBranchForm({ branch: br, newUsername: '', newPassword: '', confirmPassword: '' });
+      })
+      .catch(err => {
+        setSettingsError('Error updating credentials: ' + err.message);
+      });
+  };
+
+  const handleUpdateBatchPassword = (e) => {
+    e.preventDefault();
+    setSettingsError('');
+    setSettingsSuccess('');
+    setBatchPasswordError('');
+
+    const br = batchForm.branch;
+    const bt = batchForm.batch;
+    const key = `${br}_${bt}`;
+    const pass = batchForm.newPassword;
+    const defaultUser = `${bt}@${br}`;
+    const user = batchForm.newUsername.trim() || batchCredentials[key]?.username || defaultUser;
+
+    if (pass !== batchForm.confirmPassword) {
+      setBatchPasswordError('Passwords do not match');
+      return;
+    }
+
+    const updatedBatchCreds = {
+      ...batchCredentials,
+      [key]: { username: user, password: pass }
+    };
+
+    fetch(`${API_BASE_URL}/credentials`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ batchCredentials: updatedBatchCreds })
+    })
+      .then(res => res.json())
+      .then(data => {
+        setBatchCredentials(data.batchCredentials || {});
+        setSettingsSuccess(`Batch Inspector credentials for "${br.toUpperCase()} - ${bt.toUpperCase()}" updated successfully!`);
+        setBatchForm({ branch: br, batch: bt, newUsername: '', newPassword: '', confirmPassword: '' });
+      })
+      .catch(err => {
+        setSettingsError('Error updating credentials: ' + err.message);
+      });
+  };
 
   const handleAddBranch = (e) => {
     e.preventDefault();
@@ -1408,7 +1700,7 @@ function App() {
     setCustomBranches(updatedCustomBranches);
     setBranchCredentials(updatedBranchCreds);
     setBatchCredentials(updatedBatchCreds);
-    
+
     const dbBranches = Object.keys(updatedBranchCreds).map(b => b.charAt(0).toUpperCase() + b.slice(1));
     const uniqueBranches = Array.from(new Set([
       ...DEFAULT_BRANCHES,
@@ -1420,7 +1712,7 @@ function App() {
     fetch(`${API_BASE_URL}/credentials`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         customBranches: updatedCustomBranches,
         branchCredentials: updatedBranchCreds,
         batchCredentials: updatedBatchCreds
@@ -1442,7 +1734,7 @@ function App() {
             batchCredentials: data.batchCredentials || {}
           }));
         }
-        
+
         const dbBranches = Object.keys(data.branchCredentials || {}).map(b => b.charAt(0).toUpperCase() + b.slice(1));
         const uniqueBranches = Array.from(new Set([
           ...DEFAULT_BRANCHES,
@@ -1468,8 +1760,8 @@ function App() {
     const oldBrLower = oldBrClean.toLowerCase();
     const newBrLower = newBrClean.toLowerCase();
 
-    if (DEFAULT_BRANCHES.some(b => b.toLowerCase() === newBrLower) || 
-        customBranches.some(b => b.toLowerCase() === newBrLower && b.toLowerCase() !== oldBrLower)) {
+    if (DEFAULT_BRANCHES.some(b => b.toLowerCase() === newBrLower) ||
+      customBranches.some(b => b.toLowerCase() === newBrLower && b.toLowerCase() !== oldBrLower)) {
       alert('Branch name already exists!');
       return;
     }
@@ -1479,8 +1771,8 @@ function App() {
     const updatedBranchCreds = { ...branchCredentials };
     if (updatedBranchCreds[oldBrLower]) {
       const creds = updatedBranchCreds[oldBrLower];
-      const newUsername = creds.username.toLowerCase() === `admin@${oldBrLower}` 
-        ? `admin@${newBrLower}` 
+      const newUsername = creds.username.toLowerCase() === `admin@${oldBrLower}`
+        ? `admin@${newBrLower}`
         : creds.username;
       updatedBranchCreds[newBrLower] = {
         username: newUsername,
@@ -1496,9 +1788,9 @@ function App() {
         const batchId = parts.slice(1).join('_');
         const newKey = `${newBrLower}_${batchId}`;
         const creds = updatedBatchCreds[key];
-        
-        const newUsername = creds.username.toLowerCase() === `${batchId}@${oldBrLower}` 
-          ? `${batchId}@${newBrLower}` 
+
+        const newUsername = creds.username.toLowerCase() === `${batchId}@${oldBrLower}`
+          ? `${batchId}@${newBrLower}`
           : creds.username;
 
         updatedBatchCreds[newKey] = {
@@ -1538,7 +1830,7 @@ function App() {
         setCustomBranches(data.customBranches || []);
         setBranchCredentials(data.branchCredentials || {});
         setBatchCredentials(data.batchCredentials || {});
-        
+
         const dbBranches = Object.keys(data.branchCredentials || {}).map(b => b.charAt(0).toUpperCase() + b.slice(1));
         const uniqueBranches = Array.from(new Set([
           ...DEFAULT_BRANCHES,
@@ -1546,7 +1838,7 @@ function App() {
           ...(data.customBranches || []).map(b => b.charAt(0).toUpperCase() + b.slice(1))
         ]));
         setBranches(uniqueBranches);
-        
+
         if (rawCredentials) {
           setRawCredentials(prev => ({
             ...prev,
@@ -1635,7 +1927,7 @@ function App() {
     }
 
     const updatedCustomBatches = customBatches.filter(b => b.id !== batchIdToDelete);
-    
+
     // Also delete from batchCredentials map
     const updatedBatchCreds = { ...batchCredentials };
     for (const key of Object.keys(updatedBatchCreds)) {
@@ -1652,7 +1944,7 @@ function App() {
     fetch(`${API_BASE_URL}/credentials`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         customBatches: updatedCustomBatches,
         batchCredentials: updatedBatchCreds
       })
@@ -1695,7 +1987,7 @@ function App() {
     }
 
     const updatedCustomBatches = customBatches.map(b => b.id === batchId ? { ...b, name: nameClean, schedule: scheduleClean } : b);
-    
+
     setCustomBatches(updatedCustomBatches);
     setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...updatedCustomBatches]);
 
@@ -1713,7 +2005,7 @@ function App() {
       .then(data => {
         setCustomBatches(data.customBatches || []);
         setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...(data.customBatches || [])]);
-        
+
         if (rawCredentials) {
           setRawCredentials(prev => ({
             ...prev,
@@ -1831,6 +2123,12 @@ function App() {
     }
   }, [appMode, devView]);
 
+  // Clear settings alerts when view or mappingSubTab changes
+  useEffect(() => {
+    setSettingsError('');
+    setSettingsSuccess('');
+  }, [currentView, mappingSubTab]);
+
   // Helper functions to get current local date/month (avoiding UTC timezone shift issues)
   const getLocalDateString = () => {
     const d = new Date();
@@ -1939,16 +2237,16 @@ function App() {
       activeBranch = getLoggedInUserBranch();
     }
 
-    const matchesBranch = activeBranch === 'All' || 
+    const matchesBranch = activeBranch === 'All' ||
       (s.branch && activeBranch && s.branch.toLowerCase().trim() === activeBranch.toLowerCase().trim());
 
     // Filter by student status: Active, Inactive, or All
-    const matchesStatus = statusFilter === 'All' 
-      ? true 
+    const matchesStatus = statusFilter === 'All'
+      ? true
       : (s.status || 'Active') === statusFilter;
 
     // Filter by global batch schedule
-    const matchesBatch = batchFilter === 'All' || 
+    const matchesBatch = batchFilter === 'All' ||
       (s.schedule && batchFilter && s.schedule.toLowerCase().trim() === batchFilter.toLowerCase().trim());
 
     if (userRole === 'coordinator') {
@@ -2310,7 +2608,7 @@ function App() {
 
   const handleCouponBlur = (student, field, newCode) => {
     const code = newCode.trim().toUpperCase();
-    
+
     // Validate the coupon code if one is entered
     if (code) {
       const resolved = resolveCouponCode(code);
@@ -2517,7 +2815,7 @@ function App() {
               {devUsers.length > 0 ? (
                 devUsers.map(u => (
                   <tr key={u._id}>
-                    <td 
+                    <td
                       style={{ fontWeight: 600, color: '#30d158', cursor: 'pointer', textDecoration: 'underline' }}
                       onClick={() => handleViewUserDetail(u._id)}
                       title="Click to view detailed user profile & audits"
@@ -2526,11 +2824,10 @@ function App() {
                     </td>
                     <td>{u.email || 'N/A'}</td>
                     <td>
-                      <span className={`dev-badge ${
-                        u.role === 'developer' ? 'dev-badge-blue' :
-                        u.role === 'superadmin' ? 'dev-badge-yellow' :
-                        u.role === 'branchadmin' ? 'dev-badge-green' : 'dev-badge-gray'
-                      }`}>{u.role}</span>
+                      <span className={`dev-badge ${u.role === 'developer' ? 'dev-badge-blue' :
+                          u.role === 'superadmin' ? 'dev-badge-yellow' :
+                            u.role === 'branchadmin' ? 'dev-badge-green' : 'dev-badge-gray'
+                        }`}>{u.role}</span>
                     </td>
                     <td>
                       <span className={`dev-badge ${u.status === 'Active' ? 'dev-badge-green' : 'dev-badge-red'}`}>{u.status || 'Active'}</span>
@@ -2850,8 +3147,8 @@ function App() {
                   </thead>
                   <tbody>
                     {loginHistory.length > 0 ? loginHistory.map((h, idx) => {
-                      const durationStr = h.sessionDuration 
-                        ? `${Math.floor(h.sessionDuration / 60)}m ${h.sessionDuration % 60}s` 
+                      const durationStr = h.sessionDuration
+                        ? `${Math.floor(h.sessionDuration / 60)}m ${h.sessionDuration % 60}s`
                         : (h.status === 'Success' && !h.logoutAt) ? 'Active Session' : 'N/A';
                       return (
                         <tr key={idx}>
@@ -3092,11 +3389,10 @@ function App() {
                 devSecurityLogs.map(l => (
                   <tr key={l._id}>
                     <td>
-                      <span className={`dev-badge ${
-                        l.eventType === 'FailedLogin' ? 'dev-badge-red' :
-                        l.eventType === 'RoleChange' ? 'dev-badge-yellow' :
-                        l.eventType === 'SystemConfigUpdate' ? 'dev-badge-blue' : 'dev-badge-gray'
-                      }`}>{l.eventType}</span>
+                      <span className={`dev-badge ${l.eventType === 'FailedLogin' ? 'dev-badge-red' :
+                          l.eventType === 'RoleChange' ? 'dev-badge-yellow' :
+                            l.eventType === 'SystemConfigUpdate' ? 'dev-badge-blue' : 'dev-badge-gray'
+                        }`}>{l.eventType}</span>
                     </td>
                     <td style={{ fontWeight: 600, color: '#fff' }}>{l.username || 'System'}</td>
                     <td>{l.description}</td>
@@ -3265,14 +3561,14 @@ function App() {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
         <h4 style={{ margin: 0, color: '#fff', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.5px' }}>System Diagnostics & Host Performance</h4>
-        
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '2rem' }}>
           {/* Node Process Metrics */}
           <div className="dev-card">
             <div className="dev-card-header">
               <h4 className="dev-card-title"><Cpu size={16} color="#bf5af2" /> Node.js Server Process</h4>
             </div>
-            
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
                 <span style={{ fontSize: '0.8rem', color: '#8e8e93' }}>Process Runtime Uptime</span>
@@ -3308,7 +3604,7 @@ function App() {
             <div className="dev-card-header">
               <h4 className="dev-card-title"><HardDrive size={16} color="#0a84ff" /> Operating System & Host VM</h4>
             </div>
-            
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '0.8rem' }}>
                 <div>
@@ -3468,11 +3764,10 @@ function App() {
                 devAuditLogs.map(l => (
                   <tr key={l._id}>
                     <td>
-                      <span className={`dev-badge ${
-                        l.eventType === 'DeveloperAudit' ? 'dev-badge-purple' :
-                        l.eventType === 'SystemConfigUpdate' ? 'dev-badge-blue' :
-                        l.eventType === 'RoleChange' ? 'dev-badge-yellow' : 'dev-badge-gray'
-                      }`}>{l.eventType}</span>
+                      <span className={`dev-badge ${l.eventType === 'DeveloperAudit' ? 'dev-badge-purple' :
+                          l.eventType === 'SystemConfigUpdate' ? 'dev-badge-blue' :
+                            l.eventType === 'RoleChange' ? 'dev-badge-yellow' : 'dev-badge-gray'
+                        }`}>{l.eventType}</span>
                     </td>
                     <td style={{ fontWeight: 600, color: '#fff' }}>{l.username || 'System'}</td>
                     <td>{l.description}</td>
@@ -3526,7 +3821,7 @@ function App() {
     return (
       <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
         <h4 style={{ margin: 0, color: '#fff', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.5px' }}>Database-backed System Configurations</h4>
-        
+
         {devSettingsSuccess && (
           <div className="dev-banner dev-banner-success">
             <CheckCircle size={16} />
@@ -3542,17 +3837,90 @@ function App() {
         )}
 
         <form onSubmit={handleDevSettingsSubmit} className="dev-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          {/* Maintenance Mode */}
+          {/* Maintenance Mode Option */}
           <div className="form-group" style={{ margin: 0 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', color: '#fff' }}>
-              <input
-                type="checkbox"
-                checked={devSettings.maintenanceMode || false}
-                onChange={(e) => setDevSettings({ ...devSettings, maintenanceMode: e.target.checked })}
-                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-              />
-              System Maintenance Mode (Restricts access to developer role only)
-            </label>
+            <label style={{ color: '#fff', display: 'block', marginBottom: '6px' }}>System Maintenance Scope Lockout</label>
+            <select
+              className="dev-input"
+              value={devSettings.maintenanceMode || 'none'}
+              onChange={(e) => setDevSettings({ ...devSettings, maintenanceMode: e.target.value })}
+            >
+              <option value="none">None (System Fully Open)</option>
+              <option value="all">All Portals (Lock everyone except Developers)</option>
+              <option value="branch">Branch Portals Only (Lock Branch Admins)</option>
+              <option value="batch">Coordinator Portals Only (Lock Coordinators)</option>
+              <option value="admin">Admin Panel Only (Lock Superadmins, Branch Admins, and Coordinators)</option>
+            </select>
+          </div>
+
+          {/* Maintenance Start Time */}
+          <div className="form-group" style={{ margin: 0 }}>
+            <label style={{ color: '#fff', display: 'block', marginBottom: '4px' }}>Maintenance Start Date & Time</label>
+            <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.45)', display: 'block', marginBottom: '8px' }}>
+              Warning banners will show on landing/login pages prior to this schedule.
+            </span>
+            <input
+              type="datetime-local"
+              className="dev-input"
+              value={toDatetimeLocal(devSettings.maintenanceStart)}
+              onChange={(e) => setDevSettings({ ...devSettings, maintenanceStart: e.target.value ? new Date(e.target.value).toISOString() : null })}
+            />
+          </div>
+
+          {/* Maintenance End Time */}
+          <div className="form-group" style={{ margin: 0 }}>
+            <label style={{ color: '#fff', display: 'block', marginBottom: '4px' }}>Maintenance End Date & Time</label>
+            <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.45)', display: 'block', marginBottom: '8px' }}>
+              Select when maintenance is expected to conclude. Portal access will unlock automatically after this time.
+            </span>
+            <input
+              type="datetime-local"
+              className="dev-input"
+              value={toDatetimeLocal(devSettings.maintenanceEnd)}
+              onChange={(e) => setDevSettings({ ...devSettings, maintenanceEnd: e.target.value ? new Date(e.target.value).toISOString() : null })}
+            />
+          </div>
+
+          {devSettings.maintenanceStart && devSettings.maintenanceEnd && (
+            <div style={{ padding: '0.85rem 1rem', background: 'rgba(255, 159, 10, 0.1)', border: '1px solid rgba(255, 159, 10, 0.25)', borderRadius: '8px', fontSize: '0.825rem', color: '#ff9f0a', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', fontSize: '0.75rem' }}>Scheduled Maintenance Alert Summary</span>
+                <button
+                  type="button"
+                  onClick={() => setDevSettings({ ...devSettings, maintenanceStart: null, maintenanceEnd: null })}
+                  style={{ background: 'rgba(255, 69, 58, 0.15)', border: '1px solid rgba(255, 69, 58, 0.3)', color: '#ff453a', padding: '2px 8px', borderRadius: '4px', fontSize: '0.725rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <Trash2 size={12} /> Clear Schedule
+                </button>
+              </div>
+              <div>
+                <span><strong>Pre-maintenance Warning:</strong> Visible on portal starting now.</span>
+                <span style={{ display: 'block', marginTop: '2px' }}><strong>Lockout Active Window:</strong> {formatMaintenanceTime(devSettings.maintenanceStart)} to {formatMaintenanceTime(devSettings.maintenanceEnd)} (Local Time).</span>
+              </div>
+            </div>
+          )}
+
+          {/* System Broadcast Alert Message */}
+          <div className="form-group" style={{ margin: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <label style={{ color: '#fff', margin: 0 }}>System Announcement Alert Message (Broadcasts to all pages)</label>
+              {devSettings.systemAlertMessage && (
+                <button
+                  type="button"
+                  onClick={() => setDevSettings({ ...devSettings, systemAlertMessage: '' })}
+                  style={{ background: 'rgba(255, 69, 58, 0.15)', border: '1px solid rgba(255, 69, 58, 0.3)', color: '#ff453a', padding: '2px 8px', borderRadius: '4px', fontSize: '0.725rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <Trash2 size={12} /> Clear Alert
+                </button>
+              )}
+            </div>
+            <textarea
+              className="dev-input"
+              style={{ minHeight: '60px', resize: 'vertical' }}
+              value={devSettings.systemAlertMessage || ''}
+              onChange={(e) => setDevSettings({ ...devSettings, systemAlertMessage: e.target.value })}
+              placeholder="e.g. Warning: Scheduled database backup on Sunday, 2 AM EST. System may experience brief drops."
+            ></textarea>
           </div>
 
           {/* Session Timeout */}
@@ -3632,10 +4000,135 @@ function App() {
     );
   };
 
+  const renderDevHelpReports = () => {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <h4 style={{ margin: 0, color: '#fff', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.5px' }}>Help Reports & Support Tickets</h4>
+        
+        {devHelpReportsLoading ? (
+          <div style={{ textAlign: 'center', color: '#8e8e93', padding: '3rem' }}>Loading support tickets...</div>
+        ) : (
+          <div className="dev-table-container">
+            <table className="dev-table">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Reporter</th>
+                  <th>Branch / Batch</th>
+                  <th>Issue / Description</th>
+                  <th>Device / Client</th>
+                  <th>IP Address</th>
+                  <th>Timestamp</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {devHelpReports.length > 0 ? (
+                  devHelpReports.map(r => (
+                    <tr key={r._id}>
+                      <td>
+                        <span className={`dev-badge ${r.status === 'Resolved' ? 'dev-badge-green' : 'dev-badge-red'}`}>
+                          {r.status}
+                        </span>
+                      </td>
+                      <td style={{ fontWeight: 600, color: '#fff' }}>
+                        <div>{r.username}</div>
+                        <div style={{ fontSize: '0.75rem', opacity: 0.6, fontWeight: 400 }}>{r.role}</div>
+                      </td>
+                      <td>
+                        <div>{r.branch || 'N/A'}</div>
+                        <div style={{ fontSize: '0.75rem', opacity: 0.6 }}>{r.batch || 'N/A'}</div>
+                      </td>
+                      <td style={{ maxWidth: '300px', wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                        <div>{r.issueDescription}</div>
+                        {r.developerReply && (
+                          <div style={{ fontSize: '0.8rem', color: '#51CF66', marginTop: '6px', background: 'rgba(81, 207, 102, 0.05)', padding: '4px 8px', borderRadius: '4px' }}>
+                            <strong>Reply: </strong>{r.developerReply}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ fontSize: '0.75rem', opacity: 0.7 }} title={r.userAgent}>
+                        {parseClientDetails(r.userAgent, r.deviceName)}
+                      </td>
+                      <td>{r.ipAddress}</td>
+                      <td>{new Date(r.createdAt).toLocaleString()}</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          {r.status !== 'Resolved' ? (
+                            <button
+                              className="dev-btn dev-btn-primary"
+                              style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                              onClick={() => { setDevResolvingTicketId(r._id); setDevResolutionReply(''); }}
+                            >
+                              Resolve
+                            </button>
+                          ) : (
+                            <button
+                              className="dev-btn dev-btn-secondary"
+                              style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                              onClick={() => handleUpdateHelpStatus(r._id, 'Pending')}
+                            >
+                              Reopen
+                            </button>
+                          )}
+                          <button
+                            className="dev-btn dev-btn-danger"
+                            style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                            onClick={() => handleDeleteHelpReport(r._id)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="8" style={{ textAlign: 'center', color: '#8e8e93', padding: '2rem' }}>No support tickets or help reports found.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+
+            {devHelpReportsTotalPages > 1 && (
+              <div className="dev-pagination">
+                <span className="dev-pagination-info">Page {devHelpReportsPage} of {devHelpReportsTotalPages} (Total: {devHelpReportsTotalItems})</span>
+                <div className="dev-pagination-btns">
+                  <button
+                    className="dev-btn dev-btn-secondary"
+                    disabled={devHelpReportsPage === 1}
+                    onClick={() => {
+                      const prev = devHelpReportsPage - 1;
+                      setDevHelpReportsPage(prev);
+                      loadDevHelpReports(prev);
+                    }}
+                  >
+                    Prev
+                  </button>
+                  <button
+                    className="dev-btn dev-btn-secondary"
+                    disabled={devHelpReportsPage === devHelpReportsTotalPages}
+                    onClick={() => {
+                      const next = devHelpReportsPage + 1;
+                      setDevHelpReportsPage(next);
+                      loadDevHelpReports(next);
+                    }}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderDeveloperPanel = () => {
     return (
       <div className="dashboard-container developer-panel">
-        
+
         {/* Developer Sidebar */}
         <aside className="dev-sidebar">
           <div className="dev-sidebar-header">
@@ -3671,6 +4164,9 @@ function App() {
             <a className={`dev-nav-item ${devView === 'settings' ? 'active' : ''}`} onClick={() => setDevView('settings')}>
               <Settings className="dev-nav-icon" /> <span>System Settings</span>
             </a>
+            <a className={`dev-nav-item ${devView === 'help-reports' ? 'active' : ''}`} onClick={() => setDevView('help-reports')}>
+              <MessageCircle className="dev-nav-icon" /> <span>Help Reports</span>
+            </a>
           </nav>
           <div className="dev-sidebar-footer">
             <a className="dev-nav-item" style={{ padding: '0.75rem 0', color: '#ff453a' }} onClick={() => {
@@ -3693,7 +4189,25 @@ function App() {
 
         {/* Developer Main Area */}
         <main className="dev-main">
-          
+          {isSystemUnderMaintenance && (
+            <div className="maintenance-alert-banner-static" style={{ margin: '1.25rem 1.5rem 0 1.5rem', background: 'linear-gradient(90deg, #5e5ce6, #bf5af2)', animation: 'none' }}>
+              <AlertTriangle size={18} className="pulse-icon" />
+              <span>System Alert: Maintenance mode is active. Restricted to developers only.</span>
+            </div>
+          )}
+          {isMaintenanceUpcoming && (
+            <div className="maintenance-alert-banner-static" style={{ margin: '1.25rem 1.5rem 0 1.5rem', background: 'linear-gradient(90deg, #ff9f0a, #ffc700)', color: '#000', animation: 'none' }}>
+              <AlertTriangle size={18} className="pulse-icon" />
+              <span>Upcoming Maintenance: Portal login will be restricted from {formatMaintenanceTime(maintenanceStart)} to {formatMaintenanceTime(maintenanceEnd)}.</span>
+            </div>
+          )}
+          {systemAlertMessage && (
+            <div className="broadcast-alert-banner-static" style={{ margin: '1.25rem 1.5rem 0 1.5rem', background: 'linear-gradient(90deg, #0a84ff, #30d158)' }}>
+              <Bell size={16} className="shake-icon" />
+              <span>Announcement: {systemAlertMessage}</span>
+            </div>
+          )}
+
           {/* Header */}
           <header className="dev-header">
             <h1 className="dev-header-title">
@@ -3706,6 +4220,7 @@ function App() {
               {devView === 'database' && 'MongoDB Collection Catalog'}
               {devView === 'audit' && 'System Operations Audit Trail'}
               {devView === 'settings' && 'System Configuration Settings'}
+              {devView === 'help-reports' && 'Support Tickets & Help Reports'}
             </h1>
             <div className="dev-user-pill">
               <span style={{ color: '#8e8e93' }}>Role: Developer</span>
@@ -3725,8 +4240,54 @@ function App() {
             {devView === 'database' && renderDevDatabase()}
             {devView === 'audit' && renderDevAudit()}
             {devView === 'settings' && renderDevSettings()}
+            {devView === 'help-reports' && renderDevHelpReports()}
           </div>
           {renderUserDetailModal()}
+          {devResolvingTicketId && (
+            <div className="modal-overlay" style={{ zIndex: 1300 }}>
+              <div className="modal-content help-modal" style={{ maxWidth: '450px' }}>
+                <div className="panel-header" style={{ marginBottom: '1rem' }}>
+                  <h2 className="panel-title" style={{ fontSize: '1.05rem' }}>Resolve Support Ticket</h2>
+                  <button className="btn-icon" onClick={() => setDevResolvingTicketId(null)}>
+                    <X size={20} />
+                  </button>
+                </div>
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  handleUpdateHelpStatus(devResolvingTicketId, 'Resolved', devResolutionReply);
+                  setDevResolvingTicketId(null);
+                  setDevResolutionReply('');
+                }}>
+                  <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                    <label style={{ display: 'block', marginBottom: '6px', color: '#fff' }}>Resolution Message / Response for User</label>
+                    <textarea
+                      className="dev-input"
+                      style={{ minHeight: '100px', resize: 'vertical' }}
+                      required
+                      placeholder="Explain what was fixed, or provide details of the resolution..."
+                      value={devResolutionReply}
+                      onChange={(e) => setDevResolutionReply(e.target.value)}
+                    ></textarea>
+                  </div>
+                  <div className="modal-actions" style={{ marginTop: '1rem' }}>
+                    <button
+                      type="button"
+                      className="dev-btn dev-btn-secondary"
+                      onClick={() => setDevResolvingTicketId(null)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="dev-btn dev-btn-primary"
+                    >
+                      Confirm Resolve
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </main>
       </div>
     );
@@ -3734,7 +4295,19 @@ function App() {
 
   // --- Public Website View ---
   const renderPublic = () => (
-    <div className="public-layout">
+    <div className={`public-layout ${isMaintenanceUpcoming ? 'has-maintenance-banner' : ''} ${systemAlertMessage ? 'has-broadcast-banner' : ''}`}>
+      {systemAlertMessage && (
+        <div className="broadcast-alert-banner" style={{ zIndex: 1200 }}>
+          <Bell size={16} className="shake-icon" />
+          <span>{systemAlertMessage}</span>
+        </div>
+      )}
+      {isMaintenanceUpcoming && (
+        <div className="maintenance-alert-banner" style={{ zIndex: 1200, top: systemAlertMessage ? '35px' : '0px' }}>
+          <AlertTriangle size={18} className="pulse-icon" />
+          <span>Upcoming Maintenance: Portal login will be restricted from {formatMaintenanceTime(maintenanceStart)} to {formatMaintenanceTime(maintenanceEnd)}.</span>
+        </div>
+      )}
       <nav className={`public-nav ${scrolled ? 'scrolled' : ''}`}>
         <div className="brand" style={{ cursor: 'pointer' }} onClick={() => { window.scrollTo(0, 0); setIsMobileMenuOpen(false); }}>
           <span className="brand-accent">MASTER</span> FIT
@@ -4704,7 +5277,7 @@ function App() {
 
   const getMonthsList = (student) => {
     if (!student) return [];
-    
+
     const currentMonthStr = new Date().toISOString().slice(0, 7); // YYYY-MM
     const joinMonthStr = student.joinDate ? student.joinDate.slice(0, 7) : currentMonthStr;
 
@@ -4780,7 +5353,7 @@ function App() {
               Joined: <strong>{student.joinDate}</strong>
             </p>
           </div>
-          
+
           <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
             <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem 1.25rem', borderRadius: '10px', border: '1px solid var(--glass-border)', textAlign: 'center' }}>
               <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>Monthly Rate</span>
@@ -5230,274 +5803,316 @@ function App() {
 
   const renderCredentialsList = () => {
     const isSuper = isAdminUser(loggedInUser);
+    const isBranchAdm = isBranchAdmin(loggedInUser);
+    const hasAccess = isSuper || isBranchAdm;
 
-    if (!isSuper) {
+    if (!hasAccess) {
       return (
         <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
           <h3 className="panel-title" style={{ color: '#E50914' }}>Access Denied</h3>
-          <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Only administrators can view credentials.</p>
+          <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Only administrators can access branch & batch mapping.</p>
         </div>
       );
     }
-
-    if (loadingRawCreds) {
-      return (
-        <div className="panel" style={{ padding: '3rem', textAlign: 'center' }}>
-          <div className="loading-spinner" style={{ margin: '0 auto 1rem' }}></div>
-          <p style={{ color: 'var(--color-text-muted)' }}>Loading system accounts...</p>
-        </div>
-      );
-    }
-
-    if (!rawCredentials) {
-      return (
-        <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
-          <p style={{ color: 'var(--color-text-muted)' }}>No accounts data found or failed to load.</p>
-        </div>
-      );
-    }
-
-    const { adminCredentials = {}, branchCredentials = {}, batchCredentials = {} } = rawCredentials;
-
-    const isUserLoggedIn = (username) => {
-      if (!username) return false;
-      const nameClean = username.toLowerCase().trim();
-      return activeSessions.some(session => session.username.toLowerCase().trim() === nameClean);
-    };
 
     return (
-      <div className="credentials-view" style={{ maxWidth: '900px', margin: '0 auto' }}>
-        
-        {/* Notice alert */}
-        <div className="panel" style={{ marginBottom: '2rem', borderLeft: '4px solid var(--color-primary)', background: 'rgba(229, 9, 20, 0.05)' }}>
-          <h4 style={{ margin: 0, color: 'var(--color-text-light)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Shield size={18} color="var(--color-primary)" />
-            System Accounts Monitor
-          </h4>
-          <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', marginTop: '0.5rem', lineHeight: '1.4' }}>
-            This page shows all configured system accounts, their associated roles, and whether they are currently logged in (active session).
-            To edit credentials, please click the "Edit" button next to any user account below.
-          </p>
+      <div className="credentials-view" style={{ maxWidth: '1100px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        {/* Consolidated Sub-tab Navigation */}
+        <div style={{ display: 'flex', gap: '10px', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', flexWrap: 'wrap' }}>
+          {isSuper && (
+            <button
+              className={`btn-primary ${mappingSubTab === 'credentials' ? '' : 'btn-secondary'}`}
+              style={mappingSubTab === 'credentials' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
+              onClick={() => setMappingSubTab('credentials')}
+            >
+              System Credentials
+            </button>
+          )}
+          {isSuper && (
+            <button
+              className={`btn-primary ${mappingSubTab === 'branches' ? '' : 'btn-secondary'}`}
+              style={mappingSubTab === 'branches' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
+              onClick={() => setMappingSubTab('branches')}
+            >
+              Branches Setup
+            </button>
+          )}
+          <button
+            className={`btn-primary ${mappingSubTab === 'batches' ? '' : 'btn-secondary'}`}
+            style={mappingSubTab === 'batches' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
+            onClick={() => setMappingSubTab('batches')}
+          >
+            Batches Setup
+          </button>
         </div>
 
-        {/* Superadmin Accounts Panel */}
-        <div className="panel" style={{ marginBottom: '2rem' }}>
-          <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-            <h3 className="panel-title">Super Admin Accounts</h3>
+        {settingsError && (
+          <div style={{ color: '#ff453a', background: 'rgba(255,69,58,0.1)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,69,58,0.2)', fontWeight: 500 }}>
+            {settingsError}
           </div>
-          <div className="table-responsive">
-            <table className="data-table responsive-table-cards">
-              <thead>
-                <tr>
-                  <th>Username</th>
-                  <th>Position / Role</th>
-                  <th>Session Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.keys(adminCredentials).map((username) => (
-                  <tr key={username}>
-                    <td data-label="Username" style={{ fontWeight: 600, color: 'white' }}>{username}</td>
-                    <td data-label="Position / Role"><span className="badge badge-green">Superadmin</span></td>
-                    <td data-label="Session Status">
-                      {isUserLoggedIn(username) ? (
-                        <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          🟢 Logged In
-                        </span>
-                      ) : (
-                        <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          ⚪ Offline
-                        </span>
-                      )}
-                    </td>
-                    <td data-label="Actions">
-                      <button
-                        type="button"
-                        className="btn-small"
-                        style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
-                        onClick={() => {
-                          setEditingCredential({
-                            type: 'admin',
-                            key: username,
-                            oldUsername: username,
-                            username: username,
-                            password: '••••••',
-                            displayName: `Super Admin Account (${username})`
-                          });
-                          setIsCredentialModalOpen(true);
-                        }}
-                      >
-                        Edit
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        )}
+        {settingsSuccess && (
+          <div style={{ color: '#30d158', background: 'rgba(48,209,88,0.1)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(48,209,88,0.2)', fontWeight: 500 }}>
+            {settingsSuccess}
           </div>
-        </div>
+        )}
 
-        {/* Branch Inspector Accounts Panel */}
-        <div className="panel" style={{ marginBottom: '2rem' }}>
-          <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-            <h3 className="panel-title">Branch Inspector Accounts</h3>
-          </div>
-          <div className="table-responsive">
-            <table className="data-table responsive-table-cards">
-              <thead>
-                <tr>
-                  <th>Branch Name</th>
-                  <th>Username</th>
-                  <th>Position / Role</th>
-                  <th>Session Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(branchCredentials).length === 0 ? (
-                  <tr>
-                    <td colSpan="5" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No branch inspectors configured.</td>
-                  </tr>
-                ) : (
-                  Object.entries(branchCredentials).map(([branchKey, info]) => (
-                    <tr key={branchKey}>
-                      <td data-label="Branch Name" style={{ fontWeight: 600, color: 'white', textTransform: 'capitalize' }}>{branchKey}</td>
-                      <td data-label="Username" style={{ color: 'var(--color-text-light)' }}>{info.username}</td>
-                      <td data-label="Position / Role"><span className="badge" style={{ background: 'rgba(52, 152, 219, 0.15)', color: '#3498db', border: '1px solid rgba(52, 152, 219, 0.3)' }}>Branch Admin</span></td>
-                      <td data-label="Session Status">
-                        {isUserLoggedIn(info.username) ? (
-                          <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                            🟢 Logged In
-                          </span>
+        {/* Tab Contents */}
+        {mappingSubTab === 'credentials' && isSuper && (
+          <>
+            {/* Notice alert */}
+            <div className="panel" style={{ borderLeft: '4px solid var(--color-primary)', background: 'rgba(229, 9, 20, 0.05)' }}>
+              <h4 style={{ margin: 0, color: 'var(--color-text-light)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Shield size={18} color="var(--color-primary)" />
+                System Accounts Monitor
+              </h4>
+              <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', marginTop: '0.5rem', lineHeight: '1.4' }}>
+                This page shows all configured system accounts, their associated roles, and whether they are currently logged in.
+                To edit credentials, please click the "Edit" button next to any user account below.
+              </p>
+            </div>
+
+            {rawCredentialsError && (
+              <div style={{ color: '#ff453a', background: 'rgba(255,69,58,0.1)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,69,58,0.2)', fontWeight: 500 }}>
+                Error: {rawCredentialsError}
+              </div>
+            )}
+
+            {loadingRawCreds ? (
+              <div className="panel" style={{ padding: '3rem', textAlign: 'center' }}>
+                <div className="loading-spinner" style={{ margin: '0 auto 1rem' }}></div>
+                <p style={{ color: 'var(--color-text-muted)' }}>Loading system accounts...</p>
+              </div>
+            ) : !rawCredentials ? (
+              <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
+                <p style={{ color: 'var(--color-text-muted)' }}>No accounts data found or failed to load.</p>
+              </div>
+            ) : (
+              <>
+                {/* Superadmin Accounts Panel */}
+                <div className="panel">
+                  <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+                    <h3 className="panel-title">Super Admin Accounts</h3>
+                  </div>
+                  <div className="table-responsive">
+                    <table className="data-table responsive-table-cards">
+                      <thead>
+                        <tr>
+                          <th>Username</th>
+                          <th>Position / Role</th>
+                          <th>Session Status</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.keys(rawCredentials.adminCredentials || {}).map((username) => (
+                          <tr key={username}>
+                            <td data-label="Username" style={{ fontWeight: 600, color: 'white' }}>{username}</td>
+                            <td data-label="Position / Role"><span className="badge badge-green">Superadmin</span></td>
+                            <td data-label="Session Status">
+                              {activeSessions.some(session => session.username.toLowerCase().trim() === username.toLowerCase().trim()) ? (
+                                <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  🟢 Logged In
+                                </span>
+                              ) : (
+                                <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  ⚪ Offline
+                                </span>
+                              )}
+                            </td>
+                            <td data-label="Actions">
+                              <button
+                                type="button"
+                                className="btn-small"
+                                style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
+                                onClick={() => {
+                                  setEditingCredential({
+                                    type: 'admin',
+                                    key: username,
+                                    oldUsername: username,
+                                    username: username,
+                                    password: '••••••',
+                                    displayName: `Super Admin Account (${username})`
+                                  });
+                                  setIsCredentialModalOpen(true);
+                                }}
+                              >
+                                Edit
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Branch Inspector Accounts Panel */}
+                <div className="panel">
+                  <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+                    <h3 className="panel-title">Branch Inspector Accounts</h3>
+                  </div>
+                  <div className="table-responsive">
+                    <table className="data-table responsive-table-cards">
+                      <thead>
+                        <tr>
+                          <th>Branch Name</th>
+                          <th>Username</th>
+                          <th>Position / Role</th>
+                          <th>Session Status</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(rawCredentials.branchCredentials || {}).length === 0 ? (
+                          <tr>
+                            <td colSpan="5" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No branch inspectors configured.</td>
+                          </tr>
                         ) : (
-                          <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                            ⚪ Offline
-                          </span>
+                          Object.entries(rawCredentials.branchCredentials || {}).map(([branchKey, info]) => (
+                            <tr key={branchKey}>
+                              <td data-label="Branch Name" style={{ fontWeight: 600, color: 'white', textTransform: 'capitalize' }}>{branchKey}</td>
+                              <td data-label="Username" style={{ color: 'var(--color-text-light)' }}>{info.username}</td>
+                              <td data-label="Position / Role"><span className="badge" style={{ background: 'rgba(52, 152, 219, 0.15)', color: '#3498db', border: '1px solid rgba(52, 152, 219, 0.3)' }}>Branch Admin</span></td>
+                              <td data-label="Session Status">
+                                {activeSessions.some(session => session.username.toLowerCase().trim() === info.username.toLowerCase().trim()) ? (
+                                  <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                    🟢 Logged In
+                                  </span>
+                                ) : (
+                                  <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                    ⚪ Offline
+                                  </span>
+                                )}
+                              </td>
+                              <td data-label="Actions">
+                                <button
+                                  type="button"
+                                  className="btn-small"
+                                  style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
+                                  onClick={() => {
+                                    setEditingCredential({
+                                      type: 'branch',
+                                      key: branchKey,
+                                      oldUsername: info.username,
+                                      username: info.username,
+                                      password: '••••••',
+                                      displayName: `Branch Inspector (${branchKey})`
+                                    });
+                                    setIsCredentialModalOpen(true);
+                                  }}
+                                >
+                                  Edit
+                                </button>
+                              </td>
+                            </tr>
+                          ))
                         )}
-                      </td>
-                      <td data-label="Actions">
-                        <button
-                          type="button"
-                          className="btn-small"
-                          style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
-                          onClick={() => {
-                            setEditingCredential({
-                              type: 'branch',
-                              key: branchKey,
-                              oldUsername: info.username,
-                              username: info.username,
-                              password: '••••••',
-                              displayName: `Branch Inspector (${branchKey})`
-                            });
-                            setIsCredentialModalOpen(true);
-                          }}
-                        >
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
 
-        {/* Batch Inspector Accounts Panel */}
-        <div className="panel" style={{ marginBottom: '2rem' }}>
-          <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-            <h3 className="panel-title">Batch Inspector / Coach Accounts</h3>
-          </div>
-          <div className="table-responsive">
-            <table className="data-table responsive-table-cards">
-              <thead>
-                <tr>
-                  <th>Batch Name</th>
-                  <th>Username</th>
-                  <th>Position / Role</th>
-                  <th>Session Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(batchCredentials).length === 0 ? (
-                  <tr>
-                    <td colSpan="5" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No batch inspectors configured.</td>
-                  </tr>
-                ) : (
-                  Object.entries(batchCredentials).map(([batchKey, info]) => {
-                    const parts = batchKey.split('_');
-                    const branchName = parts[0];
-                    const batchId = parts[1] || '';
-                    
-                    let batchNameText = batchId.toUpperCase();
-                    if (batchId.startsWith('batch')) {
-                      const batchNumStr = batchId.replace('batch', '');
-                      if (batchNumStr && !isNaN(batchNumStr)) {
-                        batchNameText = `Batch ${batchNumStr}`;
-                      }
-                    }
-                    const customBatchObj = customBatches.find(cb => cb.id === batchId || cb.id === `batch_${batchId}`);
-                    if (customBatchObj) {
-                      batchNameText = customBatchObj.name;
-                    }
+                {/* Batch Inspector Accounts Panel */}
+                <div className="panel">
+                  <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+                    <h3 className="panel-title">Batch Inspector / Coach Accounts</h3>
+                  </div>
+                  <div className="table-responsive">
+                    <table className="data-table responsive-table-cards">
+                      <thead>
+                        <tr>
+                          <th>Batch Name</th>
+                          <th>Username</th>
+                          <th>Position / Role</th>
+                          <th>Session Status</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(rawCredentials.batchCredentials || {}).length === 0 ? (
+                          <tr>
+                            <td colSpan="5" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No batch inspectors configured.</td>
+                          </tr>
+                        ) : (
+                          Object.entries(rawCredentials.batchCredentials || {}).map(([batchKey, info]) => {
+                            const parts = batchKey.split('_');
+                            const branchName = parts[0];
+                            const batchId = parts[1] || '';
 
-                    return (
-                      <tr key={batchKey}>
-                        <td data-label="Batch" style={{ fontWeight: 600, color: 'white' }}>
-                          <span style={{ textTransform: 'capitalize' }}>{branchName}</span> - {batchNameText}
-                        </td>
-                        <td data-label="Username" style={{ color: 'var(--color-text-light)' }}>{info.username}</td>
-                        <td data-label="Position / Role"><span className="badge" style={{ background: 'rgba(155, 89, 182, 0.15)', color: '#9b59b6', border: '1px solid rgba(155, 89, 182, 0.3)' }}>Coach / Trainer</span></td>
-                        <td data-label="Session Status">
-                          {isUserLoggedIn(info.username) ? (
-                            <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              🟢 Logged In
-                            </span>
-                          ) : (
-                            <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              ⚪ Offline
-                            </span>
-                          )}
-                        </td>
-                        <td data-label="Actions">
-                          <button
-                            type="button"
-                            className="btn-small"
-                            style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
-                            onClick={() => {
-                              setEditingCredential({
-                                type: 'batch',
-                                key: batchKey,
-                                oldUsername: info.username,
-                                username: info.username,
-                                password: '••••••',
-                                displayName: `Batch Inspector (${branchName} - ${batchNameText})`
-                              });
-                              setIsCredentialModalOpen(true);
-                            }}
-                          >
-                            Edit
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                            let batchNameText = batchId.toUpperCase();
+                            if (batchId.startsWith('batch')) {
+                              const batchNumStr = batchId.replace('batch', '');
+                              if (batchNumStr && !isNaN(batchNumStr)) {
+                                batchNameText = `Batch ${batchNumStr}`;
+                              }
+                            }
+                            const customBatchObj = customBatches.find(cb => cb.id === batchId || cb.id === `batch_${batchId}`);
+                            if (customBatchObj) {
+                              batchNameText = customBatchObj.name;
+                            }
 
+                            return (
+                              <tr key={batchKey}>
+                                <td data-label="Batch" style={{ fontWeight: 600, color: 'white' }}>
+                                  <span style={{ textTransform: 'capitalize' }}>{branchName}</span> - {batchNameText}
+                                </td>
+                                <td data-label="Username" style={{ color: 'var(--color-text-light)' }}>{info.username}</td>
+                                <td data-label="Position / Role"><span className="badge" style={{ background: 'rgba(155, 89, 182, 0.15)', color: '#9b59b6', border: '1px solid rgba(155, 89, 182, 0.3)' }}>Coach / Trainer</span></td>
+                                <td data-label="Session Status">
+                                  {activeSessions.some(session => session.username.toLowerCase().trim() === info.username.toLowerCase().trim()) ? (
+                                    <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                      🟢 Logged In
+                                    </span>
+                                  ) : (
+                                    <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                      ⚪ Offline
+                                    </span>
+                                  )}
+                                </td>
+                                <td data-label="Actions">
+                                  <button
+                                    type="button"
+                                    className="btn-small"
+                                    style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
+                                    onClick={() => {
+                                      setEditingCredential({
+                                        type: 'batch',
+                                        key: batchKey,
+                                        oldUsername: info.username,
+                                        username: info.username,
+                                        password: '••••••',
+                                        displayName: `Batch Inspector (${branchName} - ${batchNameText})`
+                                      });
+                                      setIsCredentialModalOpen(true);
+                                    }}
+                                  >
+                                    Edit
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {mappingSubTab === 'branches' && isSuper && renderBranchesPage()}
+        {mappingSubTab === 'batches' && renderBatchesPage()}
       </div>
     );
   };
 
   const exportAdminsToCSV = (filteredAdmins) => {
     const headers = [
-      "Username", "Full Name", "Email", "Phone", "Employee ID", 
-      "Role", "Branch", "Batch", "Status", "Lockout Status", 
+      "Username", "Full Name", "Email", "Phone", "Employee ID",
+      "Role", "Branch", "Batch", "Status", "Lockout Status",
       "Login Count", "Last Login", "Last Logout"
     ];
 
@@ -5517,13 +6132,13 @@ function App() {
       a.lastLogoutAt ? new Date(a.lastLogoutAt).toLocaleString() : "Never"
     ]);
 
-    const csvContent = "data:text/csv;charset=utf-8," 
+    const csvContent = "data:text/csv;charset=utf-8,"
       + [headers.join(","), ...rows.map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(","))].join("\n");
 
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `admins_report_${new Date().toISOString().slice(0,10)}.csv`);
+    link.setAttribute("download", `admins_report_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -5542,7 +6157,7 @@ function App() {
 
     return (
       <div className="branches-view-container" style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-        
+
         {/* Stat Cards */}
         <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
           <div className="stat-card">
@@ -5568,60 +6183,101 @@ function App() {
           </div>
         </div>
 
-        {/* Create Branch Card */}
-        <div className="panel">
-          <div className="panel-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
-            <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><MapPin size={20} color="var(--color-primary)" /> Configure New Branch Mappings</h3>
-          </div>
-          <form onSubmit={handleAddBranch}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
-              <div className="form-group">
-                <label>Branch Name (e.g. Kallachi)</label>
-                <input
-                  type="text"
-                  placeholder="Enter branch name"
-                  className="form-control"
-                  value={newBranchForm.name}
-                  onChange={(e) => setNewBranchForm(prev => ({ ...prev, name: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label>Inspector Username (Will default to admin@name)</label>
-                <input
-                  type="text"
-                  placeholder="admin@name"
-                  className="form-control"
-                  value={newBranchForm.name ? `admin@${newBranchForm.name.toLowerCase().trim()}` : ''}
-                  disabled
-                />
-              </div>
-              <div className="form-group">
-                <label>Admin Password</label>
-                <input
-                  type="password"
-                  placeholder="••••••••"
-                  className="form-control"
-                  value={newBranchForm.password}
-                  onChange={(e) => setNewBranchForm(prev => ({ ...prev, password: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label>Confirm Password</label>
-                <input
-                  type="password"
-                  placeholder="••••••••"
-                  className="form-control"
-                  value={newBranchForm.confirmPassword || ''}
-                  onChange={(e) => setNewBranchForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
-                  required
-                />
-                {newBranchPasswordError && <span style={{ color: '#ff453a', fontSize: '0.75rem', marginTop: '4px', display: 'block' }}>{newBranchPasswordError}</span>}
-              </div>
+        {/* Branch Configurations and Credentials Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '2rem' }}>
+          {/* Create Branch Card */}
+          <div className="panel" style={{ height: '100%', marginBottom: 0 }}>
+            <div className="panel-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
+              <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><MapPin size={20} color="var(--color-primary)" /> Configure New Branch Mappings</h3>
             </div>
-            <button className="btn-primary" type="submit">Create Mapped Branch & Inspector Credentials</button>
-          </form>
+            <form onSubmit={handleAddBranch}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                <div className="form-group">
+                  <label>Branch Name (e.g. Kallachi)</label>
+                  <input
+                    type="text"
+                    placeholder="Enter branch name"
+                    className="form-control"
+                    value={newBranchForm.name}
+                    onChange={(e) => setNewBranchForm(prev => ({ ...prev, name: e.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Inspector Username (Will default to admin@name)</label>
+                  <input
+                    type="text"
+                    placeholder="admin@name"
+                    className="form-control"
+                    value={newBranchForm.name ? `admin@${newBranchForm.name.toLowerCase().trim()}` : ''}
+                    disabled
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Admin Password</label>
+                  <input
+                    type="password"
+                    placeholder="••••••••"
+                    className="form-control"
+                    value={newBranchForm.password}
+                    onChange={(e) => setNewBranchForm(prev => ({ ...prev, password: e.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Confirm Password</label>
+                  <input
+                    type="password"
+                    placeholder="••••••••"
+                    className="form-control"
+                    value={newBranchForm.confirmPassword || ''}
+                    onChange={(e) => setNewBranchForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                    required
+                  />
+                  {newBranchPasswordError && <span style={{ color: '#ff453a', fontSize: '0.75rem', marginTop: '4px', display: 'block' }}>{newBranchPasswordError}</span>}
+                </div>
+              </div>
+              <button className="btn-primary" type="submit" style={{ width: '100%', justifyContent: 'center', marginTop: '1.5rem' }}>Create Mapped Branch & Inspector Credentials</button>
+            </form>
+          </div>
+
+          {/* Manage Branch Credentials Panel */}
+          <div className="panel" style={{ height: '100%', marginBottom: 0 }}>
+            <div className="panel-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
+              <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Key size={20} color="var(--color-primary)" /> Manage Branch Credentials</h3>
+            </div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
+              Current Username: <strong style={{ color: 'var(--color-text-light)' }}>{branchCredentials[branchForm.branch]?.username || `admin@${branchForm.branch}`}</strong>
+            </div>
+            <form onSubmit={handleUpdateBranchPassword}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                <div className="form-group">
+                  <label>Select Branch</label>
+                  <select className="form-control" value={branchForm.branch} onChange={(e) => setBranchForm({ branch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
+                    {branches.map(br => (
+                      <option key={br} value={br.toLowerCase()}>{br}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>New Username (Optional)</label>
+                  <input type="text" className="form-control" placeholder="Enter new username" value={branchForm.newUsername} onChange={(e) => setBranchForm({ ...branchForm, newUsername: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label>New Password</label>
+                  <input type="password" className="form-control" placeholder="Enter new password" required value={branchForm.newPassword} onChange={(e) => { setBranchForm({ ...branchForm, newPassword: e.target.value }); setBranchPasswordError(''); }} />
+                </div>
+                <div className="form-group">
+                  <label>Confirm Password</label>
+                  <input type="password" className="form-control" placeholder="Confirm new password" required value={branchForm.confirmPassword} onChange={(e) => { setBranchForm({ ...branchForm, confirmPassword: e.target.value }); setBranchPasswordError(''); }} />
+                  {branchPasswordError && (
+                    <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{branchPasswordError}</div>
+                  )}
+                </div>
+              </div>
+              <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1.5rem' }}>Save Branch Credentials</button>
+            </form>
+          </div>
         </div>
 
         {/* Branches Grid / List */}
@@ -5639,7 +6295,6 @@ function App() {
                   <th>Students Roster</th>
                   <th>Staff / Inspectors</th>
                   <th>Type</th>
-                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -5649,7 +6304,7 @@ function App() {
                   const cred = branchCredentials[bKey];
                   const studentCount = students.filter(s => s.branch && s.branch.toLowerCase() === bKey).length;
                   const adminCount = adminsList.filter(a => a.branch && a.branch.toLowerCase() === bKey).length;
-                  
+
                   return (
                     <tr key={b}>
                       <td data-label="Branch Name" style={{ fontWeight: 600, color: 'white' }}>{b}</td>
@@ -5673,29 +6328,6 @@ function App() {
                           <span className="badge" style={{ background: 'rgba(48, 209, 88, 0.15)', color: '#30d158' }}>Custom Config</span>
                         )}
                       </td>
-                      <td data-label="Actions">
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button
-                            className="btn-outline-primary btn-small"
-                            onClick={() => {
-                              const newName = prompt(`Rename branch "${b}":`, b);
-                              if (newName && newName !== b) {
-                                handleEditCustomBranch(b, newName);
-                              }
-                            }}
-                          >
-                            Rename
-                          </button>
-                          {!isDefault && (
-                            <button
-                              className="btn-danger btn-small"
-                              onClick={() => handleDeleteCustomBranch(b)}
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </div>
-                      </td>
                     </tr>
                   );
                 })}
@@ -5710,7 +6342,9 @@ function App() {
 
   const renderBatchesPage = () => {
     const isSuper = isAdminUser(loggedInUser);
-    if (!isSuper) {
+    const isBranchAdm = isBranchAdmin(loggedInUser);
+    const hasAccess = isSuper || isBranchAdm;
+    if (!hasAccess) {
       return (
         <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
           <h3 className="panel-title" style={{ color: '#E50914' }}>Access Denied</h3>
@@ -5721,7 +6355,7 @@ function App() {
 
     return (
       <div className="batches-view-container" style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-        
+
         {/* Stat Cards */}
         <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
           <div className="stat-card">
@@ -5747,78 +6381,139 @@ function App() {
           </div>
         </div>
 
-        {/* Add Batch Card */}
-        <div className="panel">
-          <div className="panel-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
-            <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><CalendarDays size={20} color="var(--color-primary)" /> Configure New Batch Settings</h3>
-          </div>
-          <form onSubmit={handleAddBatch}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
-              <div className="form-group">
-                <label>Batch Name (e.g. Batch 4)</label>
-                <input
-                  type="text"
-                  placeholder="Enter batch name"
-                  className="form-control"
-                  value={newBatchForm.name}
-                  onChange={(e) => setNewBatchForm(prev => ({ ...prev, name: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label>Schedule Pattern (e.g. Mon-Fri or Sun-Wed)</label>
-                <input
-                  type="text"
-                  placeholder="Schedule Pattern"
-                  className="form-control"
-                  value={newBatchForm.schedule}
-                  onChange={(e) => setNewBatchForm(prev => ({ ...prev, schedule: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label>Assigned Branch</label>
-                <select
-                  className="form-control"
-                  value={newBatchForm.branch}
-                  disabled={!isSuper}
-                  onChange={(e) => setNewBatchForm(prev => ({ ...prev, branch: e.target.value }))}
-                >
-                  {isSuper ? (
-                    branches.map(b => (
-                      <option key={b} value={b.toLowerCase()}>{b}</option>
-                    ))
-                  ) : (
-                    <option value={getLoggedInUserBranch().toLowerCase()}>{getLoggedInUserBranch()}</option>
-                  )}
-                </select>
-              </div>
-              <div className="form-group">
-                <label>Coordinator Password</label>
-                <input
-                  type="password"
-                  placeholder="••••••••"
-                  className="form-control"
-                  value={newBatchForm.password}
-                  onChange={(e) => setNewBatchForm(prev => ({ ...prev, password: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label>Confirm Password</label>
-                <input
-                  type="password"
-                  placeholder="••••••••"
-                  className="form-control"
-                  value={newBatchForm.confirmPassword || ''}
-                  onChange={(e) => setNewBatchForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
-                  required
-                />
-                {newBatchPasswordError && <span style={{ color: '#ff453a', fontSize: '0.75rem', marginTop: '4px', display: 'block' }}>{newBatchPasswordError}</span>}
-              </div>
+        {/* Batch Configuration and Credentials Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '2rem' }}>
+          {/* Add Batch Card */}
+          <div className="panel" style={{ height: '100%', marginBottom: 0 }}>
+            <div className="panel-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
+              <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><CalendarDays size={20} color="var(--color-primary)" /> Configure New Batch Settings</h3>
             </div>
-            <button className="btn-primary" type="submit">Create Configured Batch & Mapped Coordinator Account</button>
-          </form>
+            <form onSubmit={handleAddBatch}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                <div className="form-group">
+                  <label>Batch Name (e.g. Batch 4)</label>
+                  <input
+                    type="text"
+                    placeholder="Enter batch name"
+                    className="form-control"
+                    value={newBatchForm.name}
+                    onChange={(e) => setNewBatchForm(prev => ({ ...prev, name: e.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Schedule Pattern (e.g. Mon-Fri or Sun-Wed)</label>
+                  <input
+                    type="text"
+                    placeholder="Schedule Pattern"
+                    className="form-control"
+                    value={newBatchForm.schedule}
+                    onChange={(e) => setNewBatchForm(prev => ({ ...prev, schedule: e.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Assigned Branch</label>
+                  <select
+                    className="form-control"
+                    value={newBatchForm.branch}
+                    disabled={!isSuper}
+                    onChange={(e) => setNewBatchForm(prev => ({ ...prev, branch: e.target.value }))}
+                  >
+                    {isSuper ? (
+                      branches.map(b => (
+                        <option key={b} value={b.toLowerCase()}>{b}</option>
+                      ))
+                    ) : (
+                      <option value={getLoggedInUserBranch().toLowerCase()}>{getLoggedInUserBranch()}</option>
+                    )}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Coordinator Password</label>
+                  <input
+                    type="password"
+                    placeholder="••••••••"
+                    className="form-control"
+                    value={newBatchForm.password}
+                    onChange={(e) => setNewBatchForm(prev => ({ ...prev, password: e.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Confirm Password</label>
+                  <input
+                    type="password"
+                    placeholder="••••••••"
+                    className="form-control"
+                    value={newBatchForm.confirmPassword || ''}
+                    onChange={(e) => setNewBatchForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                    required
+                  />
+                  {newBatchPasswordError && <span style={{ color: '#ff453a', fontSize: '0.75rem', marginTop: '4px', display: 'block' }}>{newBatchPasswordError}</span>}
+                </div>
+              </div>
+              <button className="btn-primary" type="submit" style={{ width: '100%', justifyContent: 'center', marginTop: '1.5rem' }}>Create Configured Batch & Mapped Coordinator Account</button>
+            </form>
+          </div>
+
+          {/* Manage Batch Credentials Panel */}
+          <div className="panel" style={{ height: '100%', marginBottom: 0 }}>
+            <div className="panel-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
+              <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Key size={20} color="var(--color-primary)" /> Manage Batch Credentials</h3>
+            </div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
+              Current Username: <strong style={{ color: 'var(--color-text-light)' }}>{batchCredentials[`${batchForm.branch}_${batchForm.batch}`]?.username || `${batchForm.batch}@${batchForm.branch}`}</strong>
+            </div>
+            <form onSubmit={handleUpdateBatchPassword}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                <div className="form-group">
+                  <label>Select Branch</label>
+                  <select
+                    className="form-control"
+                    value={batchForm.branch}
+                    disabled={!isSuper}
+                    onChange={(e) => setBatchForm({ ...batchForm, branch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}
+                  >
+                    {isSuper ? (
+                      branches.map(br => (
+                        <option key={br} value={br.toLowerCase()}>{br}</option>
+                      ))
+                    ) : (
+                      <option value={getLoggedInUserBranch().toLowerCase()}>{getLoggedInUserBranch()}</option>
+                    )}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Select Batch</label>
+                  <select className="form-control" value={batchForm.batch} onChange={(e) => setBatchForm({ ...batchForm, batch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
+                    {batchOptions.filter(opt => {
+                      if (DEFAULT_BATCH_OPTIONS.some(d => d.id === opt.id)) return true;
+                      return batchCredentials[`${batchForm.branch.toLowerCase()}_${opt.id}`] !== undefined;
+                    }).map(opt => (
+                      <option key={opt.id} value={opt.id}>{opt.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>New Username (Optional)</label>
+                  <input type="text" className="form-control" placeholder="Enter new username" value={batchForm.newUsername} onChange={(e) => setBatchForm({ ...batchForm, newUsername: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label>New Password</label>
+                  <input type="password" className="form-control" placeholder="Enter new password" required value={batchForm.newPassword} onChange={(e) => { setBatchForm({ ...batchForm, newPassword: e.target.value }); setBatchPasswordError(''); }} />
+                </div>
+                <div className="form-group">
+                  <label>Confirm Password</label>
+                  <input type="password" className="form-control" placeholder="Confirm new password" required value={batchForm.confirmPassword} onChange={(e) => { setBatchForm({ ...batchForm, confirmPassword: e.target.value }); setBatchPasswordError(''); }} />
+                  {branchPasswordError && (
+                    <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{branchPasswordError}</div>
+                  )}
+                </div>
+              </div>
+              <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1.5rem' }}>Save Batch Credentials</button>
+            </form>
+          </div>
         </div>
 
         {/* Batches List Table */}
@@ -5835,19 +6530,18 @@ function App() {
                   <th>Mapped Coordinator Accounts</th>
                   <th>Students Active</th>
                   <th>Type</th>
-                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {batchOptions.filter(b => {
                   const isDefault = DEFAULT_BATCH_OPTIONS.some(opt => opt.id === b.id);
                   if (isSuper) return true;
-                  
+
                   const branchKey = getLoggedInUserBranch().toLowerCase();
                   if (isDefault) {
                     return batchCredentials[`${branchKey}_${b.id}`] !== undefined;
                   }
-                  
+
                   return Object.keys(batchCredentials).some(key => {
                     const parts = key.split('_');
                     return parts[0].toLowerCase() === branchKey && parts.slice(1).join('_') === b.id;
@@ -5855,7 +6549,7 @@ function App() {
                 }).map((b) => {
                   const isDefault = DEFAULT_BATCH_OPTIONS.some(opt => opt.id === b.id);
                   const studentCount = students.filter(s => s.batch === b.id || s.schedule === b.schedule).length;
-                  
+
                   // Collect mapped credentials across branches
                   const matchedCreds = [];
                   for (const [key, val] of Object.entries(batchCredentials)) {
@@ -5888,18 +6582,6 @@ function App() {
                           <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}>System Default</span>
                         ) : (
                           <span className="badge" style={{ background: 'rgba(48, 209, 88, 0.15)', color: '#30d158' }}>Custom Config</span>
-                        )}
-                      </td>
-                      <td data-label="Actions">
-                        {!isDefault ? (
-                          <button
-                            className="btn-danger btn-small"
-                            onClick={() => handleDeleteCustomBatch(b.id, b.name)}
-                          >
-                            Delete
-                          </button>
-                        ) : (
-                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No Actions available</span>
                         )}
                       </td>
                     </tr>
@@ -5938,7 +6620,7 @@ function App() {
     // Filter logic
     const filteredAdmins = scopedAdmins.filter(admin => {
       // Search
-      const searchMatch = 
+      const searchMatch =
         admin.username.toLowerCase().includes(adminSearchQuery.toLowerCase()) ||
         (admin.fullName && admin.fullName.toLowerCase().includes(adminSearchQuery.toLowerCase())) ||
         (admin.employeeId && admin.employeeId.toLowerCase().includes(adminSearchQuery.toLowerCase())) ||
@@ -5968,7 +6650,7 @@ function App() {
 
     return (
       <div className="admins-view-container" style={{ maxWidth: '1100px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-        
+
         {/* Stat Cards */}
         <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
           <div className="stat-card">
@@ -6256,7 +6938,7 @@ function App() {
                     </select>
                   </div>
                 </div>
-                
+
                 {newAdminForm.role !== 'superadmin' && (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                     <div className="form-group">
@@ -6544,7 +7226,7 @@ function App() {
 
     const handleLogoutAllSessions = () => {
       const currentToken = getSessionToken();
-      
+
       if (window.confirm("Do you want to terminate all OTHER active sessions? (You will remain logged in)")) {
         setSettingsError('');
         setSettingsSuccess('');
@@ -7219,238 +7901,6 @@ function App() {
             </div>
           )}
         </div>
-
-        {/* Coordinator Passwords Management */}
-        {(isSuper || isBranchAdm) && (
-          <div className={isSuper ? "grid-2-col" : ""} style={{ gap: '2rem', marginBottom: '2rem' }}>
-            {/* Branch Passwords */}
-            {isSuper && (
-              <div className="panel">
-                <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-                  <h3 className="panel-title">Manage Branch Credentials</h3>
-                </div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
-                  Current Username: <strong style={{ color: 'var(--color-text-light)' }}>{branchCredentials[branchForm.branch]?.username || `admin@${branchForm.branch}`}</strong>
-                </div>
-                <form onSubmit={handleUpdateBranchPassword}>
-                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                    <label>Select Branch</label>
-                    <select className="form-control" value={branchForm.branch} onChange={(e) => setBranchForm({ branch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
-                      {branches.map(br => (
-                        <option key={br} value={br.toLowerCase()}>{br}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                    <label>New Username (Optional)</label>
-                    <input type="text" className="form-control" placeholder="Enter new username" value={branchForm.newUsername} onChange={(e) => setBranchForm({ ...branchForm, newUsername: e.target.value })} />
-                  </div>
-                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                    <label>New Password</label>
-                    <input type="password" className="form-control" placeholder="Enter new password" required value={branchForm.newPassword} onChange={(e) => { setBranchForm({ ...branchForm, newPassword: e.target.value }); setBranchPasswordError(''); }} />
-                  </div>
-                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                    <label>Confirm Password</label>
-                    <input type="password" className="form-control" placeholder="Confirm new password" required value={branchForm.confirmPassword} onChange={(e) => { setBranchForm({ ...branchForm, confirmPassword: e.target.value }); setBranchPasswordError(''); }} />
-                    {branchPasswordError && (
-                      <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{branchPasswordError}</div>
-                    )}
-                  </div>
-                  <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Save Branch Credentials</button>
-                </form>
-              </div>
-            )}
-
-            {/* Batch Passwords */}
-            <div className="panel">
-              <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-                <h3 className="panel-title">Manage Batch Credentials</h3>
-              </div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
-                Current Username: <strong style={{ color: 'var(--color-text-light)' }}>{batchCredentials[`${batchForm.branch}_${batchForm.batch}`]?.username || `${batchForm.batch}@${batchForm.branch}`}</strong>
-              </div>
-              <form onSubmit={handleUpdateBatchPassword}>
-                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                  <label>Select Branch</label>
-                  <select
-                    className="form-control"
-                    value={batchForm.branch}
-                    disabled={!isSuper}
-                    onChange={(e) => setBatchForm({ ...batchForm, branch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}
-                  >
-                    {isSuper ? (
-                      branches.map(br => (
-                        <option key={br} value={br.toLowerCase()}>{br}</option>
-                      ))
-                    ) : (
-                      <option value={getLoggedInUserBranch().toLowerCase()}>{getLoggedInUserBranch()}</option>
-                    )}
-                  </select>
-                </div>
-                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                  <label>Select Batch</label>
-                  <select className="form-control" value={batchForm.batch} onChange={(e) => setBatchForm({ ...batchForm, batch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
-                    {batchOptions.filter(opt => {
-                      if (DEFAULT_BATCH_OPTIONS.some(d => d.id === opt.id)) return true;
-                      return batchCredentials[`${batchForm.branch.toLowerCase()}_${opt.id}`] !== undefined;
-                    }).map(opt => (
-                      <option key={opt.id} value={opt.id}>{opt.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                  <label>New Username (Optional)</label>
-                  <input type="text" className="form-control" placeholder="Enter new username" value={batchForm.newUsername} onChange={(e) => setBatchForm({ ...batchForm, newUsername: e.target.value })} />
-                </div>
-                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                  <label>New Password</label>
-                  <input type="password" className="form-control" placeholder="Enter new password" required value={batchForm.newPassword} onChange={(e) => { setBatchForm({ ...batchForm, newPassword: e.target.value }); setBatchPasswordError(''); }} />
-                </div>
-                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                  <label>Confirm Password</label>
-                  <input type="password" className="form-control" placeholder="Confirm new password" required value={batchForm.confirmPassword} onChange={(e) => { setBatchForm({ ...batchForm, confirmPassword: e.target.value }); setBatchPasswordError(''); }} />
-                  {batchPasswordError && (
-                    <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{batchPasswordError}</div>
-                  )}
-                </div>
-                <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Save Batch Credentials</button>
-              </form>
-            </div>
-          </div>
-        )}
-
-            {/* Manage Branches & Batches Options */}
-            {(isSuper || isBranchAdm) && (
-              <div className={isSuper ? "grid-2-col" : ""} style={{ gap: '2rem', marginTop: '2rem' }}>
-                {/* Branch List and Add Form */}
-                {isSuper && (
-                  <div className="panel">
-                    <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-                      <h3 className="panel-title">Add & Manage Branches</h3>
-                    </div>
-
-                    <form onSubmit={handleAddBranch} style={{ marginBottom: '2rem' }}>
-                      <div className="form-group" style={{ marginBottom: '1rem' }}>
-                        <label>Branch Name</label>
-                        <input
-                          type="text"
-                          className="form-control"
-                          placeholder="e.g. Vatakara"
-                          value={newBranchForm.name}
-                          onChange={(e) => setNewBranchForm({ ...newBranchForm, name: e.target.value })}
-                          required
-                        />
-                      </div>
-                      <div className="form-group" style={{ marginBottom: '1rem' }}>
-                        <label>Password</label>
-                        <input
-                          type="password"
-                          className="form-control"
-                          placeholder="Enter password"
-                          value={newBranchForm.password || ''}
-                          onChange={(e) => { setNewBranchForm({ ...newBranchForm, password: e.target.value }); setNewBranchPasswordError(''); }}
-                          required
-                        />
-                      </div>
-                      <div className="form-group" style={{ marginBottom: '1rem' }}>
-                        <label>Confirm Password</label>
-                        <input
-                          type="password"
-                          className="form-control"
-                          placeholder="Confirm password"
-                          value={newBranchForm.confirmPassword || ''}
-                          onChange={(e) => { setNewBranchForm({ ...newBranchForm, confirmPassword: e.target.value }); setNewBranchPasswordError(''); }}
-                          required
-                        />
-                        {newBranchPasswordError && (
-                          <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{newBranchPasswordError}</div>
-                        )}
-                      </div>
-                      <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Branch</button>
-                    </form>
-
-
-                  </div>
-                )}
-
-                {/* Batch List and Add Form */}
-                <div className="panel">
-                  <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-                    <h3 className="panel-title">Add & Manage Batches</h3>
-                  </div>
-
-                  <form onSubmit={handleAddBatch} style={{ marginBottom: '2rem' }}>
-                    <div className="form-group" style={{ marginBottom: '1rem' }}>
-                      <label>Batch Name</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        placeholder="e.g. Batch 4"
-                        value={newBatchForm.name}
-                        onChange={(e) => setNewBatchForm({ ...newBatchForm, name: e.target.value })}
-                        required
-                      />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: '1rem' }}>
-                      <label>Schedule Pattern</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        placeholder="e.g. Sat-Sun"
-                        value={newBatchForm.schedule}
-                        onChange={(e) => setNewBatchForm({ ...newBatchForm, schedule: e.target.value })}
-                        required
-                      />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: '1rem' }}>
-                      <label>Select Branch</label>
-                      <select
-                        className="form-control"
-                        value={newBatchForm.branch}
-                        disabled={!isSuper}
-                        onChange={(e) => setNewBatchForm({ ...newBatchForm, branch: e.target.value })}
-                      >
-                        {isSuper ? (
-                          branches.map(br => (
-                            <option key={br} value={br.toLowerCase()}>{br}</option>
-                          ))
-                        ) : (
-                          <option value={getLoggedInUserBranch().toLowerCase()}>{getLoggedInUserBranch()}</option>
-                        )}
-                      </select>
-                    </div>
-                    <div className="form-group" style={{ marginBottom: '1rem' }}>
-                      <label>Password</label>
-                      <input
-                        type="password"
-                        className="form-control"
-                        placeholder="Enter password"
-                        value={newBatchForm.password || ''}
-                        onChange={(e) => { setNewBatchForm({ ...newBatchForm, password: e.target.value }); setNewBatchPasswordError(''); }}
-                        required
-                      />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: '1rem' }}>
-                      <label>Confirm Password</label>
-                      <input
-                        type="password"
-                        className="form-control"
-                        placeholder="Confirm password"
-                        value={newBatchForm.confirmPassword || ''}
-                        onChange={(e) => { setNewBatchForm({ ...newBatchForm, confirmPassword: e.target.value }); setNewBatchPasswordError(''); }}
-                        required
-                      />
-                      {newBatchPasswordError && (
-                        <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{newBatchPasswordError}</div>
-                      )}
-                    </div>
-                    <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Create Batch</button>
-                  </form>
-
-
-                </div>
-              </div>
-            )}
       </div>
     );
   };
@@ -7458,8 +7908,20 @@ function App() {
   // --- Admin Login View ---
   const renderLogin = () => {
     return (
-      <div className="login-layout" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', overflowY: 'auto', padding: '1rem 0.5rem' }}>
+      <div className={`login-layout ${isMaintenanceUpcoming ? 'has-maintenance-banner' : ''} ${systemAlertMessage ? 'has-broadcast-banner' : ''}`} style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', overflowY: 'auto', padding: '1rem 0.5rem' }}>
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(5,5,5,0.85)' }}></div>
+        {systemAlertMessage && (
+          <div className="broadcast-alert-banner" style={{ zIndex: 100 }}>
+            <Bell size={16} className="shake-icon" />
+            <span>{systemAlertMessage}</span>
+          </div>
+        )}
+        {isMaintenanceUpcoming && (
+          <div className="maintenance-alert-banner" style={{ zIndex: 100, top: systemAlertMessage ? '35px' : '0px' }}>
+            <AlertTriangle size={18} className="pulse-icon" />
+            <span>Upcoming Maintenance: Portal login will be restricted from {formatMaintenanceTime(maintenanceStart)} to {formatMaintenanceTime(maintenanceEnd)}.</span>
+          </div>
+        )}
         <div className="login-grid-overlay"></div>
         <div className="login-bg-glows">
           <div className="login-glow-1"></div>
@@ -7642,8 +8104,20 @@ function App() {
 
   // --- Admin Login View ---
   const renderSuperAdminLogin = () => (
-    <div className="login-layout" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', overflowY: 'auto', padding: '1rem 0.5rem' }}>
+    <div className={`login-layout ${isMaintenanceUpcoming ? 'has-maintenance-banner' : ''} ${systemAlertMessage ? 'has-broadcast-banner' : ''}`} style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', overflowY: 'auto', padding: '1rem 0.5rem' }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(5,5,5,0.85)' }}></div>
+      {systemAlertMessage && (
+        <div className="broadcast-alert-banner" style={{ zIndex: 100 }}>
+          <Bell size={16} className="shake-icon" />
+          <span>{systemAlertMessage}</span>
+        </div>
+      )}
+      {isMaintenanceUpcoming && (
+        <div className="maintenance-alert-banner" style={{ zIndex: 100, top: systemAlertMessage ? '35px' : '0px' }}>
+          <AlertTriangle size={18} className="pulse-icon" />
+          <span>Upcoming Maintenance: Portal login will be restricted from {formatMaintenanceTime(maintenanceStart)} to {formatMaintenanceTime(maintenanceEnd)}.</span>
+        </div>
+      )}
       <div className="login-grid-overlay"></div>
       <div className="login-bg-glows">
         <div className="login-glow-1"></div>
@@ -8095,28 +8569,10 @@ function App() {
             <TrendingUp className="nav-icon" /> <span>Performance</span>
           </a>
           <div style={{ flex: 1 }}></div>
-          {isAdminUser(loggedInUser) && (
-            <>
-              <a className={`nav-item ${currentView === 'branches-list' ? 'active' : ''}`} onClick={() => setCurrentView('branches-list')}>
-                <MapPin className="nav-icon" /> <span>Branches</span>
-              </a>
-              <a className={`nav-item ${currentView === 'batches-list' ? 'active' : ''}`} onClick={() => setCurrentView('batches-list')}>
-                <CalendarDays className="nav-icon" /> <span>Batches</span>
-              </a>
-              <a className={`nav-item ${currentView === 'admins-list' ? 'active' : ''}`} onClick={() => setCurrentView('admins-list')}>
-                <Shield className="nav-icon" /> <span>Admins</span>
-              </a>
-              <a className={`nav-item ${currentView === 'credentials-list' ? 'active' : ''}`} onClick={() => setCurrentView('credentials-list')}>
-                <Lock className="nav-icon" /> <span>All Credentials</span>
-              </a>
-            </>
-          )}
-          {isBranchAdmin(loggedInUser) && (
-            <>
-              <a className={`nav-item ${currentView === 'admins-list' ? 'active' : ''}`} onClick={() => setCurrentView('admins-list')}>
-                <Shield className="nav-icon" /> <span>Coordinators</span>
-              </a>
-            </>
+          {(isAdminUser(loggedInUser) || isBranchAdmin(loggedInUser)) && (
+            <a className={`nav-item ${currentView === 'credentials-list' ? 'active' : ''}`} onClick={() => setCurrentView('credentials-list')}>
+              <Lock className="nav-icon" /> <span>Branch & Batch Mapping</span>
+            </a>
           )}
           {hasSettingsAccess(loggedInUser) && (
             <a className={`nav-item ${currentView === 'settings' ? 'active' : ''}`} onClick={() => setCurrentView('settings')}>
@@ -8147,6 +8603,24 @@ function App() {
       </aside>
 
       <main className="main-content">
+        {isSystemUnderMaintenance && (
+          <div className="maintenance-alert-banner-static">
+            <AlertTriangle size={18} className="pulse-icon" />
+            <span>System Alert: The application is currently under maintenance. Regular actions are locked.</span>
+          </div>
+        )}
+        {isMaintenanceUpcoming && (
+          <div className="maintenance-alert-banner-static" style={{ background: 'linear-gradient(90deg, #ff9f0a, #ffc700)', color: '#000', marginBottom: '1rem' }}>
+            <AlertTriangle size={18} className="pulse-icon" />
+            <span><strong>Upcoming Maintenance Notice:</strong> Portal login will be restricted from {formatMaintenanceTime(maintenanceStart)} to {formatMaintenanceTime(maintenanceEnd)}. Please save your work beforehand.</span>
+          </div>
+        )}
+        {systemAlertMessage && (
+          <div className="broadcast-alert-banner-static">
+            <Bell size={16} className="shake-icon" />
+            <span>Announcement: {systemAlertMessage}</span>
+          </div>
+        )}
         <header className="header">
           <div className="header-main-row">
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -8160,10 +8634,7 @@ function App() {
                 {currentView === 'reminders' && 'Alerts & Reminders'}
                 {currentView === 'performance' && 'Student Performance'}
                 {currentView === 'settings' && 'Account Settings'}
-                {currentView === 'credentials-list' && 'System Accounts & Credentials'}
-                {currentView === 'branches-list' && 'Branch Management'}
-                {currentView === 'batches-list' && 'Batch Management'}
-                {currentView === 'admins-list' && (isBranchAdmin(loggedInUser) ? 'Coordinator Accounts' : 'Admin User Management')}
+                {currentView === 'credentials-list' && 'Branch & Batch Mapping'}
               </h1>
             </div>
 
@@ -8313,10 +8784,10 @@ function App() {
                                     {student.name.charAt(0)}
                                   </div>
                                 )}
-                                <span style={{ 
-                                  fontWeight: 500, 
-                                  color: student.status === 'Inactive' ? 'var(--color-text-muted)' : '#E50914', 
-                                  textDecoration: 'underline' 
+                                <span style={{
+                                  fontWeight: 500,
+                                  color: student.status === 'Inactive' ? 'var(--color-text-muted)' : '#E50914',
+                                  textDecoration: 'underline'
                                 }}>
                                   {student.name}
                                 </span>
@@ -8365,9 +8836,6 @@ function App() {
           {currentView === 'performance' && renderPerformance()}
           {currentView === 'settings' && renderSettings()}
           {currentView === 'credentials-list' && renderCredentialsList()}
-          {currentView === 'branches-list' && renderBranchesPage()}
-          {currentView === 'batches-list' && renderBatchesPage()}
-          {currentView === 'admins-list' && renderAdminsPage()}
         </div>
       </main>
 
@@ -9111,6 +9579,183 @@ function App() {
 
       {renderEditCredentialModal()}
       {renderUserDetailModal()}
+
+      {/* Floating Help Button */}
+      {loggedInUser && (
+        <button
+          onClick={() => {
+            setIsHelpModalOpen(true);
+            setHelpSubmitFeedback(null);
+          }}
+          className="help-float-btn"
+          title="Report an Issue / Get Help"
+        >
+          <MessageCircle size={20} />
+          <span>Help</span>
+        </button>
+      )}
+
+      {/* Help/Support Ticket Submission Modal */}
+      {isHelpModalOpen && (
+        <div className="modal-overlay" style={{ zIndex: 1200 }}>
+          <div className="modal-content help-modal">
+            <div className="panel-header" style={{ marginBottom: '1rem' }}>
+              <h2 className="panel-title">Report an Issue / Support</h2>
+              <button className="btn-icon" onClick={() => { setIsHelpModalOpen(false); setHelpModalTab('new'); }}>
+                <X size={24} />
+              </button>
+            </div>
+
+            {/* Sub Tabs inside Help Modal */}
+            <div style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
+              <button
+                type="button"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: helpModalTab === 'new' ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                  fontWeight: 600,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  padding: '4px 0',
+                  borderBottom: helpModalTab === 'new' ? '2px solid var(--color-primary)' : '2px solid transparent',
+                  transition: 'all 0.2s'
+                }}
+                onClick={() => setHelpModalTab('new')}
+              >
+                New Report
+              </button>
+              <button
+                type="button"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: helpModalTab === 'history' ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                  fontWeight: 600,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  padding: '4px 0',
+                  borderBottom: helpModalTab === 'history' ? '2px solid var(--color-primary)' : '2px solid transparent',
+                  transition: 'all 0.2s'
+                }}
+                onClick={() => {
+                  setHelpModalTab('history');
+                  loadUserHelpReports();
+                }}
+              >
+                My Tickets ({userHelpReports.length})
+              </button>
+            </div>
+
+            {helpModalTab === 'new' ? (
+              <form onSubmit={handleSubmitHelp}>
+                <div className="form-group">
+                  <label>Issue Description</label>
+                  <textarea
+                    className="form-control"
+                    style={{ minHeight: '120px', resize: 'vertical' }}
+                    required
+                    placeholder="Please describe the issue you are experiencing, or any help you need in detail..."
+                    value={helpDescription}
+                    onChange={(e) => setHelpDescription(e.target.value)}
+                    disabled={isSubmittingHelp}
+                  ></textarea>
+                </div>
+
+                {helpSubmitFeedback && (
+                  <div className={`feedback-alert ${helpSubmitFeedback.type}`}>
+                    {helpSubmitFeedback.type === 'success' ? (
+                      <CheckCircle size={18} />
+                    ) : (
+                      <AlertTriangle size={18} />
+                    )}
+                    <span>{helpSubmitFeedback.message}</span>
+                  </div>
+                )}
+
+                <div className="modal-actions" style={{ marginTop: '1rem' }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => { setIsHelpModalOpen(false); setHelpModalTab('new'); }}
+                    disabled={isSubmittingHelp}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn-primary"
+                    disabled={isSubmittingHelp}
+                  >
+                    {isSubmittingHelp ? 'Submitting...' : 'Submit Report'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div style={{ maxHeight: '350px', overflowY: 'auto', paddingRight: '4px' }}>
+                {loadingUserHelpReports ? (
+                  <div style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '2rem' }}>Loading tickets...</div>
+                ) : userHelpReports.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {userHelpReports.map(ticket => (
+                      <div
+                        key={ticket._id}
+                        style={{
+                          background: 'rgba(255,255,255,0.02)',
+                          border: '1px solid var(--glass-border)',
+                          borderRadius: '8px',
+                          padding: '12px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                            {new Date(ticket.createdAt).toLocaleString()}
+                          </span>
+                          <span
+                            className={`badge ${ticket.status === 'Resolved' ? 'badge-green' : 'badge-red'}`}
+                            style={{ fontSize: '0.65rem', padding: '2px 6px' }}
+                          >
+                            {ticket.status}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.85rem', color: '#fff', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          {ticket.issueDescription}
+                        </div>
+                        {ticket.deviceName && (
+                          <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+                            Device: {ticket.deviceName}
+                          </div>
+                        )}
+                        {ticket.developerReply && (
+                          <div style={{
+                            background: 'rgba(81, 207, 102, 0.08)',
+                            borderLeft: '3px solid #51CF66',
+                            padding: '8px 12px',
+                            marginTop: '8px',
+                            borderRadius: '4px',
+                            fontSize: '0.8rem',
+                            color: '#d1d1d6'
+                          }}>
+                            <span style={{ fontWeight: 600, color: '#51CF66', display: 'block', marginBottom: '2px' }}>Developer Reply:</span>
+                            {ticket.developerReply}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '2rem' }}>
+                    You have not submitted any help tickets yet.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
     </div>
   );

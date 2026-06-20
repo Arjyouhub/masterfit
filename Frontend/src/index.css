@@ -2226,3 +2226,358 @@ html.admin-html, body.admin-body {
   border-color: rgba(255, 69, 58, 0.2);
   color: #ff453a;
 }
+
+/* Floating Help Button */
+.help-float-btn {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(229, 9, 20, 0.25);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(229, 9, 20, 0.4);
+  color: #fff;
+  padding: 0.75rem 1.25rem;
+  border-radius: 50px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  box-shadow: 0 8px 32px rgba(229, 9, 20, 0.25);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.help-float-btn:hover {
+  background: rgba(229, 9, 20, 0.45);
+  border-color: rgba(229, 9, 20, 0.6);
+  transform: translateY(-3px) scale(1.05);
+  box-shadow: 0 12px 40px rgba(229, 9, 20, 0.45);
+}
+
+.help-float-btn:active {
+  transform: translateY(-1px) scale(0.98);
+}
+
+/* Help Modal CSS */
+.modal-content.help-modal {
+  max-width: 500px;
+}
+
+/* Feedback Alert styles */
+.feedback-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  border: 1px solid transparent;
+}
+
+.feedback-alert.success {
+  background: rgba(81, 207, 102, 0.1);
+  border-color: rgba(81, 207, 102, 0.2);
+  color: #51CF66;
+}
+
+.feedback-alert.error {
+  background: rgba(255, 107, 107, 0.1);
+  border-color: rgba(255, 107, 107, 0.2);
+  color: #FF6B6B;
+}
+
+@media (max-width: 768px) {
+  .help-float-btn {
+    bottom: 1.5rem;
+    right: 1.5rem;
+    padding: 0.6rem 1.1rem;
+    font-size: 0.8rem;
+  }
+}
+
+/* System Maintenance Banner - Floating Absolute */
+.maintenance-alert-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(90deg, #ff453a, #ff9f0a);
+  color: #fff;
+  padding: 0.6rem 1.2rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 4px 15px rgba(255, 69, 58, 0.4);
+  text-align: center;
+}
+
+/* System Maintenance Banner - Static block */
+.maintenance-alert-banner-static {
+  background: linear-gradient(90deg, #ff453a, #ff9f0a);
+  color: #fff;
+  padding: 0.75rem 1.5rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 4px 15px rgba(255, 69, 58, 0.2);
+  text-align: center;
+  border-radius: 8px;
+  margin: 1.25rem 3rem 0 3rem;
+  animation: pulseShadow 2s infinite ease-in-out;
+}
+
+@keyframes pulseShadow {
+  0% { box-shadow: 0 4px 15px rgba(255, 69, 58, 0.2); }
+  50% { box-shadow: 0 4px 25px rgba(255, 69, 58, 0.45); }
+  100% { box-shadow: 0 4px 15px rgba(255, 69, 58, 0.2); }
+}
+
+@keyframes pulseScale {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.pulse-icon {
+  animation: pulseScale 1.5s infinite ease-in-out;
+  display: inline-flex;
+}
+
+@media (max-width: 768px) {
+  .maintenance-alert-banner-static {
+    margin: 0.75rem;
+    padding: 0.6rem 1rem;
+    font-size: 0.8rem;
+  }
+  .maintenance-alert-banner {
+    padding: 0.5rem 0.85rem;
+    font-size: 0.75rem;
+  }
+}
+
+/* Maintenance Banner adjustments to push navbar and layout down */
+.public-layout.has-maintenance-banner {
+  padding-top: 35px;
+}
+
+.public-layout.has-maintenance-banner .public-nav {
+  top: 35px;
+}
+
+.login-layout.has-maintenance-banner {
+  padding-top: 35px;
+}
+
+@media (max-width: 768px) {
+  .public-layout.has-maintenance-banner {
+    padding-top: 30px;
+  }
+  .public-layout.has-maintenance-banner .public-nav {
+    top: 30px;
+  }
+  .login-layout.has-maintenance-banner {
+    padding-top: 30px;
+  }
+}
+
+/* Broadcast Announcement Banner - Floating Absolute */
+.broadcast-alert-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(90deg, #0a84ff, #30d158);
+  color: #fff;
+  padding: 0.6rem 1.2rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 4px 15px rgba(10, 132, 255, 0.4);
+  text-align: center;
+  transition: top 0.3s ease;
+}
+
+/* Broadcast Announcement Banner - Static block */
+.broadcast-alert-banner-static {
+  background: linear-gradient(90deg, #0a84ff, #30d158);
+  color: #fff;
+  padding: 0.75rem 1.5rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 4px 15px rgba(10, 132, 255, 0.2);
+  text-align: center;
+  border-radius: 8px;
+  margin: 1.25rem 3rem 0 3rem;
+}
+
+/* Layout offsets when broadcast/alert banner is active */
+.public-layout.has-broadcast-banner {
+  padding-top: 35px;
+}
+.public-layout.has-broadcast-banner .public-nav {
+  top: 35px;
+}
+.public-layout.has-maintenance-banner.has-broadcast-banner {
+  padding-top: 70px;
+}
+.public-layout.has-maintenance-banner.has-broadcast-banner .public-nav {
+  top: 70px;
+}
+
+.login-layout.has-broadcast-banner {
+  padding-top: 35px;
+}
+.login-layout.has-maintenance-banner.has-broadcast-banner {
+  padding-top: 70px;
+}
+
+@keyframes shake {
+  0% { transform: rotate(0); }
+  15% { transform: rotate(10deg); }
+  30% { transform: rotate(-10deg); }
+  45% { transform: rotate(5deg); }
+  60% { transform: rotate(-5deg); }
+  75% { transform: rotate(2deg); }
+  85% { transform: rotate(-2deg); }
+  100% { transform: rotate(0); }
+}
+
+.shake-icon {
+  animation: shake 2.5s infinite ease-in-out;
+  display: inline-flex;
+}
+
+@media (max-width: 768px) {
+  .broadcast-alert-banner-static {
+    margin: 0.75rem;
+    padding: 0.6rem 1rem;
+    font-size: 0.8rem;
+  }
+  .broadcast-alert-banner {
+    padding: 0.5rem 0.85rem;
+    font-size: 0.75rem;
+  }
+  .public-layout.has-broadcast-banner {
+    padding-top: 30px;
+  }
+  .public-layout.has-broadcast-banner .public-nav {
+    top: 30px;
+  }
+  .public-layout.has-maintenance-banner.has-broadcast-banner {
+    padding-top: 60px;
+  }
+  .public-layout.has-maintenance-banner.has-broadcast-banner .public-nav {
+    top: 60px;
+  }
+  .login-layout.has-broadcast-banner {
+    padding-top: 30px;
+  }
+  .login-layout.has-maintenance-banner.has-broadcast-banner {
+    padding-top: 60px;
+  }
+}
+
+/* Responsive Developer Panel styles for mobile devices */
+@media (max-width: 992px) {
+  .developer-panel {
+    flex-direction: column !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .dev-sidebar {
+    width: 100% !important;
+    height: auto !important;
+    border-right: none !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  }
+  .dev-sidebar-header {
+    padding: 1rem 1.5rem !important;
+  }
+  .dev-nav {
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    padding: 0.5rem 1rem !important;
+    gap: 8px !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .dev-nav-item {
+    padding: 0.5rem 1rem !important;
+    border-left: none !important;
+    border-bottom: 3px solid transparent !important;
+    display: inline-flex !important;
+    align-items: center;
+    gap: 8px !important;
+    flex-shrink: 0 !important;
+  }
+  .dev-nav-item.active {
+    border-bottom-color: #5e5ce6 !important;
+    background: rgba(94, 92, 230, 0.1) !important;
+  }
+  .dev-sidebar-footer {
+    display: none !important;
+  }
+  .dev-main {
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .dev-header {
+    height: auto !important;
+    padding: 1.25rem 1rem !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0.75rem !important;
+  }
+  .dev-body {
+    padding: 1rem !important;
+  }
+  .dev-table-container {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Custom styles for WebKit calendar and clock picker indicators in dark theme */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+/* Calendar input focus glow */
+input[type="datetime-local"].dev-input:focus {
+  border-color: #ff9f0a;
+  box-shadow: 0 0 8px rgba(255, 159, 10, 0.25);
+}
+
+
+
+
+

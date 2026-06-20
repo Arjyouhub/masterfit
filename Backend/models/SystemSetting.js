@@ -2,7 +2,10 @@ import mongoose from 'mongoose';
 
 const systemSettingSchema = new mongoose.Schema({
   configKey: { type: String, required: true, default: 'main', unique: true },
-  maintenanceMode: { type: Boolean, default: false },
+  maintenanceMode: { type: String, default: 'none' }, // 'none' | 'all' | 'branch' | 'batch' | 'admin'
+  maintenanceStart: { type: Date, default: null },
+  maintenanceEnd: { type: Date, default: null },
+  systemAlertMessage: { type: String, default: '' },
   sessionTimeoutMinutes: { type: Number, default: 60 },
   minPasswordLength: { type: Number, default: 6 },
   failedLoginThreshold: { type: Number, default: 5 },
