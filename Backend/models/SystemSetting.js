@@ -6,6 +6,8 @@ const systemSettingSchema = new mongoose.Schema({
   maintenanceStart: { type: Date, default: null },
   maintenanceEnd: { type: Date, default: null },
   systemAlertMessage: { type: String, default: '' },
+  systemUpdateNotification: { type: String, default: '' },
+  systemUpdateNotificationId: { type: String, default: '' },
   sessionTimeoutMinutes: { type: Number, default: 60 },
   minPasswordLength: { type: Number, default: 6 },
   failedLoginThreshold: { type: Number, default: 5 },

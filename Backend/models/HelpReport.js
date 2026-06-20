@@ -11,6 +11,7 @@ const helpReportSchema = new mongoose.Schema({
   ipAddress: { type: String, default: '' },
   status: { type: String, default: 'Pending' },
   developerReply: { type: String, default: '' },
+  seenByUser: { type: Boolean, default: false },
   resolvedAt: { type: Date }
 }, { timestamps: true });
 

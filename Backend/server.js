@@ -689,6 +689,12 @@ async function loadSettingsCache() {
     if (!cachedSettings.systemAlertMessage) {
       cachedSettings.systemAlertMessage = '';
     }
+    if (!cachedSettings.systemUpdateNotification) {
+      cachedSettings.systemUpdateNotification = '';
+    }
+    if (!cachedSettings.systemUpdateNotificationId) {
+      cachedSettings.systemUpdateNotificationId = '';
+    }
     if (!cachedSettings.maintenanceStart) {
       cachedSettings.maintenanceStart = null;
     }
@@ -1008,6 +1014,39 @@ app.get('/api/help-reports', authenticateSession, async (req, res) => {
   }
 });
 
+// Fetch unseen resolved help reports for the logged-in user
+app.get('/api/help-reports/unseen-resolved', authenticateSession, async (req, res) => {
+  try {
+    const reports = await HelpReport.find({
+      username: req.user.username.toLowerCase().trim(),
+      status: 'Resolved',
+      seenByUser: false
+    })
+      .sort({ updatedAt: -1 })
+      .lean();
+    res.json({ reports });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Mark a help report as seen/acknowledged by the user
+app.put('/api/help-reports/:id/seen', authenticateSession, async (req, res) => {
+  try {
+    const report = await HelpReport.findOneAndUpdate(
+      { _id: req.params.id, username: req.user.username.toLowerCase().trim() },
+      { seenByUser: true },
+      { new: true }
+    );
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+    res.json({ success: true, report });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Public endpoint to check system maintenance status & alerts
 app.get('/api/system/maintenance', async (req, res) => {
   try {
@@ -1032,7 +1071,9 @@ app.get('/api/system/maintenance', async (req, res) => {
       maintenanceEnd: cachedSettings.maintenanceEnd || null,
       isMaintenanceUpcoming: isUpcoming,
       isMaintenanceActive: isActive,
-      systemAlertMessage: cachedSettings.systemAlertMessage || ''
+      systemAlertMessage: cachedSettings.systemAlertMessage || '',
+      systemUpdateNotification: cachedSettings.systemUpdateNotification || '',
+      systemUpdateNotificationId: cachedSettings.systemUpdateNotificationId || ''
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1183,7 +1224,7 @@ app.post('/api/login', async (req, res) => {
       user.isLocked = false;
       await user.save();
 
-      return res.json({ success: true, username: user.username, token, role: user.role, branch: user.branch, batch: user.batch });
+      return res.json({ success: true, username: user.username, token, role: user.role, branch: user.branch, batch: user.batch, loginCount: user.loginCount });
     }
 
     // Password verification failed
@@ -1237,7 +1278,7 @@ app.get('/api/session/verify', async (req, res) => {
       // Validate user status
       const user = await User.findOne({ username: session.username }).lean();
       if (user && user.status === 'Active') {
-        return res.json({ success: true, username: session.username, role: user.role, branch: user.branch, batch: user.batch });
+        return res.json({ success: true, username: session.username, role: user.role, branch: user.branch, batch: user.batch, loginCount: user.loginCount });
       }
     }
     return res.status(401).json({ success: false, error: 'Session expired, disabled, or invalid' });
@@ -2680,7 +2721,7 @@ developerRouter.get('/settings', (req, res) => {
 // Developer settings POST
 developerRouter.post('/settings', async (req, res) => {
   try {
-    const { maintenanceMode, maintenanceStart, maintenanceEnd, systemAlertMessage, sessionTimeoutMinutes, minPasswordLength, failedLoginThreshold, failedLoginBlockTimeMinutes, logRetentionLimit } = req.body;
+    const { maintenanceMode, maintenanceStart, maintenanceEnd, systemAlertMessage, systemUpdateNotification, sessionTimeoutMinutes, minPasswordLength, failedLoginThreshold, failedLoginBlockTimeMinutes, logRetentionLimit } = req.body;
     
     // Validate inputs
     if (sessionTimeoutMinutes !== undefined && (isNaN(sessionTimeoutMinutes) || sessionTimeoutMinutes <= 0)) {
@@ -2708,6 +2749,12 @@ developerRouter.post('/settings', async (req, res) => {
     if (maintenanceStart !== undefined) settings.maintenanceStart = maintenanceStart ? new Date(maintenanceStart) : null;
     if (maintenanceEnd !== undefined) settings.maintenanceEnd = maintenanceEnd ? new Date(maintenanceEnd) : null;
     if (systemAlertMessage !== undefined) settings.systemAlertMessage = String(systemAlertMessage).trim();
+    
+    if (systemUpdateNotification !== undefined && systemUpdateNotification !== settings.systemUpdateNotification) {
+      settings.systemUpdateNotification = String(systemUpdateNotification).trim();
+      settings.systemUpdateNotificationId = Date.now().toString(); // Generate unique notification ID
+    }
+    
     if (sessionTimeoutMinutes !== undefined) settings.sessionTimeoutMinutes = parseInt(sessionTimeoutMinutes, 10);
     if (minPasswordLength !== undefined) settings.minPasswordLength = parseInt(minPasswordLength, 10);
     if (failedLoginThreshold !== undefined) settings.failedLoginThreshold = parseInt(failedLoginThreshold, 10);

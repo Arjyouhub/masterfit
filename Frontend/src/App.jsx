@@ -194,6 +194,8 @@ function App() {
     maintenanceMode: 'none',
     maintenanceStart: null,
     maintenanceEnd: null,
+    systemUpdateNotification: '',
+    systemUpdateNotificationId: '',
     sessionTimeoutMinutes: 30,
     minPasswordLength: 6,
     failedLoginThreshold: 5,
@@ -220,6 +222,10 @@ function App() {
   const [maintenanceStart, setMaintenanceStart] = useState(null);
   const [maintenanceEnd, setMaintenanceEnd] = useState(null);
   const [systemAlertMessage, setSystemAlertMessage] = useState('');
+  const [unseenResolvedReports, setUnseenResolvedReports] = useState([]);
+  const [activeUpdateNotification, setActiveUpdateNotification] = useState(null);
+  const [showWelcomeModal, setShowWelcomeModal] = useState(false);
+  const [userLoginCount, setUserLoginCount] = useState(null);
 
   // Developer resolving ticket modal states
   const [devResolvingTicketId, setDevResolvingTicketId] = useState(null);
@@ -846,6 +852,7 @@ function App() {
             setUserRole(data.role || '');
             setUserBranch(data.branch || '');
             setUserBatch(data.batch || '');
+            setUserLoginCount(data.loginCount);
           } else {
             throw new Error('Session invalid');
           }
@@ -1003,6 +1010,49 @@ function App() {
       }
     }
   }, [currentView, loggedInUser]);
+
+  const checkUnseenHelpReplies = () => {
+    const token = getSessionToken();
+    if (!token) return;
+    fetch(`${API_BASE_URL}/help-reports/unseen-resolved`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.reports && data.reports.length > 0) {
+          setUnseenResolvedReports(data.reports);
+        }
+      })
+      .catch(err => console.error("Error checking unseen help reports:", err));
+  };
+
+  const acknowledgeReportSeen = (reportId) => {
+    const token = getSessionToken();
+    if (!token) return;
+    fetch(`${API_BASE_URL}/help-reports/${reportId}/seen`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          setUnseenResolvedReports(prev => prev.filter(r => r._id !== reportId));
+        }
+      })
+      .catch(err => console.error("Error acknowledging report:", err));
+  };
+
+  const dismissUpdateNotification = () => {
+    if (activeUpdateNotification) {
+      localStorage.setItem('dismissed_update_id', activeUpdateNotification.id);
+      setActiveUpdateNotification(null);
+    }
+  };
 
   const toDatetimeLocal = (dateVal) => {
     if (!dateVal) return '';
@@ -1518,8 +1568,21 @@ function App() {
           setMaintenanceStart(data.maintenanceStart || null);
           setMaintenanceEnd(data.maintenanceEnd || null);
           setSystemAlertMessage(data.systemAlertMessage || '');
+          
+          if (loggedInUser && data.systemUpdateNotification && data.systemUpdateNotificationId) {
+            if (localStorage.getItem('dismissed_update_id') !== data.systemUpdateNotificationId) {
+              setActiveUpdateNotification({
+                message: data.systemUpdateNotification,
+                id: data.systemUpdateNotificationId
+              });
+            }
+          }
         })
         .catch(err => console.error("Error checking maintenance status:", err));
+
+      if (loggedInUser) {
+        checkUnseenHelpReplies();
+      }
     };
 
     checkMaintenance();
@@ -1532,6 +1595,12 @@ function App() {
       loadUserHelpReports();
     }
   }, [isHelpModalOpen, loggedInUser]);
+
+  useEffect(() => {
+    if (loggedInUser && userLoginCount === 1 && !sessionStorage.getItem('welcome_dismissed')) {
+      setShowWelcomeModal(true);
+    }
+  }, [loggedInUser, userLoginCount]);
 
   const handleUpdateBranchPassword = (e) => {
     e.preventDefault();
@@ -3920,6 +3989,29 @@ function App() {
               value={devSettings.systemAlertMessage || ''}
               onChange={(e) => setDevSettings({ ...devSettings, systemAlertMessage: e.target.value })}
               placeholder="e.g. Warning: Scheduled database backup on Sunday, 2 AM EST. System may experience brief drops."
+            ></textarea>
+          </div>
+
+          {/* System Release/Update Notification Message */}
+          <div className="form-group" style={{ margin: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <label style={{ color: '#fff', margin: 0 }}>System Release/Update Notification popup (Shown to logged-in users)</label>
+              {devSettings.systemUpdateNotification && (
+                <button
+                  type="button"
+                  onClick={() => setDevSettings({ ...devSettings, systemUpdateNotification: '' })}
+                  style={{ background: 'rgba(255, 69, 58, 0.15)', border: '1px solid rgba(255, 69, 58, 0.3)', color: '#ff453a', padding: '2px 8px', borderRadius: '4px', fontSize: '0.725rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <Trash2 size={12} /> Clear Notification
+                </button>
+              )}
+            </div>
+            <textarea
+              className="dev-input"
+              style={{ minHeight: '60px', resize: 'vertical' }}
+              value={devSettings.systemUpdateNotification || ''}
+              onChange={(e) => setDevSettings({ ...devSettings, systemUpdateNotification: e.target.value })}
+              placeholder="e.g. We have deployed custom dark theme calendar pickers and support reply notification popups!"
             ></textarea>
           </div>
 
@@ -8009,6 +8101,7 @@ function App() {
                       setUserRole(data.role || '');
                       setUserBranch(data.branch || '');
                       setUserBatch(data.batch || '');
+                      setUserLoginCount(data.loginCount);
                       const matchingBranch = branches.find(b => b.toLowerCase() === branchKey);
                       setBranchFilter(matchingBranch || 'All');
                       setLoginData({ username: '', password: '' });
@@ -8466,6 +8559,7 @@ function App() {
                     setUserRole(data.role || '');
                     setUserBranch(data.branch || '');
                     setUserBatch(data.batch || '');
+                    setUserLoginCount(data.loginCount);
                     setBranchFilter('All');
                     setLoginData({ username: '', password: '' });
                     setAppMode('admin');
@@ -9753,6 +9847,106 @@ function App() {
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Welcome Notification Modal for First Time Logins */}
+      {showWelcomeModal && (
+        <div className="modal-overlay" style={{ zIndex: 2000 }}>
+          <div className="modal-content glass-panel" style={{ maxWidth: '500px', padding: '2rem', textAlign: 'center', border: '1px solid rgba(255, 255, 255, 0.15)', background: 'rgba(5,5,5,0.95)', backdropFilter: 'blur(20px)' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem', color: 'var(--color-secondary)' }}>
+              <Award size={48} className="pulse-icon" />
+            </div>
+            <h2 style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, textTransform: 'uppercase', marginBottom: '1rem', color: '#fff' }}>Welcome to MASTER FIT Portal!</h2>
+            <p style={{ color: 'var(--color-text-muted)', fontSize: '0.925rem', lineHeight: '1.6', marginBottom: '1.5rem' }}>
+              We are excited to have you on board. Here is a quick overview of your tools:
+            </p>
+            <div style={{ textAlign: 'left', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '1rem', marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.85rem' }}>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <span style={{ color: 'var(--color-primary)', fontWeight: 'bold' }}>✓</span>
+                <span>Track branch and batch student attendance in real time.</span>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <span style={{ color: 'var(--color-primary)', fontWeight: 'bold' }}>✓</span>
+                <span>Submit help requests using the floating <strong>Help</strong> bubble.</span>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <span style={{ color: 'var(--color-primary)', fontWeight: 'bold' }}>✓</span>
+                <span>Get replies directly from developers for any issues reported.</span>
+              </div>
+            </div>
+            <button
+              className="btn-primary"
+              style={{ width: '100%', padding: '0.75rem', borderRadius: '8px' }}
+              onClick={() => {
+                sessionStorage.setItem('welcome_dismissed', 'true');
+                setShowWelcomeModal(false);
+              }}
+            >
+              Get Started
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* System Update / News Announcement Modal */}
+      {activeUpdateNotification && (
+        <div className="modal-overlay" style={{ zIndex: 1999 }}>
+          <div className="modal-content glass-panel" style={{ maxWidth: '500px', padding: '2rem', border: '1px solid rgba(10, 132, 255, 0.3)', background: 'rgba(5,5,5,0.95)', backdropFilter: 'blur(20px)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '1rem', color: '#0a84ff' }}>
+              <Bell size={32} className="shake-icon" />
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 800, textTransform: 'uppercase', fontSize: '1.4rem', color: '#fff' }}>System Update Notification</h2>
+            </div>
+            <p style={{ color: '#fff', fontSize: '0.95rem', lineHeight: '1.6', background: 'rgba(10, 132, 255, 0.05)', padding: '1rem', borderRadius: '8px', borderLeft: '4px solid #0a84ff', marginBottom: '1.5rem', whiteSpace: 'pre-wrap' }}>
+              {activeUpdateNotification.message}
+            </p>
+            <button
+              className="btn-primary"
+              style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', background: '#0a84ff' }}
+              onClick={dismissUpdateNotification}
+            >
+              Acknowledge & Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Help Resolved Support Notifications Modal */}
+      {unseenResolvedReports.length > 0 && (
+        <div className="modal-overlay" style={{ zIndex: 1998 }}>
+          <div className="modal-content glass-panel" style={{ maxWidth: '550px', padding: '2rem', border: '1px solid rgba(81, 207, 102, 0.3)', background: 'rgba(5,5,5,0.95)', backdropFilter: 'blur(20px)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '1rem', color: '#51CF66' }}>
+              <CheckCircle size={32} className="pulse-icon" />
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 800, textTransform: 'uppercase', fontSize: '1.4rem', color: '#fff' }}>Support Ticket Resolved</h2>
+            </div>
+            <p style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem', marginBottom: '1.25rem' }}>
+              A developer has reviewed and resolved your reported support ticket:
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '250px', overflowY: 'auto', marginBottom: '1.5rem' }}>
+              {unseenResolvedReports.map(report => (
+                <div key={report._id} style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '1rem' }}>
+                  <div style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)', fontStyle: 'italic', marginBottom: '6px' }}>
+                    " {report.issueDescription} "
+                  </div>
+                  <div style={{ background: 'rgba(81, 207, 102, 0.08)', borderLeft: '3px solid #51CF66', padding: '8px 12px', borderRadius: '4px', fontSize: '0.85rem', color: '#fff' }}>
+                    <span style={{ fontWeight: 600, color: '#51CF66', display: 'block', marginBottom: '2px' }}>Resolution Reply:</span>
+                    {report.developerReply}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ marginTop: '8px', fontSize: '0.75rem', padding: '4px 10px', background: 'rgba(81, 207, 102, 0.15)', border: '1px solid rgba(81, 207, 102, 0.3)', color: '#51CF66', cursor: 'pointer' }}
+                    onClick={() => acknowledgeReportSeen(report._id)}
+                  >
+                    Mark as Read
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', textAlign: 'center' }}>
+              Please review and mark each ticket resolution response as read.
+            </div>
           </div>
         </div>
       )}
