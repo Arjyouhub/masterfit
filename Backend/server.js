@@ -679,9 +679,15 @@ async function loadSettingsCache() {
       needsUpdate = true;
     }
     
+    if (!settings.systemUpdateNotification) {
+      settings.systemUpdateNotification = "Dear Users, we have launched a new Help & Support ticketing system! You can now report issues directly using the floating 'Help' button at the bottom-right. You will also receive notification popups containing developer replies as soon as your tickets are resolved.";
+      settings.systemUpdateNotificationId = "default-help-release";
+      needsUpdate = true;
+    }
+    
     if (needsUpdate) {
       await settings.save();
-      console.log('[Settings Cache] Legacy maintenanceMode corrected and saved to database.');
+      console.log('[Settings Cache] Legacy maintenanceMode corrected or default announcement populated, and saved to database.');
     }
     
     cachedSettings = settings.toObject();
