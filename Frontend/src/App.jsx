@@ -148,6 +148,18 @@ function App() {
   const [rawCredentials, setRawCredentials] = useState(null);
   const [loadingRawCreds, setLoadingRawCreds] = useState(false);
 
+  // Global Notifications States
+  const [notifications, setNotifications] = useState([]);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+  const [newNotificationForm, setNewNotificationForm] = useState({ title: '', message: '', type: 'general' });
+  const [notificationSuccess, setNotificationSuccess] = useState('');
+  const [notificationError, setNotificationError] = useState('');
+  const [activeAnnouncementPopup, setActiveAnnouncementPopup] = useState(null);
+  const [announcementForm, setAnnouncementForm] = useState({ title: '', message: '' });
+  const [announcementSuccess, setAnnouncementSuccess] = useState('');
+  const [announcementError, setAnnouncementError] = useState('');
+  const [latestAnnouncement, setLatestAnnouncement] = useState(null);
+
   // Rebuilt Developer Panel States
   const [devView, setDevView] = useState('dashboard');
   const [devDashboardStats, setDevDashboardStats] = useState(null);
@@ -678,8 +690,10 @@ function App() {
         })
         .then(data => {
           setAdminsList(data || []);
-        })
+        });
     }
+    // 5. Fetch Global Announcements
+    checkUnreadAnnouncement();
   };
 
   const handleCreateAdmin = (e) => {
@@ -1075,6 +1089,197 @@ function App() {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${getSessionToken()}`
     };
+  };
+
+  const loadNotifications = () => {
+    const token = getSessionToken();
+    if (!token) return;
+    fetch(`${API_BASE_URL}/notifications`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setNotifications(data);
+          const currentUserClean = getSessionUser() ? getSessionUser().toLowerCase().trim() : '';
+          const unreadCount = data.filter(n => !n.readBy || !n.readBy.includes(currentUserClean)).length;
+          setUnreadNotificationsCount(unreadCount);
+          
+          if (data.length > 0) {
+            setLatestAnnouncement(data[0]);
+          } else {
+            setLatestAnnouncement(null);
+          }
+        }
+      })
+      .catch(err => console.error("Error loading notifications:", err));
+  };
+
+  const checkUnreadAnnouncement = (user = loggedInUser) => {
+    if (!user) return;
+    const token = getSessionToken();
+    if (!token) return;
+    
+    fetch(`${API_BASE_URL}/notifications`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          const latest = data[0];
+          const userClean = user.toLowerCase().trim();
+          const isRead = latest.readBy && latest.readBy.includes(userClean);
+          
+          if (!isRead) {
+            setActiveAnnouncementPopup(latest);
+          } else {
+            setActiveAnnouncementPopup(null);
+          }
+          
+          setNotifications(data);
+          const unreadCount = data.filter(n => !n.readBy || !n.readBy.includes(userClean)).length;
+          setUnreadNotificationsCount(unreadCount);
+        } else {
+          setActiveAnnouncementPopup(null);
+        }
+      })
+      .catch(err => console.error("Error checking announcements:", err));
+  };
+
+  const handlePublishAnnouncement = (e) => {
+    e.preventDefault();
+    setAnnouncementSuccess('');
+    setAnnouncementError('');
+    
+    if (!announcementForm.title.trim() || !announcementForm.message.trim()) {
+      setAnnouncementError('Announcement title and message are required.');
+      return;
+    }
+    
+    setDevActionLoading(true);
+    const token = getSessionToken();
+    fetch(`${API_BASE_URL}/notifications`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        title: announcementForm.title.trim(),
+        message: announcementForm.message.trim(),
+        type: 'general'
+      })
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(errData => {
+            throw new Error(errData.error || 'Failed to publish announcement');
+          });
+        }
+        return res.json();
+      })
+      .then(data => {
+        setAnnouncementSuccess('Global announcement published successfully!');
+        setAnnouncementForm({ title: '', message: '' });
+        loadNotifications();
+      })
+      .catch(err => {
+        setAnnouncementError(err.message);
+      })
+      .finally(() => setDevActionLoading(false));
+  };
+
+  const handleMarkAsRead = (id) => {
+    const token = getSessionToken();
+    fetch(`${API_BASE_URL}/notifications/${id}/read`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to mark read');
+        loadNotifications();
+      })
+      .catch(err => console.error(err));
+  };
+
+  const handleMarkAsUnread = (id) => {
+    const token = getSessionToken();
+    fetch(`${API_BASE_URL}/notifications/${id}/unread`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to mark unread');
+        loadNotifications();
+      })
+      .catch(err => console.error(err));
+  };
+
+  const handleCreateNotification = (e) => {
+    e.preventDefault();
+    setNotificationSuccess('');
+    setNotificationError('');
+    
+    if (!newNotificationForm.title.trim() || !newNotificationForm.message.trim()) {
+      setNotificationError('Title and message are required.');
+      return;
+    }
+    
+    const token = getSessionToken();
+    fetch(`${API_BASE_URL}/notifications`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(newNotificationForm)
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(errData => {
+            throw new Error(errData.error || 'Failed to create notification');
+          });
+        }
+        return res.json();
+      })
+      .then(data => {
+        setNotificationSuccess('Global notification sent successfully!');
+        setNewNotificationForm({ title: '', message: '', type: 'general' });
+        loadNotifications();
+      })
+      .catch(err => {
+        setNotificationError(err.message);
+      });
+  };
+
+  const handleDeleteNotification = (id) => {
+    if (!window.confirm('Are you sure you want to delete this notification?')) return;
+    
+    const token = getSessionToken();
+    fetch(`${API_BASE_URL}/notifications/${id}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to delete notification');
+        loadNotifications();
+      })
+      .catch(err => console.error(err));
   };
 
   const loadDevDashboardStats = () => {
@@ -1568,20 +1773,12 @@ function App() {
           setMaintenanceStart(data.maintenanceStart || null);
           setMaintenanceEnd(data.maintenanceEnd || null);
           setSystemAlertMessage(data.systemAlertMessage || '');
-          
-          if (loggedInUser && data.systemUpdateNotification && data.systemUpdateNotificationId) {
-            if (localStorage.getItem('dismissed_update_id') !== data.systemUpdateNotificationId) {
-              setActiveUpdateNotification({
-                message: data.systemUpdateNotification,
-                id: data.systemUpdateNotificationId
-              });
-            }
-          }
         })
         .catch(err => console.error("Error checking maintenance status:", err));
 
       if (loggedInUser) {
         checkUnseenHelpReplies();
+        checkUnreadAnnouncement(loggedInUser);
       }
     };
 
@@ -1601,6 +1798,12 @@ function App() {
       setShowWelcomeModal(true);
     }
   }, [loggedInUser, userLoginCount]);
+
+  useEffect(() => {
+    if (loggedInUser) {
+      checkUnreadAnnouncement(loggedInUser);
+    }
+  }, [loggedInUser]);
 
   const handleUpdateBranchPassword = (e) => {
     e.preventDefault();
@@ -2369,7 +2572,6 @@ function App() {
     let defaultBranch = getLoggedInUserBranch();
 
     const student = {
-      id: students.length > 0 ? Math.max(...students.map(s => s.id)) + 1 : 1,
       ...newStudent,
       branch: (userRole === 'coordinator' || userRole === 'branchadmin')
         ? defaultBranch
@@ -2380,22 +2582,36 @@ function App() {
       performanceScore: 50
     };
 
-    setStudents([...students, student]);
-    setIsAddModalOpen(false);
-
     fetch(`${API_BASE_URL}/students`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(student)
     })
-      .then(res => res.json())
-      .catch(err => console.error("Error creating student:", err));
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(errData => {
+            throw new Error(errData.error || 'Failed to save student data on the server');
+          });
+        }
+        return res.json();
+      })
+      .then(savedStudent => {
+        // Confirmation from DB received: update local state
+        setStudents(prev => [...prev, savedStudent]);
+        setIsAddModalOpen(false);
+        setNewStudent({ name: '', age: '', phone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: defaultBranch, photo: null });
 
-    if (appMode === 'login' || appMode === 'superadmin-login') {
-      alert(`Enrollment request for ${newStudent.name} submitted successfully!`);
-    }
+        if (appMode === 'login' || appMode === 'superadmin-login') {
+          alert(`Enrollment request for ${savedStudent.name} submitted successfully!`);
+        }
 
-    setNewStudent({ name: '', age: '', phone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: defaultBranch, photo: null });
+        // Fetch latest student list to sync state
+        reloadAllAppData();
+      })
+      .catch(err => {
+        console.error("Error creating student:", err);
+        alert(`Failed to save student: ${err.message}`);
+      });
   };
 
   const formatMonthName = (monthStr) => {
@@ -3888,206 +4104,313 @@ function App() {
 
   const renderDevSettings = () => {
     return (
-      <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-        <h4 style={{ margin: 0, color: '#fff', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.5px' }}>Database-backed System Configurations</h4>
+      <div style={{ maxWidth: '800px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        <h4 style={{ margin: 0, color: '#fff', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.5px', fontFamily: 'Outfit, sans-serif' }}>
+          System Control & Configuration Center
+        </h4>
 
         {devSettingsSuccess && (
           <div className="dev-banner dev-banner-success">
             <CheckCircle size={16} />
-            {devSettingsSuccess}
+            <span>{devSettingsSuccess}</span>
           </div>
         )}
-
         {devSettingsError && (
           <div className="dev-banner dev-banner-error">
             <AlertTriangle size={16} />
-            {devSettingsError}
+            <span>{devSettingsError}</span>
           </div>
         )}
 
-        <form onSubmit={handleDevSettingsSubmit} className="dev-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          {/* Maintenance Mode Option */}
-          <div className="form-group" style={{ margin: 0 }}>
-            <label style={{ color: '#fff', display: 'block', marginBottom: '6px' }}>System Maintenance Scope Lockout</label>
-            <select
-              className="dev-input"
-              value={devSettings.maintenanceMode || 'none'}
-              onChange={(e) => setDevSettings({ ...devSettings, maintenanceMode: e.target.value })}
-            >
-              <option value="none">None (System Fully Open)</option>
-              <option value="all">All Portals (Lock everyone except Developers)</option>
-              <option value="branch">Branch Portals Only (Lock Branch Admins)</option>
-              <option value="batch">Coordinator Portals Only (Lock Coordinators)</option>
-              <option value="admin">Admin Panel Only (Lock Superadmins, Branch Admins, and Coordinators)</option>
-            </select>
-          </div>
-
-          {/* Maintenance Start Time */}
-          <div className="form-group" style={{ margin: 0 }}>
-            <label style={{ color: '#fff', display: 'block', marginBottom: '4px' }}>Maintenance Start Date & Time</label>
-            <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.45)', display: 'block', marginBottom: '8px' }}>
-              Warning banners will show on landing/login pages prior to this schedule.
-            </span>
-            <input
-              type="datetime-local"
-              className="dev-input"
-              value={toDatetimeLocal(devSettings.maintenanceStart)}
-              onChange={(e) => setDevSettings({ ...devSettings, maintenanceStart: e.target.value ? new Date(e.target.value).toISOString() : null })}
-            />
-          </div>
-
-          {/* Maintenance End Time */}
-          <div className="form-group" style={{ margin: 0 }}>
-            <label style={{ color: '#fff', display: 'block', marginBottom: '4px' }}>Maintenance End Date & Time</label>
-            <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.45)', display: 'block', marginBottom: '8px' }}>
-              Select when maintenance is expected to conclude. Portal access will unlock automatically after this time.
-            </span>
-            <input
-              type="datetime-local"
-              className="dev-input"
-              value={toDatetimeLocal(devSettings.maintenanceEnd)}
-              onChange={(e) => setDevSettings({ ...devSettings, maintenanceEnd: e.target.value ? new Date(e.target.value).toISOString() : null })}
-            />
-          </div>
-
-          {devSettings.maintenanceStart && devSettings.maintenanceEnd && (
-            <div style={{ padding: '0.85rem 1rem', background: 'rgba(255, 159, 10, 0.1)', border: '1px solid rgba(255, 159, 10, 0.25)', borderRadius: '8px', fontSize: '0.825rem', color: '#ff9f0a', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', fontSize: '0.75rem' }}>Scheduled Maintenance Alert Summary</span>
-                <button
-                  type="button"
-                  onClick={() => setDevSettings({ ...devSettings, maintenanceStart: null, maintenanceEnd: null })}
-                  style={{ background: 'rgba(255, 69, 58, 0.15)', border: '1px solid rgba(255, 69, 58, 0.3)', color: '#ff453a', padding: '2px 8px', borderRadius: '4px', fontSize: '0.725rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                >
-                  <Trash2 size={12} /> Clear Schedule
-                </button>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', alignItems: 'start' }}>
+          
+          {/* LEFT COLUMN: System Config Forms */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+            
+            {/* Announcement Management Section */}
+            <div className="dev-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div className="dev-card-header">
+                <h4 className="dev-card-title">
+                  <Bell size={16} color="#5e5ce6" /> Announcement Management
+                </h4>
               </div>
-              <div>
-                <span><strong>Pre-maintenance Warning:</strong> Visible on portal starting now.</span>
-                <span style={{ display: 'block', marginTop: '2px' }}><strong>Lockout Active Window:</strong> {formatMaintenanceTime(devSettings.maintenanceStart)} to {formatMaintenanceTime(devSettings.maintenanceEnd)} (Local Time).</span>
-              </div>
-            </div>
-          )}
 
-          {/* System Broadcast Alert Message */}
-          <div className="form-group" style={{ margin: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-              <label style={{ color: '#fff', margin: 0 }}>System Announcement Alert Message (Broadcasts to all pages)</label>
-              {devSettings.systemAlertMessage && (
-                <button
-                  type="button"
-                  onClick={() => setDevSettings({ ...devSettings, systemAlertMessage: '' })}
-                  style={{ background: 'rgba(255, 69, 58, 0.15)', border: '1px solid rgba(255, 69, 58, 0.3)', color: '#ff453a', padding: '2px 8px', borderRadius: '4px', fontSize: '0.725rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                >
-                  <Trash2 size={12} /> Clear Alert
-                </button>
+              {announcementSuccess && (
+                <div className="dev-banner dev-banner-success" style={{ margin: '0.5rem 0' }}>
+                  <span>{announcementSuccess}</span>
+                </div>
+              )}
+              {announcementError && (
+                <div className="dev-banner dev-banner-error" style={{ margin: '0.5rem 0' }}>
+                  <span>{announcementError}</span>
+                </div>
+              )}
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label style={{ display: 'block', marginBottom: '6px', color: '#fff', fontSize: '0.85rem' }}>Announcement Title</label>
+                <input 
+                  type="text" 
+                  className="dev-input"
+                  placeholder="e.g. Scheduled System Upgrade"
+                  value={announcementForm.title}
+                  onChange={(e) => setAnnouncementForm({ ...announcementForm, title: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label style={{ display: 'block', marginBottom: '6px', color: '#fff', fontSize: '0.85rem' }}>Announcement Message</label>
+                <textarea 
+                  className="dev-input"
+                  style={{ minHeight: '80px', resize: 'vertical' }}
+                  placeholder="Enter details of the update, system status, or announcement..."
+                  value={announcementForm.message}
+                  onChange={(e) => setAnnouncementForm({ ...announcementForm, message: e.target.value })}
+                ></textarea>
+              </div>
+
+              <button 
+                type="button" 
+                className="dev-btn dev-btn-primary" 
+                onClick={handlePublishAnnouncement}
+                disabled={devActionLoading}
+                style={{ alignSelf: 'flex-start' }}
+              >
+                {devActionLoading ? 'Publishing...' : 'Publish Announcement'}
+              </button>
+
+              {latestAnnouncement && (
+                <div style={{ marginTop: '0.75rem', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '0.75rem' }}>
+                  <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#8e8e93', fontWeight: 600, letterSpacing: '0.5px' }}>Current Active Announcement</span>
+                  <div style={{ background: 'rgba(0, 0, 0, 0.25)', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.03)', marginTop: '0.5rem' }}>
+                    <h5 style={{ margin: 0, color: '#fff', fontSize: '0.9rem', fontWeight: 600 }}>{latestAnnouncement.title}</h5>
+                    <p style={{ color: '#d1d1d6', fontSize: '0.8rem', marginTop: '0.4rem', whiteSpace: 'pre-wrap', lineHeight: '1.4', margin: '0.4rem 0 0 0' }}>{latestAnnouncement.message}</p>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: '#8e8e93', marginTop: '0.6rem', borderTop: '1px solid rgba(255, 255, 255, 0.03)', paddingTop: '0.4rem' }}>
+                      <span>By: {latestAnnouncement.sender}</span>
+                      <span>{new Date(latestAnnouncement.createdAt).toLocaleDateString()} {new Date(latestAnnouncement.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
-            <textarea
-              className="dev-input"
-              style={{ minHeight: '60px', resize: 'vertical' }}
-              value={devSettings.systemAlertMessage || ''}
-              onChange={(e) => setDevSettings({ ...devSettings, systemAlertMessage: e.target.value })}
-              placeholder="e.g. Warning: Scheduled database backup on Sunday, 2 AM EST. System may experience brief drops."
-            ></textarea>
-          </div>
 
-          {/* System Release/Update Notification Message */}
-          <div className="form-group" style={{ margin: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-              <label style={{ color: '#fff', margin: 0 }}>System Release/Update Notification popup (Shown to logged-in users)</label>
-              {devSettings.systemUpdateNotification && (
-                <button
-                  type="button"
-                  onClick={() => setDevSettings({ ...devSettings, systemUpdateNotification: '' })}
-                  style={{ background: 'rgba(255, 69, 58, 0.15)', border: '1px solid rgba(255, 69, 58, 0.3)', color: '#ff453a', padding: '2px 8px', borderRadius: '4px', fontSize: '0.725rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                >
-                  <Trash2 size={12} /> Clear Notification
-                </button>
-              )}
+            {/* System Diagnostic Information */}
+            <div className="dev-card">
+              <div className="dev-card-header">
+                <h4 className="dev-card-title">
+                  <Cpu size={16} color="#bf5af2" /> System Diagnostics & Health Status
+                </h4>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', fontSize: '0.85rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div>
+                    <span style={{ color: '#8e8e93', display: 'block', fontSize: '0.75rem' }}>Database Status</span>
+                    <strong style={{ color: devSystemStatus?.databaseStatus === 'Connected' ? '#30d158' : '#ff453a' }}>
+                      {devSystemStatus?.databaseStatus || 'Unknown'}
+                    </strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#8e8e93', display: 'block', fontSize: '0.75rem' }}>MongoDB Connection</span>
+                    <strong style={{ color: devSystemStatus?.databaseStatus === 'Connected' ? '#30d158' : '#ff453a' }}>
+                      {devSystemStatus?.databaseStatus === 'Connected' ? 'Active & Healthy' : 'Disconnected'}
+                    </strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#8e8e93', display: 'block', fontSize: '0.75rem' }}>Render Server Status</span>
+                    <strong style={{ color: '#30d158' }}>Online</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#8e8e93', display: 'block', fontSize: '0.75rem' }}>System API Uptime</span>
+                    <strong style={{ color: '#fff' }}>
+                      {devSystemStatus?.process?.uptime ? `${Math.floor(devSystemStatus.process.uptime / 3600)}h ${Math.floor((devSystemStatus.process.uptime % 3600) / 60)}m` : 'N/A'}
+                    </strong>
+                  </div>
+                </div>
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem' }}>
+                  <span style={{ color: '#8e8e93', display: 'block', fontSize: '0.75rem', marginBottom: '4px' }}>Server OS Platform / CPU Load</span>
+                  <span style={{ color: '#fff', fontSize: '0.8rem' }}>
+                    {devSystemStatus?.os?.platform || 'Linux'} ({devSystemStatus?.os?.release || 'Generic'}) • Load avg: {devSystemStatus?.os?.cpuUsage ? devSystemStatus.os.cpuUsage.map(l => l.toFixed(2)).join(', ') : 'N/A'}
+                  </span>
+                </div>
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem' }}>
+                  <span style={{ color: '#8e8e93', display: 'block', fontSize: '0.75rem', marginBottom: '4px' }}>Memory Allocation (Heap Used / Heap Total)</span>
+                  <span style={{ color: '#fff', fontSize: '0.8rem' }}>
+                    {devSystemStatus?.process?.memoryUsage?.heapUsed || 'N/A'} / {devSystemStatus?.process?.memoryUsage?.heapTotal || 'N/A'} (RSS: {devSystemStatus?.process?.memoryUsage?.rss || 'N/A'})
+                  </span>
+                </div>
+              </div>
             </div>
-            <textarea
-              className="dev-input"
-              style={{ minHeight: '60px', resize: 'vertical' }}
-              value={devSettings.systemUpdateNotification || ''}
-              onChange={(e) => setDevSettings({ ...devSettings, systemUpdateNotification: e.target.value })}
-              placeholder="e.g. We have deployed custom dark theme calendar pickers and support reply notification popups!"
-            ></textarea>
+
           </div>
 
-          {/* Session Timeout */}
-          <div className="form-group" style={{ margin: 0 }}>
-            <label>Auto-logout Inactivity Session Timeout (Minutes)</label>
-            <input
-              type="number"
-              className="dev-input"
-              value={devSettings.sessionTimeoutMinutes || ''}
-              onChange={(e) => setDevSettings({ ...devSettings, sessionTimeoutMinutes: parseInt(e.target.value, 10) || 0 })}
-              required
-              min="1"
-            />
-          </div>
+          {/* RIGHT COLUMN: Maintenance & Other Configurations */}
+          <form onSubmit={handleDevSettingsSubmit} className="dev-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div className="dev-card-header" style={{ marginBottom: '0.5rem' }}>
+              <h4 className="dev-card-title">
+                <Settings size={16} color="#0a84ff" /> System Maintenance & Security
+              </h4>
+            </div>
 
-          {/* Minimum Password Length */}
-          <div className="form-group" style={{ margin: 0 }}>
-            <label>Minimum Password Character Limit (Rules check)</label>
-            <input
-              type="number"
-              className="dev-input"
-              value={devSettings.minPasswordLength || ''}
-              onChange={(e) => setDevSettings({ ...devSettings, minPasswordLength: parseInt(e.target.value, 10) || 0 })}
-              required
-              min="4"
-              max="32"
-            />
-          </div>
+            {/* Maintenance Mode Option */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label style={{ color: '#fff', display: 'block', marginBottom: '6px' }}>System Maintenance Scope Lockout</label>
+              <select
+                className="dev-input"
+                value={devSettings.maintenanceMode || 'none'}
+                onChange={(e) => setDevSettings({ ...devSettings, maintenanceMode: e.target.value })}
+              >
+                <option value="none">None (System Fully Open)</option>
+                <option value="all">All Portals (Lock everyone except Developers)</option>
+                <option value="branch">Branch Portals Only (Lock Branch Admins)</option>
+                <option value="batch">Coordinator Portals Only (Lock Coordinators)</option>
+                <option value="admin">Admin Panel Only (Lock Superadmins, Branch Admins, and Coordinators)</option>
+              </select>
+            </div>
 
-          {/* Failed Login Threshold */}
-          <div className="form-group" style={{ margin: 0 }}>
-            <label>Failed Login Attempt Lockout Threshold</label>
-            <input
-              type="number"
-              className="dev-input"
-              value={devSettings.failedLoginThreshold || ''}
-              onChange={(e) => setDevSettings({ ...devSettings, failedLoginThreshold: parseInt(e.target.value, 10) || 0 })}
-              required
-              min="1"
-            />
-          </div>
+            {/* Maintenance Start Time */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label style={{ color: '#fff', display: 'block', marginBottom: '4px' }}>Maintenance Start Date & Time</label>
+              <span style={{ fontSize: '0.725rem', color: 'rgba(255,255,255,0.45)', display: 'block', marginBottom: '6px' }}>
+                Warning banners will show on landing/login pages prior to this schedule.
+              </span>
+              <input
+                type="datetime-local"
+                className="dev-input"
+                value={toDatetimeLocal(devSettings.maintenanceStart)}
+                onChange={(e) => setDevSettings({ ...devSettings, maintenanceStart: e.target.value ? new Date(e.target.value).toISOString() : null })}
+              />
+            </div>
 
-          {/* Failed Login Block Duration */}
-          <div className="form-group" style={{ margin: 0 }}>
-            <label>Intruder Lockout Duration (Minutes)</label>
-            <input
-              type="number"
-              className="dev-input"
-              value={devSettings.failedLoginBlockTimeMinutes || ''}
-              onChange={(e) => setDevSettings({ ...devSettings, failedLoginBlockTimeMinutes: parseInt(e.target.value, 10) || 0 })}
-              required
-              min="1"
-            />
-          </div>
+            {/* Maintenance End Time */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label style={{ color: '#fff', display: 'block', marginBottom: '4px' }}>Maintenance End Date & Time</label>
+              <span style={{ fontSize: '0.725rem', color: 'rgba(255,255,255,0.45)', display: 'block', marginBottom: '6px' }}>
+                Portal access will unlock automatically after this schedule.
+              </span>
+              <input
+                type="datetime-local"
+                className="dev-input"
+                value={toDatetimeLocal(devSettings.maintenanceEnd)}
+                onChange={(e) => setDevSettings({ ...devSettings, maintenanceEnd: e.target.value ? new Date(e.target.value).toISOString() : null })}
+              />
+            </div>
 
-          {/* Log Retention Limit */}
-          <div className="form-group" style={{ margin: 0 }}>
-            <label>Maximum Application Logs Buffer retention limit</label>
-            <input
-              type="number"
-              className="dev-input"
-              value={devSettings.logRetentionLimit || ''}
-              onChange={(e) => setDevSettings({ ...devSettings, logRetentionLimit: parseInt(e.target.value, 10) || 0 })}
-              required
-              min="10"
-              max="10000"
-            />
-          </div>
+            {devSettings.maintenanceStart && devSettings.maintenanceEnd && (
+              <div style={{ padding: '0.75rem 0.85rem', background: 'rgba(255, 159, 10, 0.1)', border: '1px solid rgba(255, 159, 10, 0.25)', borderRadius: '8px', fontSize: '0.8rem', color: '#ff9f0a', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', fontSize: '0.725rem' }}>Maintenance Alert Summary</span>
+                  <button
+                    type="button"
+                    onClick={() => setDevSettings({ ...devSettings, maintenanceStart: null, maintenanceEnd: null })}
+                    style={{ background: 'rgba(255, 69, 58, 0.15)', border: '1px solid rgba(255, 69, 58, 0.3)', color: '#ff453a', padding: '2px 8px', borderRadius: '4px', fontSize: '0.7rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <Trash2 size={11} /> Clear
+                  </button>
+                </div>
+                <div>
+                  <span style={{ display: 'block' }}><strong>Alert Pre-banner:</strong> Active now.</span>
+                  <span style={{ display: 'block', marginTop: '2px' }}><strong>Lockout window:</strong> {formatMaintenanceTime(devSettings.maintenanceStart)} to {formatMaintenanceTime(devSettings.maintenanceEnd)}.</span>
+                </div>
+              </div>
+            )}
 
-          <div style={{ marginTop: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.03)', paddingTop: '1.25rem', textAlign: 'right' }}>
-            <button type="submit" className="dev-btn dev-btn-primary" disabled={devActionLoading}>
-              {devActionLoading ? 'Saving...' : 'Apply Configurations'}
-            </button>
-          </div>
-        </form>
+            {/* System Broadcast Alert Message */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <label style={{ color: '#fff', margin: 0 }}>System Alert Broadcast Message (All pages banner)</label>
+                {devSettings.systemAlertMessage && (
+                  <button
+                    type="button"
+                    onClick={() => setDevSettings({ ...devSettings, systemAlertMessage: '' })}
+                    style={{ background: 'rgba(255, 69, 58, 0.15)', border: '1px solid rgba(255, 69, 58, 0.3)', color: '#ff453a', padding: '2px 8px', borderRadius: '4px', fontSize: '0.725rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <Trash2 size={12} /> Clear
+                  </button>
+                )}
+              </div>
+              <textarea
+                className="dev-input"
+                style={{ minHeight: '60px', resize: 'vertical' }}
+                value={devSettings.systemAlertMessage || ''}
+                onChange={(e) => setDevSettings({ ...devSettings, systemAlertMessage: e.target.value })}
+                placeholder="e.g. Scheduled database backup details..."
+              ></textarea>
+            </div>
+
+            {/* Session Timeout */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label>Auto-logout Inactivity Session Timeout (Minutes)</label>
+              <input
+                type="number"
+                className="dev-input"
+                value={devSettings.sessionTimeoutMinutes || ''}
+                onChange={(e) => setDevSettings({ ...devSettings, sessionTimeoutMinutes: parseInt(e.target.value, 10) || 0 })}
+                required
+                min="1"
+              />
+            </div>
+
+            {/* Minimum Password Length */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label>Minimum Password Character Limit</label>
+              <input
+                type="number"
+                className="dev-input"
+                value={devSettings.minPasswordLength || ''}
+                onChange={(e) => setDevSettings({ ...devSettings, minPasswordLength: parseInt(e.target.value, 10) || 0 })}
+                required
+                min="4"
+                max="32"
+              />
+            </div>
+
+            {/* Failed Login Threshold */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label>Failed Login Attempt Lockout Threshold</label>
+              <input
+                type="number"
+                className="dev-input"
+                value={devSettings.failedLoginThreshold || ''}
+                onChange={(e) => setDevSettings({ ...devSettings, failedLoginThreshold: parseInt(e.target.value, 10) || 0 })}
+                required
+                min="1"
+              />
+            </div>
+
+            {/* Failed Login Block Duration */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label>Intruder Lockout Duration (Minutes)</label>
+              <input
+                type="number"
+                className="dev-input"
+                value={devSettings.failedLoginBlockTimeMinutes || ''}
+                onChange={(e) => setDevSettings({ ...devSettings, failedLoginBlockTimeMinutes: parseInt(e.target.value, 10) || 0 })}
+                required
+                min="1"
+              />
+            </div>
+
+            {/* Log Retention Limit */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label>Maximum Application Logs Buffer limit</label>
+              <input
+                type="number"
+                className="dev-input"
+                value={devSettings.logRetentionLimit || ''}
+                onChange={(e) => setDevSettings({ ...devSettings, logRetentionLimit: parseInt(e.target.value, 10) || 0 })}
+                required
+                min="10"
+                max="10000"
+              />
+            </div>
+
+            <div style={{ marginTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.03)', paddingTop: '1rem', textAlign: 'right' }}>
+              <button type="submit" className="dev-btn dev-btn-primary" disabled={devActionLoading} style={{ width: '100%', justifyContent: 'center' }}>
+                {devActionLoading ? 'Applying...' : 'Apply All System Configurations'}
+              </button>
+            </div>
+          </form>
+
+        </div>
       </div>
     );
   };
@@ -4223,10 +4546,29 @@ function App() {
 
         {/* Developer Sidebar */}
         <aside className="dev-sidebar">
-          <div className="dev-sidebar-header">
+          <div className="dev-sidebar-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
             <div className="dev-sidebar-logo">
               <Shield size={20} color="#5e5ce6" /> <span>MASTER</span><span>FIT</span><span>•</span><span>DEV</span>
             </div>
+            <button
+              className="dev-mobile-logout-btn"
+              title="Console Logout"
+              onClick={() => {
+                const token = getSessionToken();
+                if (token) {
+                  fetch(`${API_BASE_URL}/logout`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token })
+                  }).catch(err => console.error(err));
+                }
+                clearSession();
+                setLoggedInUser('');
+                setAppMode('superadmin-login');
+              }}
+            >
+              <LogOut size={20} />
+            </button>
           </div>
           <nav className="dev-nav">
             <a className={`dev-nav-item ${devView === 'dashboard' ? 'active' : ''}`} onClick={() => setDevView('dashboard')}>
@@ -4299,7 +4641,6 @@ function App() {
               <span>Announcement: {systemAlertMessage}</span>
             </div>
           )}
-
           {/* Header */}
           <header className="dev-header">
             <h1 className="dev-header-title">
@@ -4320,7 +4661,7 @@ function App() {
               <span style={{ fontWeight: 600 }}>{loggedInUser}</span>
             </div>
           </header>
-
+ 
           {/* Body */}
           <div className="dev-body">
             {devView === 'dashboard' && renderDevDashboard()}
@@ -9851,6 +10192,48 @@ function App() {
         </div>
       )}
 
+      {/* Unread Global Announcement Login Popup Modal */}
+      {activeAnnouncementPopup && (
+        <div className="modal-overlay" style={{ zIndex: 12000 }}>
+          <div className="modal-content" style={{ maxWidth: '500px', padding: '2.25rem 2rem', background: 'rgba(10, 10, 20, 0.95)', border: '1px solid rgba(94, 92, 230, 0.25)', borderRadius: '16px', boxShadow: '0 16px 40px rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(25px)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
+              <Bell size={24} color="#ff9f0a" className="shake-icon" />
+              <h2 style={{ fontSize: '1.25rem', fontWeight: '800', color: '#fff', margin: 0, fontFamily: 'Outfit, sans-serif', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                New System Announcement
+              </h2>
+            </div>
+            
+            <h3 style={{ fontSize: '1.15rem', color: '#fff', fontWeight: '600', margin: '0 0 0.85rem 0' }}>
+              {activeAnnouncementPopup.title}
+            </h3>
+            
+            <p style={{ color: '#d1d1d6', fontSize: '0.9rem', lineHeight: '1.55', margin: '0 0 1.5rem 0', whiteSpace: 'pre-wrap' }}>
+              {activeAnnouncementPopup.message}
+            </p>
+            
+            <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)', fontSize: '0.725rem', color: '#8e8e93', display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '8px' }}>
+              <span>Published by: <strong style={{ color: '#e2e2ee' }}>{activeAnnouncementPopup.sender}</strong></span>
+              <span>
+                {new Date(activeAnnouncementPopup.createdAt).toLocaleDateString()} at {new Date(activeAnnouncementPopup.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button 
+                className="btn-primary" 
+                style={{ padding: '0.55rem 1.75rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 600 }}
+                onClick={() => {
+                  handleMarkAsRead(activeAnnouncementPopup._id);
+                  setActiveAnnouncementPopup(null);
+                }}
+              >
+                Acknowledge & Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Welcome Notification Modal for First Time Logins */}
       {showWelcomeModal && (
         <div className="modal-overlay" style={{ zIndex: 2000 }}>
@@ -9890,27 +10273,7 @@ function App() {
         </div>
       )}
 
-      {/* System Update / News Announcement Modal */}
-      {activeUpdateNotification && (
-        <div className="modal-overlay" style={{ zIndex: 1999 }}>
-          <div className="modal-content glass-panel" style={{ maxWidth: '500px', padding: '2rem', border: '1px solid rgba(10, 132, 255, 0.3)', background: 'rgba(5,5,5,0.95)', backdropFilter: 'blur(20px)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '1rem', color: '#0a84ff' }}>
-              <Bell size={32} className="shake-icon" />
-              <h2 style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 800, textTransform: 'uppercase', fontSize: '1.4rem', color: '#fff' }}>System Update Notification</h2>
-            </div>
-            <p style={{ color: '#fff', fontSize: '0.95rem', lineHeight: '1.6', background: 'rgba(10, 132, 255, 0.05)', padding: '1rem', borderRadius: '8px', borderLeft: '4px solid #0a84ff', marginBottom: '1.5rem', whiteSpace: 'pre-wrap' }}>
-              {activeUpdateNotification.message}
-            </p>
-            <button
-              className="btn-primary"
-              style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', background: '#0a84ff' }}
-              onClick={dismissUpdateNotification}
-            >
-              Acknowledge & Close
-            </button>
-          </div>
-        </div>
-      )}
+
 
       {/* Help Resolved Support Notifications Modal */}
       {unseenResolvedReports.length > 0 && (

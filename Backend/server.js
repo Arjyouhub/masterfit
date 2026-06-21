@@ -19,6 +19,8 @@ import LoginHistory from './models/LoginHistory.js';
 import SecurityLog from './models/SecurityLog.js';
 import SystemSetting from './models/SystemSetting.js';
 import HelpReport from './models/HelpReport.js';
+import Notification from './models/Notification.js';
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -780,10 +782,21 @@ app.post('/api/students', authenticateSession, async (req, res) => {
   try {
     const { role, branch } = req.user;
     
+    // Validate MongoDB connection before saving
+    if (mongoose.connection.readyState !== 1) {
+      const dbErr = 'Database connection is not active';
+      console.error(`[Student Creation Error] ${dbErr}`);
+      addLog('error', dbErr);
+      return res.status(500).json({ error: dbErr });
+    }
+
     // Validate request body branch
     if (role !== 'superadmin' && role !== 'developer') {
       if (!req.body.branch || String(req.body.branch).toLowerCase().trim() !== branch.toLowerCase().trim()) {
-        return res.status(403).json({ error: 'Unauthorized: cannot enroll student in another branch' });
+        const authErr = 'Unauthorized: cannot enroll student in another branch';
+        console.error(`[Student Creation Error] ${authErr}`);
+        addLog('error', authErr);
+        return res.status(403).json({ error: authErr });
       }
     }
 
@@ -798,11 +811,58 @@ app.post('/api/students', authenticateSession, async (req, res) => {
       return res.status(400).json({ error: 'Valid phone number is required' });
     }
 
-    const encryptedBody = encryptStudentData(req.body);
-    const newStudent = new Student(encryptedBody);
-    const saved = await newStudent.save();
+    // Check for duplicate student (same name & phone number in the branch)
+    const existingStudents = await Student.find({ branch: req.body.branch }).select('name phone').lean();
+    const isDuplicate = existingStudents.some(s => {
+      const decryptedName = decrypt(s.name);
+      const decryptedPhone = decrypt(s.phone);
+      return decryptedName.toLowerCase().trim() === req.body.name.toLowerCase().trim() &&
+             decryptedPhone.trim() === req.body.phone.trim();
+    });
+
+    if (isDuplicate) {
+      const dupErr = 'A student with the same name and phone number already exists in this branch';
+      console.error(`[Student Creation Error] ${dupErr}`);
+      addLog('error', dupErr);
+      return res.status(400).json({ error: dupErr });
+    }
+
+    console.log(`[Student Creation] Creating student: Name: ${req.body.name}, Age: ${req.body.age}, Branch: ${req.body.branch}`);
+    addLog('api', `Creating student: Name: ${req.body.name}, Branch: ${req.body.branch}`);
+
+    // Generate unique numeric ID on the server side to prevent duplicates
+    let nextId;
+    let saved = null;
+    let attempts = 0;
+    while (!saved && attempts < 5) {
+      attempts++;
+      const lastStudent = await Student.findOne().sort({ id: -1 });
+      nextId = lastStudent && lastStudent.id ? lastStudent.id + 1 : 1;
+      
+      req.body.id = nextId;
+      const encryptedBody = encryptStudentData(req.body);
+      const newStudent = new Student(encryptedBody);
+      
+      try {
+        saved = await newStudent.save();
+      } catch (saveErr) {
+        if (saveErr.code === 11000) {
+          // Duplicate key error, retry with a new max id
+          continue;
+        }
+        throw saveErr;
+      }
+    }
+
+    if (!saved) {
+      throw new Error('Failed to generate a unique student ID after multiple attempts');
+    }
+
+    console.log(`[Student Creation] Successfully saved student to database. ID: ${saved.id}`);
     res.status(201).json(decryptStudent(saved));
   } catch (err) {
+    console.error(`[Student Creation Error] Exception caught: ${err.message}`);
+    addLog('error', `Failed to create student: ${err.message}`);
     res.status(400).json({ error: err.message });
   }
 });
@@ -1050,6 +1110,87 @@ app.put('/api/help-reports/:id/seen', authenticateSession, async (req, res) => {
     res.json({ success: true, report });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Notifications API Endpoints
+// Retrieve all notifications
+app.get('/api/notifications', authenticateSession, async (req, res) => {
+  try {
+    const notifications = await Notification.find().sort({ createdAt: -1 }).lean();
+    res.json(notifications);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Create a new global notification
+app.post('/api/notifications', authenticateSession, authorizeRoles('developer', 'superadmin'), async (req, res) => {
+  try {
+    const { title, message, type } = req.body;
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: 'Notification title is required' });
+    }
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'Notification message is required' });
+    }
+    
+    const notification = new Notification({
+      title: title.trim(),
+      message: message.trim(),
+      type: type || 'general',
+      sender: req.user.username
+    });
+    
+    const saved = await notification.save();
+    console.log(`[Notification] Created new global notification: "${saved.title}" by ${saved.sender}`);
+    res.status(201).json(saved);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Mark notification as read by the user
+app.put('/api/notifications/:id/read', authenticateSession, async (req, res) => {
+  try {
+    const username = req.user.username.toLowerCase().trim();
+    const updated = await Notification.findByIdAndUpdate(
+      req.params.id,
+      { $addToSet: { readBy: username } },
+      { new: true }
+    );
+    if (!updated) return res.status(404).json({ error: 'Notification not found' });
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Mark notification as unread by the user
+app.put('/api/notifications/:id/unread', authenticateSession, async (req, res) => {
+  try {
+    const username = req.user.username.toLowerCase().trim();
+    const updated = await Notification.findByIdAndUpdate(
+      req.params.id,
+      { $pull: { readBy: username } },
+      { new: true }
+    );
+    if (!updated) return res.status(404).json({ error: 'Notification not found' });
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Delete a notification (restricted to developer/superadmin)
+app.delete('/api/notifications/:id', authenticateSession, authorizeRoles('developer', 'superadmin'), async (req, res) => {
+  try {
+    const deleted = await Notification.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Notification not found' });
+    console.log(`[Notification] Deleted notification: "${deleted.title}"`);
+    res.json({ message: 'Notification deleted successfully' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

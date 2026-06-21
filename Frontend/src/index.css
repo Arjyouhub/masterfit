@@ -1771,6 +1771,10 @@ html.admin-html, body.admin-body {
   color: #5e5ce6;
 }
 
+.dev-mobile-logout-btn {
+  display: none;
+}
+
 .dev-nav {
   flex: 1;
   padding: 1rem 0;
@@ -2534,6 +2538,24 @@ html.admin-html, body.admin-body {
   .dev-sidebar-footer {
     display: none !important;
   }
+  .dev-mobile-logout-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    background: none !important;
+    border: none !important;
+    color: #ff453a !important;
+    cursor: pointer;
+    padding: 6px !important;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+  }
+  .dev-mobile-logout-btn:hover {
+    transform: scale(1.1);
+    opacity: 0.9;
+  }
+  .dev-mobile-logout-btn:active {
+    transform: scale(0.95);
+  }
   .dev-main {
     width: 100% !important;
     height: auto !important;
@@ -2575,6 +2597,167 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 input[type="datetime-local"].dev-input:focus {
   border-color: #ff9f0a;
   box-shadow: 0 0 8px rgba(255, 159, 10, 0.25);
+}
+
+/* ==========================================================================
+   PREMIUM RESPONSIVENESS AND DEVICE COMPATIBILITY LAYER
+   ========================================================================== */
+
+/* Universal Layout & Text Wrapping Safeguard */
+p, span, h1, h2, h3, h4, h5, h6, th, td, label, div, li, a {
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+}
+
+/* Touch Device Target Optimization (iOS / Android guidelines) */
+@media (pointer: coarse) {
+  a.nav-item,
+  a.nav-link,
+  .btn-primary,
+  .btn-secondary,
+  .btn-outline-primary,
+  .btn-small,
+  button,
+  .form-control,
+  .dev-input,
+  select,
+  input {
+    min-height: 44px; /* Minimum ergonomic touch-target dimension */
+  }
+
+  .btn-icon,
+  .dev-mobile-logout-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* Modals & Dialog Box Responsiveness */
+.modal-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem 1rem !important;
+  box-sizing: border-box;
+  z-index: 10000 !important;
+}
+
+.modal-content {
+  width: 100% !important;
+  max-width: 540px !important;
+  max-height: 85vh !important; /* Prevents overflow clipping on small screens */
+  overflow-y: auto !important;
+  border-radius: 16px;
+  box-sizing: border-box;
+  padding: 2rem 1.5rem !important;
+  margin: auto;
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.85);
+}
+
+/* Mobile & Tablet Overrides (Widths < 768px) */
+@media (max-width: 768px) {
+  .modal-content {
+    padding: 1.5rem 1rem !important;
+    max-height: 90vh !important;
+  }
+
+  /* Force stack inline grids */
+  [style*="display: grid"]:not([style*="repeat(7,"]):not(.calendar-grid):not(.calendar-grid-header):not(.year-calendar-grid) {
+    grid-template-columns: 1fr !important;
+    gap: 1rem !important;
+  }
+
+  /* Handle developer diagnostics section wrapping */
+  .dev-grid {
+    grid-template-columns: 1fr !important;
+    gap: 1.5rem !important;
+  }
+
+  /* Table containers should not expand parents */
+  .dev-table-container,
+  .table-responsive {
+    width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    margin-bottom: 1rem;
+  }
+
+  .dev-table {
+    width: 100% !important;
+    min-width: 650px; /* Forces custom scroll indicator instead of squishing fields */
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr !important;
+    gap: 1rem !important;
+  }
+
+  /* Forms element alignments */
+  .form-group {
+    margin-bottom: 1.25rem;
+  }
+
+  .modal-actions {
+    flex-direction: column-reverse !important;
+    gap: 0.75rem !important;
+    width: 100%;
+  }
+
+  .modal-actions button,
+  .modal-actions a {
+    width: 100% !important;
+    justify-content: center !important;
+    display: inline-flex !important;
+  }
+}
+
+/* Ultra-Small Phones (Widths < 375px) */
+@media (max-width: 375px) {
+  body, html {
+    font-size: 14px;
+  }
+
+  .brand {
+    font-size: 1.1rem !important;
+  }
+
+  .page-title {
+    font-size: 1.05rem !important;
+  }
+
+  .modal-content {
+    padding: 1.25rem 0.75rem !important;
+  }
+
+  .stat-card {
+    padding: 1rem !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0.75rem !important;
+  }
+
+  .stat-icon-wrapper {
+    width: 44px !important;
+    height: 44px !important;
+  }
+
+  .stat-icon {
+    width: 20px !important;
+    height: 20px !important;
+  }
+}
+
+/* Ultra-Wide Monitors & Large Displays */
+@media (min-width: 1920px) {
+  .dashboard-container {
+    max-width: 1720px;
+    margin: 0 auto;
+    border-left: 1px solid var(--glass-border);
+    border-right: 1px solid var(--glass-border);
+    box-shadow: 0 0 50px rgba(0, 0, 0, 0.8);
+  }
 }
 
 
