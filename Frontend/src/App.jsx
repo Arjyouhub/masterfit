@@ -2029,6 +2029,21 @@ function App() {
     }
   }, [appMode, devView, devUsersPage, devSessionsPage, devLoginHistoryPage, devSecurityLogsPage, devAppLogsPage, devLogsType, devLogsSearch, devAuditLogsPage, devAuditType, devHelpReportsPage]);
 
+  // Real-time system status polling for developer diagnostics
+  useEffect(() => {
+    if (appMode !== 'developer' || devView !== 'settings') return;
+
+    // Load immediately on tab mount
+    loadDevSystemStatus();
+
+    // Poll every 5 seconds for real-time diagnostics updates
+    const interval = setInterval(() => {
+      loadDevSystemStatus();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [appMode, devView]);
+
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 50);
