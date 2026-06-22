@@ -4210,6 +4210,19 @@ function App() {
     const load1 = systemOs?.cpuUsage && systemOs.cpuUsage[0] ? Math.round(systemOs.cpuUsage[0] * 100) : 12;
     const load5 = systemOs?.cpuUsage && systemOs.cpuUsage[1] ? Math.round(systemOs.cpuUsage[1] * 100) : 8;
 
+    // Parse memory sizes in MB
+    const rssVal = parseInt(systemProcess?.memoryUsage?.rss) || 0;
+    const heapUsedVal = parseInt(systemProcess?.memoryUsage?.heapUsed) || 0;
+    const heapTotalVal = parseInt(systemProcess?.memoryUsage?.heapTotal) || 0;
+
+    // Dynamic calculations against 512 MB limits
+    const rssPercent = Math.min(100, Math.max(0, Math.round((rssVal / 512) * 100)));
+    const heapPercent = heapTotalVal > 0 ? Math.min(100, Math.max(0, Math.round((heapUsedVal / heapTotalVal) * 100))) : 0;
+    
+    const containerTotalMem = 512;
+    const containerFreeMem = Math.max(0, containerTotalMem - rssVal);
+    const containerUsedPercent = Math.min(100, Math.max(0, Math.round((rssVal / containerTotalMem) * 100)));
+
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
         <h4 style={{ margin: 0, color: '#fff', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.5px' }}>System Diagnostics & Host Performance</h4>
@@ -4232,10 +4245,10 @@ function App() {
               <div className="dev-progress-container">
                 <div className="dev-progress-lbl">
                   <span>RSS Memory Allocation</span>
-                  <span>{systemProcess?.memoryUsage?.rss}</span>
+                  <span>{systemProcess?.memoryUsage?.rss} / 512 MB Limit</span>
                 </div>
                 <div className="dev-progress-bar">
-                  <div className="dev-progress-fill fill-purple" style={{ width: '35%' }}></div>
+                  <div className="dev-progress-fill fill-purple" style={{ width: `${rssPercent}%` }}></div>
                 </div>
               </div>
 
@@ -4245,7 +4258,7 @@ function App() {
                   <span>{systemProcess?.memoryUsage?.heapUsed} / {systemProcess?.memoryUsage?.heapTotal}</span>
                 </div>
                 <div className="dev-progress-bar">
-                  <div className="dev-progress-fill fill-purple" style={{ width: '55%' }}></div>
+                  <div className="dev-progress-fill fill-purple" style={{ width: `${heapPercent}%` }}></div>
                 </div>
               </div>
             </div>
@@ -4284,10 +4297,10 @@ function App() {
               <div className="dev-progress-container">
                 <div className="dev-progress-lbl">
                   <span>Free Memory / Total Memory</span>
-                  <span>{systemOs?.freeMemory} Free of {systemOs?.totalMemory}</span>
+                  <span>{containerFreeMem} MB Free of {containerTotalMem} MB</span>
                 </div>
                 <div className="dev-progress-bar">
-                  <div className="dev-progress-fill fill-blue" style={{ width: '45%' }}></div>
+                  <div className="dev-progress-fill fill-blue" style={{ width: `${containerUsedPercent}%` }}></div>
                 </div>
               </div>
             </div>
@@ -4313,8 +4326,8 @@ function App() {
           </div>
           <div className="dev-card">
             <div className="dev-card-title">Total Size / Storage</div>
-            <div className="dev-stat-val" style={{ fontSize: '1.75rem' }}>{dataSize} / {storageSize}</div>
-            <div className="dev-stat-lbl">Storage utilization</div>
+            <div className="dev-stat-val" style={{ fontSize: '1.75rem' }}>{storageSize} / 512 MB</div>
+            <div className="dev-stat-lbl">Storage utilization (Data: {dataSize})</div>
           </div>
           <div className="dev-card">
             <div className="dev-card-title">Record Objects Count</div>
@@ -4684,11 +4697,11 @@ function App() {
                 <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '4px' }}>
                     <span style={{ color: '#8e8e93' }}>MongoDB Storage Space</span>
-                    <span style={{ color: '#fff', fontWeight: 600 }}>{devSystemStatus?.dbDataSize || '0.00 MB'} / 512 MB Limit</span>
+                    <span style={{ color: '#fff', fontWeight: 600 }}>{devSystemStatus?.dbStorageSize || '0.00 MB'} / 512 MB Limit</span>
                   </div>
                   <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden', marginTop: '4px' }}>
                     <div style={{
-                      width: `${Math.min(100, Math.max(1, (parseFloat(devSystemStatus?.dbDataSize || '0') / 512) * 100))}%`,
+                      width: `${Math.min(100, Math.max(1, (parseFloat(devSystemStatus?.dbStorageSize || '0') / 512) * 100))}%`,
                       height: '100%',
                       background: 'linear-gradient(90deg, #ff9f0a, #ffc700)',
                       borderRadius: '3px'
@@ -4699,11 +4712,11 @@ function App() {
                 <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '4px' }}>
                     <span style={{ color: '#8e8e93' }}>Render Server Memory (RAM)</span>
-                    <span style={{ color: '#fff', fontWeight: 600 }}>{devSystemStatus?.process?.memoryUsage?.heapUsed || '0 MB'} / 512 MB Limit</span>
+                    <span style={{ color: '#fff', fontWeight: 600 }}>{devSystemStatus?.process?.memoryUsage?.rss || '0 MB'} / 512 MB Limit</span>
                   </div>
                   <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden', marginTop: '4px' }}>
                     <div style={{
-                      width: `${Math.min(100, Math.max(1, (parseFloat(devSystemStatus?.process?.memoryUsage?.heapUsed || '0') / 512) * 100))}%`,
+                      width: `${Math.min(100, Math.max(1, (parseFloat(devSystemStatus?.process?.memoryUsage?.rss || '0') / 512) * 100))}%`,
                       height: '100%',
                       background: 'linear-gradient(90deg, #0a84ff, #64d2ff)',
                       borderRadius: '3px'
