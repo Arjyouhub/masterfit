@@ -2921,12 +2921,26 @@ developerRouter.get('/system-status', async (req, res) => {
     const activeUsersCount = await Session.distinct('username');
     const totalSessionsCount = await Session.countDocuments();
     
+    let dbDataSize = '0.00 MB';
+    let dbStorageSize = '0.00 MB';
+    if (mongoose.connection.readyState === 1) {
+      try {
+        const stats = await mongoose.connection.db.command({ dbStats: 1 });
+        dbDataSize = (stats.dataSize / (1024 * 1024)).toFixed(2) + ' MB';
+        dbStorageSize = (stats.storageSize / (1024 * 1024)).toFixed(2) + ' MB';
+      } catch (e) {
+        console.error('Failed to fetch db stats for system-status:', e);
+      }
+    }
+
     const freeMemBytes = os.freemem();
     const totalMemBytes = os.totalmem();
     const processMem = process.memoryUsage();
     
     res.json({
       databaseStatus: dbStatus,
+      dbDataSize,
+      dbStorageSize,
       activeUsers: activeUsersCount.length,
       totalSessions: totalSessionsCount,
       os: {

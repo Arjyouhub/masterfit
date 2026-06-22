@@ -1598,6 +1598,7 @@ function App() {
       .catch(err => console.error("Error loading dev settings:", err));
     loadDevNotifications();
     loadLockedUsers();
+    loadDevSystemStatus();
   };
 
   const loadDevHelpReports = (page = devHelpReportsPage) => {
@@ -4652,20 +4653,10 @@ function App() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', fontSize: '0.85rem' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div>
-                    <span style={{ color: '#8e8e93', display: 'block', fontSize: '0.75rem' }}>Database Status</span>
+                    <span style={{ color: '#8e8e93', display: 'block', fontSize: '0.75rem' }}>Database Connection</span>
                     <strong style={{ color: devSystemStatus?.databaseStatus === 'Connected' ? '#30d158' : '#ff453a' }}>
-                      {devSystemStatus?.databaseStatus || 'Unknown'}
+                      {devSystemStatus?.databaseStatus === 'Connected' ? 'Connected & Active' : 'Disconnected'}
                     </strong>
-                  </div>
-                  <div>
-                    <span style={{ color: '#8e8e93', display: 'block', fontSize: '0.75rem' }}>MongoDB Connection</span>
-                    <strong style={{ color: devSystemStatus?.databaseStatus === 'Connected' ? '#30d158' : '#ff453a' }}>
-                      {devSystemStatus?.databaseStatus === 'Connected' ? 'Active & Healthy' : 'Disconnected'}
-                    </strong>
-                  </div>
-                  <div>
-                    <span style={{ color: '#8e8e93', display: 'block', fontSize: '0.75rem' }}>Render Server Status</span>
-                    <strong style={{ color: '#30d158' }}>Online</strong>
                   </div>
                   <div>
                     <span style={{ color: '#8e8e93', display: 'block', fontSize: '0.75rem' }}>System API Uptime</span>
@@ -4674,16 +4665,41 @@ function App() {
                     </strong>
                   </div>
                 </div>
+
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '4px' }}>
+                    <span style={{ color: '#8e8e93' }}>MongoDB Storage Space</span>
+                    <span style={{ color: '#fff', fontWeight: 600 }}>{devSystemStatus?.dbDataSize || '0.00 MB'} / 512 MB Limit</span>
+                  </div>
+                  <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden', marginTop: '4px' }}>
+                    <div style={{
+                      width: `${Math.min(100, Math.max(1, (parseFloat(devSystemStatus?.dbDataSize || '0') / 512) * 100))}%`,
+                      height: '100%',
+                      background: 'linear-gradient(90deg, #ff9f0a, #ffc700)',
+                      borderRadius: '3px'
+                    }} />
+                  </div>
+                </div>
+
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '4px' }}>
+                    <span style={{ color: '#8e8e93' }}>Render Server Memory (RAM)</span>
+                    <span style={{ color: '#fff', fontWeight: 600 }}>{devSystemStatus?.process?.memoryUsage?.heapUsed || '0 MB'} / 512 MB Limit</span>
+                  </div>
+                  <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden', marginTop: '4px' }}>
+                    <div style={{
+                      width: `${Math.min(100, Math.max(1, (parseFloat(devSystemStatus?.process?.memoryUsage?.heapUsed || '0') / 512) * 100))}%`,
+                      height: '100%',
+                      background: 'linear-gradient(90deg, #0a84ff, #64d2ff)',
+                      borderRadius: '3px'
+                    }} />
+                  </div>
+                </div>
+
                 <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem' }}>
                   <span style={{ color: '#8e8e93', display: 'block', fontSize: '0.75rem', marginBottom: '4px' }}>Server OS Platform / CPU Load</span>
                   <span style={{ color: '#fff', fontSize: '0.8rem' }}>
                     {devSystemStatus?.os?.platform || 'Linux'} ({devSystemStatus?.os?.release || 'Generic'}) • Load avg: {devSystemStatus?.os?.cpuUsage ? devSystemStatus.os.cpuUsage.map(l => l.toFixed(2)).join(', ') : 'N/A'}
-                  </span>
-                </div>
-                <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem' }}>
-                  <span style={{ color: '#8e8e93', display: 'block', fontSize: '0.75rem', marginBottom: '4px' }}>Memory Allocation (Heap Used / Heap Total)</span>
-                  <span style={{ color: '#fff', fontSize: '0.8rem' }}>
-                    {devSystemStatus?.process?.memoryUsage?.heapUsed || 'N/A'} / {devSystemStatus?.process?.memoryUsage?.heapTotal || 'N/A'} (RSS: {devSystemStatus?.process?.memoryUsage?.rss || 'N/A'})
                   </span>
                 </div>
               </div>
