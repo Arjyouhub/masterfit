@@ -4,7 +4,7 @@ const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   email: { type: String, default: '' },
   password: { type: String, required: true },
-  role: { type: String, required: true, enum: ['superadmin', 'branchadmin', 'coordinator', 'developer'] },
+  role: { type: String, required: true, enum: ['superadmin', 'branchadmin', 'trainer', 'developer'] },
   branch: { type: String, default: '' },
   batch: { type: String, default: '' },
   status: { type: String, required: true, default: 'Active', enum: ['Active', 'Disabled', 'SoftDeleted'] },
@@ -18,6 +18,8 @@ const userSchema = new mongoose.Schema({
   failedLoginCount: { type: Number, default: 0 },
   passwordChangedAt: { type: Date, default: null },
   isLocked: { type: Boolean, default: false },
+  lockUntil: { type: Date, default: null },
+  lockedAt: { type: Date, default: null },
   failedAttempts: { type: Number, default: 0 }
 }, { timestamps: true });
 

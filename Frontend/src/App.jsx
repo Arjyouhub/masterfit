@@ -18,6 +18,30 @@ const DEFAULT_BATCH_OPTIONS = [
 ];
 
 
+const getCookieValue = (name) => {
+  const cookies = document.cookie.split(';');
+  for (let i = 0; i < cookies.length; i++) {
+    const cookie = cookies[i].trim();
+    if (cookie.startsWith(name + '=')) {
+      return cookie.substring(name.length + 1);
+    }
+  }
+  return '';
+};
+
+const getSessionToken = () => {
+  return localStorage.getItem('umai_session_token') || getCookieValue('umai_session_token');
+};
+
+const sortStudentsAlphabetically = (arr) => {
+  if (!Array.isArray(arr)) return [];
+  return [...arr].sort((a, b) => {
+    const nameA = String(a && a.name || '').trim().toLowerCase();
+    const nameB = String(b && b.name || '').trim().toLowerCase();
+    return nameA.localeCompare(nameB, 'en', { sensitivity: 'base', numeric: true });
+  });
+};
+
 const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
   ? 'http://localhost:5000/api'
   : 'https://masterfit-dfz7.onrender.com/api';
@@ -25,16 +49,7 @@ const API_BASE_URL = window.location.hostname === 'localhost' || window.location
 // Global Fetch Interceptor to automatically append Authorization token
 const originalFetch = window.fetch;
 window.fetch = function (url, options = {}) {
-  const token = localStorage.getItem('umai_session_token') || (() => {
-    const cookies = document.cookie.split(';');
-    for (let i = 0; i < cookies.length; i++) {
-      const cookie = cookies[i].trim();
-      if (cookie.startsWith('umai_session_token=')) {
-        return cookie.substring('umai_session_token='.length);
-      }
-    }
-    return '';
-  })();
+  const token = getSessionToken();
 
   if (token && typeof url === 'string' && url.startsWith(API_BASE_URL)) {
     if (!options.headers) {
@@ -151,11 +166,25 @@ function App() {
   // Global Notifications States
   const [notifications, setNotifications] = useState([]);
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+  const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
   const [newNotificationForm, setNewNotificationForm] = useState({ title: '', message: '', type: 'general' });
   const [notificationSuccess, setNotificationSuccess] = useState('');
   const [notificationError, setNotificationError] = useState('');
   const [activeAnnouncementPopup, setActiveAnnouncementPopup] = useState(null);
-  const [announcementForm, setAnnouncementForm] = useState({ title: '', message: '' });
+  const [announcementForm, setAnnouncementForm] = useState({
+    title: '',
+    message: '',
+    type: 'general',
+    priority: 'medium',
+    branch: 'all',
+    batch: 'all',
+    targetUser: 'all',
+    expiryDate: '',
+    scheduledAt: '',
+    isScheduled: false
+  });
+  const [devNotifications, setDevNotifications] = useState([]);
+  const [editingNotificationId, setEditingNotificationId] = useState(null);
   const [announcementSuccess, setAnnouncementSuccess] = useState('');
   const [announcementError, setAnnouncementError] = useState('');
   const [latestAnnouncement, setLatestAnnouncement] = useState(null);
@@ -217,6 +246,8 @@ function App() {
 
   const [devSettingsSuccess, setDevSettingsSuccess] = useState('');
   const [devSettingsError, setDevSettingsError] = useState('');
+  const [globalSuccess, setGlobalSuccess] = useState('');
+  const [globalError, setGlobalError] = useState('');
   const [devActionLoading, setDevActionLoading] = useState(false);
   const [devSessionFeedback, setDevSessionFeedback] = useState(null);
   const [devUserFeedback, setDevUserFeedback] = useState(null);
@@ -230,6 +261,7 @@ function App() {
   const [userHelpReports, setUserHelpReports] = useState([]);
   const [loadingUserHelpReports, setLoadingUserHelpReports] = useState(false);
   const [isSystemUnderMaintenance, setIsSystemUnderMaintenance] = useState(false);
+  const [maintenanceMode, setMaintenanceMode] = useState('none');
   const [isMaintenanceUpcoming, setIsMaintenanceUpcoming] = useState(false);
   const [maintenanceStart, setMaintenanceStart] = useState(null);
   const [maintenanceEnd, setMaintenanceEnd] = useState(null);
@@ -367,7 +399,7 @@ function App() {
     // Check if user exists in the loaded adminsList
     const match = adminsList.find(a => a.username.toLowerCase().trim() === cleanUsername);
     if (match) {
-      let roleText = 'Batch Inspector';
+      let roleText = 'Trainer';
       if (match.role === 'superadmin') roleText = 'Super Admin';
       else if (match.role === 'developer') roleText = 'Developer';
       else if (match.role === 'branchadmin') roleText = 'Branch Admin';
@@ -422,13 +454,13 @@ function App() {
       };
     }
 
-    // Check if it's a batch coordinator
+    // Check if it's a trainer
     // Find batch in batchOptions
     const batchObj = batchOptions.find(b => b.id.toLowerCase() === userPart);
     const batchNameText = batchObj ? batchObj.name : userPart.charAt(0).toUpperCase() + userPart.slice(1);
 
     return {
-      role: 'Batch Inspector',
+      role: 'Trainer',
       branch: branchName,
       batchName: batchNameText
     };
@@ -541,13 +573,19 @@ function App() {
       return batchOptions;
     }
 
-    return batchOptions.filter(opt => {
+    const filtered = batchOptions.filter(opt => {
       return batchCredentials[`${branchKey}_${opt.id}`] !== undefined;
     });
+
+    if (filtered.length === 0) {
+      return batchOptions;
+    }
+
+    return filtered;
   };
 
   const isBatchAdminUser = (user) => {
-    return userRole === 'coordinator';
+    return userRole === 'trainer' || userRole === 'coordinator';
   };
 
   const getBatchNameFromSchedule = (schedule) => {
@@ -628,7 +666,7 @@ function App() {
         return res.json();
       })
       .then(data => {
-        setStudents(data || []);
+        setStudents(sortStudentsAlphabetically(data));
       })
       .catch(err => console.error('Error fetching students:', err));
 
@@ -756,12 +794,28 @@ function App() {
   };
 
   const handleDeleteAdmin = (id, username) => {
-    if (!window.confirm(`Are you sure you want to delete the admin user "${username}"?`)) {
+    const choice = window.prompt(
+      `Type "SOFT" to soft-delete the user "${username}" (disables login but keeps audit logs),\n` +
+      `Type "PERMANENT" to permanently delete the user account from the database,\n` +
+      `Or click Cancel.`
+    );
+    if (!choice) return;
+    const cleanChoice = choice.toUpperCase().trim();
+    if (cleanChoice !== 'SOFT' && cleanChoice !== 'PERMANENT') {
+      alert("Invalid choice. Action cancelled.");
       return;
     }
 
-    fetch(`${API_BASE_URL}/admins/${id}`, {
-      method: 'DELETE'
+    const permanent = cleanChoice === 'PERMANENT';
+    const url = permanent
+      ? `${API_BASE_URL}/admins/${id}?permanent=true`
+      : `${API_BASE_URL}/admins/${id}`;
+
+    fetch(url, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${getSessionToken()}`
+      }
     })
       .then(res => {
         if (!res.ok) {
@@ -770,7 +824,7 @@ function App() {
         return res.json();
       })
       .then(() => {
-        alert("Admin user account deleted successfully.");
+        alert(permanent ? "Admin user account permanently deleted successfully." : "Admin user account soft-deleted successfully.");
         reloadAllAppData();
       })
       .catch(err => alert("Error: " + err.message));
@@ -920,7 +974,7 @@ function App() {
         const branchVal = getLoggedInUserBranch();
         setNewAdminForm(prev => ({
           ...prev,
-          role: 'coordinator',
+          role: 'trainer',
           branch: branchVal,
           batch: 'batch1'
         }));
@@ -1107,7 +1161,7 @@ function App() {
           const currentUserClean = getSessionUser() ? getSessionUser().toLowerCase().trim() : '';
           const unreadCount = data.filter(n => !n.readBy || !n.readBy.includes(currentUserClean)).length;
           setUnreadNotificationsCount(unreadCount);
-          
+
           if (data.length > 0) {
             setLatestAnnouncement(data[0]);
           } else {
@@ -1118,11 +1172,29 @@ function App() {
       .catch(err => console.error("Error loading notifications:", err));
   };
 
+  const loadDevNotifications = () => {
+    const token = getSessionToken();
+    if (!token) return;
+    fetch(`${API_BASE_URL}/notifications?all=true`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setDevNotifications(data);
+        }
+      })
+      .catch(err => console.error("Error loading developer notifications:", err));
+  };
+
   const checkUnreadAnnouncement = (user = loggedInUser) => {
     if (!user) return;
     const token = getSessionToken();
     if (!token) return;
-    
+
     fetch(`${API_BASE_URL}/notifications`, {
       headers: {
         'Content-Type': 'application/json',
@@ -1135,13 +1207,13 @@ function App() {
           const latest = data[0];
           const userClean = user.toLowerCase().trim();
           const isRead = latest.readBy && latest.readBy.includes(userClean);
-          
+
           if (!isRead) {
             setActiveAnnouncementPopup(latest);
           } else {
             setActiveAnnouncementPopup(null);
           }
-          
+
           setNotifications(data);
           const unreadCount = data.filter(n => !n.readBy || !n.readBy.includes(userClean)).length;
           setUnreadNotificationsCount(unreadCount);
@@ -1152,20 +1224,26 @@ function App() {
       .catch(err => console.error("Error checking announcements:", err));
   };
 
-  const handlePublishAnnouncement = (e) => {
-    e.preventDefault();
+  const handleSaveAnnouncement = (e) => {
+    if (e) e.preventDefault();
     setAnnouncementSuccess('');
     setAnnouncementError('');
-    
+
     if (!announcementForm.title.trim() || !announcementForm.message.trim()) {
       setAnnouncementError('Announcement title and message are required.');
       return;
     }
-    
+
     setDevActionLoading(true);
     const token = getSessionToken();
-    fetch(`${API_BASE_URL}/notifications`, {
-      method: 'POST',
+    const isEdit = !!editingNotificationId;
+    const url = isEdit
+      ? `${API_BASE_URL}/notifications/${editingNotificationId}`
+      : `${API_BASE_URL}/notifications`;
+    const method = isEdit ? 'PUT' : 'POST';
+
+    fetch(url, {
+      method,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
@@ -1173,26 +1251,89 @@ function App() {
       body: JSON.stringify({
         title: announcementForm.title.trim(),
         message: announcementForm.message.trim(),
-        type: 'general'
+        type: announcementForm.type || 'general',
+        priority: announcementForm.priority || 'medium',
+        branch: 'all',
+        batch: 'all',
+        targetUser: announcementForm.targetUser || 'all',
+        expiryDate: announcementForm.expiryDate ? new Date(announcementForm.expiryDate).toISOString() : null,
+        scheduledAt: announcementForm.scheduledAt ? new Date(announcementForm.scheduledAt).toISOString() : null,
+        isScheduled: !!announcementForm.isScheduled
       })
     })
       .then(res => {
         if (!res.ok) {
           return res.json().then(errData => {
-            throw new Error(errData.error || 'Failed to publish announcement');
+            throw new Error(errData.error || 'Failed to save announcement');
           });
         }
         return res.json();
       })
       .then(data => {
-        setAnnouncementSuccess('Global announcement published successfully!');
-        setAnnouncementForm({ title: '', message: '' });
+        setAnnouncementSuccess(isEdit ? 'Announcement updated successfully!' : 'Announcement published successfully!');
+        setAnnouncementForm({
+          title: '',
+          message: '',
+          type: 'general',
+          priority: 'medium',
+          branch: 'all',
+          batch: 'all',
+          targetUser: 'all',
+          expiryDate: '',
+          scheduledAt: '',
+          isScheduled: false
+        });
+        setEditingNotificationId(null);
         loadNotifications();
+        loadDevNotifications();
       })
       .catch(err => {
         setAnnouncementError(err.message);
       })
       .finally(() => setDevActionLoading(false));
+  };
+
+  const handleDeleteNotification = (id) => {
+    if (!window.confirm('Are you sure you want to delete this notification? This action cannot be undone.')) {
+      return;
+    }
+    setAnnouncementSuccess('');
+    setAnnouncementError('');
+    setDevActionLoading(true);
+    const token = getSessionToken();
+    fetch(`${API_BASE_URL}/notifications/${id}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to delete notification');
+        setAnnouncementSuccess('Notification deleted successfully!');
+        loadNotifications();
+        loadDevNotifications();
+      })
+      .catch(err => {
+        setAnnouncementError(err.message);
+      })
+      .finally(() => setDevActionLoading(false));
+  };
+
+  const handleStartEditAnnouncement = (n) => {
+    setEditingNotificationId(n._id);
+    setAnnouncementForm({
+      title: n.title || '',
+      message: n.message || '',
+      type: n.type || 'general',
+      priority: n.priority || 'medium',
+      branch: n.branch || 'all',
+      batch: n.batch || 'all',
+      targetUser: n.targetUser || 'all',
+      expiryDate: n.expiryDate ? new Date(n.expiryDate).toISOString().substring(0, 16) : '',
+      scheduledAt: n.scheduledAt ? new Date(n.scheduledAt).toISOString().substring(0, 16) : '',
+      isScheduled: !!n.isScheduled
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleMarkAsRead = (id) => {
@@ -1231,12 +1372,12 @@ function App() {
     e.preventDefault();
     setNotificationSuccess('');
     setNotificationError('');
-    
+
     if (!newNotificationForm.title.trim() || !newNotificationForm.message.trim()) {
       setNotificationError('Title and message are required.');
       return;
     }
-    
+
     const token = getSessionToken();
     fetch(`${API_BASE_URL}/notifications`, {
       method: 'POST',
@@ -1264,23 +1405,7 @@ function App() {
       });
   };
 
-  const handleDeleteNotification = (id) => {
-    if (!window.confirm('Are you sure you want to delete this notification?')) return;
-    
-    const token = getSessionToken();
-    fetch(`${API_BASE_URL}/notifications/${id}`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      }
-    })
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to delete notification');
-        loadNotifications();
-      })
-      .catch(err => console.error(err));
-  };
+
 
   const loadDevDashboardStats = () => {
     fetch(`${API_BASE_URL}/developer/dashboard-stats`, { headers: getDevHeaders() })
@@ -1366,6 +1491,60 @@ function App() {
       .catch(err => console.error("Error loading database stats:", err));
   };
 
+  const handleDeleteLoginHistory = (id) => {
+    if (!window.confirm("Are you sure you want to delete this login history entry?")) return;
+    fetch(`${API_BASE_URL}/developer/login-history/${id}`, {
+      method: 'DELETE',
+      headers: getDevHeaders()
+    })
+      .then(res => {
+        if (!res.ok) throw new Error("Failed to delete entry");
+        loadDevLoginHistory(devLoginHistoryPage);
+      })
+      .catch(err => alert("Error: " + err.message));
+  };
+
+  const handleClearAllLoginHistory = () => {
+    if (!window.confirm("WARNING: Are you sure you want to clear ALL login history entries? This cannot be undone.")) return;
+    fetch(`${API_BASE_URL}/developer/login-history`, {
+      method: 'DELETE',
+      headers: getDevHeaders()
+    })
+      .then(res => {
+        if (!res.ok) throw new Error("Failed to clear history");
+        setDevLoginHistoryPage(1);
+        loadDevLoginHistory(1);
+      })
+      .catch(err => alert("Error: " + err.message));
+  };
+
+  const handleDeleteAuditLog = (id) => {
+    if (!window.confirm("Are you sure you want to delete this security/audit log entry?")) return;
+    fetch(`${API_BASE_URL}/developer/security-logs/${id}`, {
+      method: 'DELETE',
+      headers: getDevHeaders()
+    })
+      .then(res => {
+        if (!res.ok) throw new Error("Failed to delete entry");
+        loadDevAuditLogs(devAuditLogsPage, devAuditType);
+      })
+      .catch(err => alert("Error: " + err.message));
+  };
+
+  const handleClearAllAuditLogs = () => {
+    if (!window.confirm("WARNING: Are you sure you want to clear ALL security and audit logs? This cannot be undone.")) return;
+    fetch(`${API_BASE_URL}/developer/security-logs`, {
+      method: 'DELETE',
+      headers: getDevHeaders()
+    })
+      .then(res => {
+        if (!res.ok) throw new Error("Failed to clear logs");
+        setDevAuditLogsPage(1);
+        loadDevAuditLogs(1, devAuditType);
+      })
+      .catch(err => alert("Error: " + err.message));
+  };
+
   const loadDevAuditLogs = (page = devAuditLogsPage, type = devAuditType) => {
     fetch(`${API_BASE_URL}/developer/audit?page=${page}&limit=10&eventType=${type}`, { headers: getDevHeaders() })
       .then(res => res.json())
@@ -1378,11 +1557,47 @@ function App() {
       .catch(err => console.error("Error loading audit logs:", err));
   };
 
+  const [lockedUsers, setLockedUsers] = useState([]);
+
+  const loadLockedUsers = () => {
+    fetch(`${API_BASE_URL}/developer/locked-users`, { headers: getDevHeaders() })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to load locked accounts');
+        return res.json();
+      })
+      .then(data => {
+        setLockedUsers(data || []);
+      })
+      .catch(err => console.error("Error loading locked accounts:", err));
+  };
+
+  const unlockUserAccount = (userId) => {
+    fetch(`${API_BASE_URL}/developer/users/${userId}/lock`, {
+      method: 'PUT',
+      headers: getDevHeaders(),
+      body: JSON.stringify({ isLocked: false })
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to unlock account');
+        return res.json();
+      })
+      .then(() => {
+        setGlobalSuccess("Account unlocked successfully.");
+        loadLockedUsers();
+      })
+      .catch(err => {
+        console.error("Error unlocking account:", err);
+        setGlobalError(`Failed to unlock account: ${err.message}`);
+      });
+  };
+
   const loadDevSettings = () => {
     fetch(`${API_BASE_URL}/developer/settings`, { headers: getDevHeaders() })
       .then(res => res.json())
       .then(data => setDevSettings(data))
       .catch(err => console.error("Error loading dev settings:", err));
+    loadDevNotifications();
+    loadLockedUsers();
   };
 
   const loadDevHelpReports = (page = devHelpReportsPage) => {
@@ -1536,6 +1751,49 @@ function App() {
       .finally(() => setDevActionLoading(false));
   };
 
+  const handleClearBroadcastMessage = () => {
+    if (!window.confirm("Are you sure you want to delete and stop the current System Alert Broadcast? This will immediately remove it for all users.")) {
+      return;
+    }
+    const updated = { ...devSettings, systemAlertMessage: '' };
+    setDevActionLoading(true);
+    fetch(`${API_BASE_URL}/developer/settings`, {
+      method: 'POST',
+      headers: getDevHeaders(),
+      body: JSON.stringify(updated)
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to update system settings');
+        setDevSettings(data.settings);
+        setSystemAlertMessage('');
+        setDevSettingsSuccess('System alert broadcast has been deleted and stopped.');
+      })
+      .catch(err => setDevSettingsError(err.message))
+      .finally(() => setDevActionLoading(false));
+  };
+
+  const handleClearUpdateNotification = () => {
+    if (!window.confirm("Are you sure you want to delete and clear the current System Update Notification?")) {
+      return;
+    }
+    const updated = { ...devSettings, systemUpdateNotification: '' };
+    setDevActionLoading(true);
+    fetch(`${API_BASE_URL}/developer/settings`, {
+      method: 'POST',
+      headers: getDevHeaders(),
+      body: JSON.stringify(updated)
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to update system settings');
+        setDevSettings(data.settings);
+        setDevSettingsSuccess('System update notification has been deleted.');
+      })
+      .catch(err => setDevSettingsError(err.message))
+      .finally(() => setDevActionLoading(false));
+  };
+
   const handleDevUserSave = (e) => {
     e.preventDefault();
     setDevUserFeedback(null);
@@ -1563,20 +1821,36 @@ function App() {
   };
 
   const handleDevUserSoftDelete = (id) => {
-    if (!window.confirm("Are you sure you want to soft delete this user? They will be disabled and password credentials will be removed.")) return;
+    const choice = window.prompt(
+      `Type "SOFT" to soft-delete this user account (disables login but keeps logs),\n` +
+      `Type "PERMANENT" to permanently delete this user account from the database,\n` +
+      `Or click Cancel.`
+    );
+    if (!choice) return;
+    const cleanChoice = choice.toUpperCase().trim();
+    if (cleanChoice !== 'SOFT' && cleanChoice !== 'PERMANENT') {
+      alert("Invalid choice. Action cancelled.");
+      return;
+    }
+
+    const permanent = cleanChoice === 'PERMANENT';
     setDevUserFeedback(null);
     setDevActionLoading(true);
 
-    fetch(`${API_BASE_URL}/developer/users/${id}`, {
+    const url = permanent
+      ? `${API_BASE_URL}/developer/users/${id}?permanent=true`
+      : `${API_BASE_URL}/developer/users/${id}`;
+
+    fetch(url, {
       method: 'DELETE',
       headers: getDevHeaders()
     })
       .then(async res => {
         const data = await res.json();
         if (!res.ok) {
-          throw new Error(data.error || 'Failed to soft delete user.');
+          throw new Error(data.error || 'Failed to delete user.');
         }
-        setDevUserFeedback({ type: 'success', message: 'User soft-deleted successfully.' });
+        setDevUserFeedback({ type: 'success', message: permanent ? 'User permanently deleted successfully.' : 'User soft-deleted successfully.' });
         loadDevUsers(devUsersPage, devUserSearch);
       })
       .catch(err => {
@@ -1769,10 +2043,12 @@ function App() {
         .then(res => res.json())
         .then(data => {
           setIsSystemUnderMaintenance(!!data.isMaintenanceActive);
+          setMaintenanceMode(data.maintenanceMode || 'none');
           setIsMaintenanceUpcoming(!!data.isMaintenanceUpcoming);
           setMaintenanceStart(data.maintenanceStart || null);
           setMaintenanceEnd(data.maintenanceEnd || null);
           setSystemAlertMessage(data.systemAlertMessage || '');
+
         })
         .catch(err => console.error("Error checking maintenance status:", err));
 
@@ -1872,7 +2148,7 @@ function App() {
       .then(res => res.json())
       .then(data => {
         setBatchCredentials(data.batchCredentials || {});
-        setSettingsSuccess(`Batch Inspector credentials for "${br.toUpperCase()} - ${bt.toUpperCase()}" updated successfully!`);
+        setSettingsSuccess(`Trainer credentials for "${br.toUpperCase()} - ${bt.toUpperCase()}" updated successfully!`);
         setBatchForm({ branch: br, batch: bt, newUsername: '', newPassword: '', confirmPassword: '' });
       })
       .catch(err => {
@@ -2423,10 +2699,12 @@ function App() {
 
   // Profile modal dues calculation month limit
   const [profileFeeMonth, setProfileFeeMonth] = useState(getLocalMonthString());
+  const [profileAttendanceMonth, setProfileAttendanceMonth] = useState(getLocalMonthString());
 
   useEffect(() => {
     if (selectedStudent) {
       setProfileFeeMonth(feeMonth);
+      setProfileAttendanceMonth(feeMonth);
     }
   }, [selectedStudent, feeMonth]);
 
@@ -2444,7 +2722,7 @@ function App() {
 
   // Form State
   const [newStudent, setNewStudent] = useState({
-    name: '', age: '', phone: '', belt: 'White', joinDate: getLocalDateString(), batch: 'Morning', schedule: 'Mon-Thu', branch: 'Kuttiady', photo: null, status: 'Active'
+    name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: '', photo: null
   });
 
   const compressImage = (base64Str, maxWidth = 150, maxHeight = 150, quality = 0.7) => {
@@ -2499,7 +2777,7 @@ function App() {
   // Global Search State
   const [searchQuery, setSearchQuery] = useState('');
 
-  const searchedStudents = students.filter(s => {
+  const searchedStudents = sortStudentsAlphabetically(students.filter(s => {
     const matchesSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase()) || s.phone.includes(searchQuery);
 
     let activeBranch = 'All';
@@ -2521,7 +2799,7 @@ function App() {
     const matchesBatch = batchFilter === 'All' ||
       (s.schedule && batchFilter && s.schedule.toLowerCase().trim() === batchFilter.toLowerCase().trim());
 
-    if (userRole === 'coordinator') {
+    if (userRole === 'trainer' || userRole === 'coordinator') {
       const activeBatch = batchOptions.find(b => b.id.toLowerCase() === userBatch.toLowerCase());
       if (activeBatch) {
         return matchesSearch && matchesBranch && matchesStatus && matchesBatch && s.schedule === activeBatch.schedule;
@@ -2529,7 +2807,7 @@ function App() {
     }
 
     return matchesSearch && matchesBranch && matchesStatus && matchesBatch;
-  });
+  }));
 
   const getBeltColorClass = (belt) => {
     switch (belt.toLowerCase()) {
@@ -2550,16 +2828,28 @@ function App() {
     setStudentToDelete(id);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = (permanent = false) => {
     if (studentToDelete !== null) {
-      setStudents(students.filter(s => s.id !== studentToDelete));
+      if (permanent) {
+        setStudents(students.filter(s => s.id !== studentToDelete));
+      } else {
+        setStudents(students.map(s => s.id === studentToDelete ? { ...s, status: 'SoftDeleted' } : s));
+      }
       setSelectedStudent(null);
 
-      fetch(`${API_BASE_URL}/students/${studentToDelete}`, {
-        method: 'DELETE'
+      const url = permanent
+        ? `${API_BASE_URL}/students/${studentToDelete}?permanent=true`
+        : `${API_BASE_URL}/students/${studentToDelete}`;
+
+      fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${getSessionToken()}`
+        }
       })
         .then(res => {
           if (!res.ok) throw new Error('Failed to delete on server');
+          if (typeof loadStudents === 'function') loadStudents();
         })
         .catch(err => console.error("Error deleting student:", err));
 
@@ -2569,20 +2859,63 @@ function App() {
 
   const handleAddStudent = (e) => {
     e.preventDefault();
+
+    const phoneClean = newStudent.phone.trim();
+    if (!/^\d{10}$/.test(phoneClean)) {
+      setGlobalError("Student mobile number must be exactly 10 digits.");
+      return;
+    }
+
+    const parentPhoneClean = newStudent.parentPhone ? newStudent.parentPhone.trim() : '';
+    if (!/^\d{10}$/.test(parentPhoneClean)) {
+      setGlobalError("Parent mobile number must be exactly 10 digits.");
+      return;
+    }
+
+    if (!newStudent.dob) {
+      setGlobalError("Date of Birth (DOB) is required.");
+      return;
+    }
+
     let defaultBranch = getLoggedInUserBranch();
+    if (defaultBranch === 'All') {
+      defaultBranch = branches[0] || 'Kuttiady';
+    }
+
+    let studentBatch = newStudent.batch;
+    let studentSchedule = newStudent.schedule;
+
+    if (userRole === 'trainer' || userRole === 'coordinator') {
+      const activeBatch = batchOptions.find(b => b.id.toLowerCase() === userBatch.toLowerCase());
+      if (activeBatch) {
+        studentBatch = activeBatch.name;
+        studentSchedule = activeBatch.schedule;
+      }
+    }
+
+    const resolvedBranch = (userRole === 'trainer' || userRole === 'coordinator' || userRole === 'branchadmin')
+      ? defaultBranch
+      : ((isAdminUser(loggedInUser) || appMode === 'superadmin-login') ? newStudent.branch : (appMode === 'login' ? selectedBranchLogin : defaultBranch));
 
     const student = {
       ...newStudent,
-      branch: (userRole === 'coordinator' || userRole === 'branchadmin')
-        ? defaultBranch
-        : ((isAdminUser(loggedInUser) || appMode === 'login' || appMode === 'superadmin-login') ? newStudent.branch : defaultBranch),
+      phone: phoneClean,
+      parentPhone: parentPhoneClean,
+      branch: resolvedBranch,
+      batch: studentBatch,
+      schedule: studentSchedule,
       status: "Active",
       admissionPaid: false,
       paidMonths: {},
       performanceScore: 50
     };
 
-    fetch(`${API_BASE_URL}/students`, {
+    const isPublicRegistration = !loggedInUser || appMode === 'login';
+    const targetUrl = isPublicRegistration
+      ? `${API_BASE_URL}/public/students`
+      : `${API_BASE_URL}/students`;
+
+    fetch(targetUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(student)
@@ -2596,21 +2929,16 @@ function App() {
         return res.json();
       })
       .then(savedStudent => {
-        // Confirmation from DB received: update local state
-        setStudents(prev => [...prev, savedStudent]);
+        setStudents(prev => sortStudentsAlphabetically([...prev, savedStudent]));
         setIsAddModalOpen(false);
-        setNewStudent({ name: '', age: '', phone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: defaultBranch, photo: null });
+        setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: defaultBranch === 'All' ? (branches[0] || 'Kuttiady') : defaultBranch, photo: null });
 
-        if (appMode === 'login' || appMode === 'superadmin-login') {
-          alert(`Enrollment request for ${savedStudent.name} submitted successfully!`);
-        }
-
-        // Fetch latest student list to sync state
+        setGlobalSuccess("Student added successfully.");
         reloadAllAppData();
       })
       .catch(err => {
         console.error("Error creating student:", err);
-        alert(`Failed to save student: ${err.message}`);
+        setGlobalError(`Failed to save student: ${err.message}`);
       });
   };
 
@@ -3110,8 +3438,8 @@ function App() {
                     <td>{u.email || 'N/A'}</td>
                     <td>
                       <span className={`dev-badge ${u.role === 'developer' ? 'dev-badge-blue' :
-                          u.role === 'superadmin' ? 'dev-badge-yellow' :
-                            u.role === 'branchadmin' ? 'dev-badge-green' : 'dev-badge-gray'
+                        u.role === 'superadmin' ? 'dev-badge-yellow' :
+                          u.role === 'branchadmin' ? 'dev-badge-green' : 'dev-badge-gray'
                         }`}>{u.role}</span>
                     </td>
                     <td>
@@ -3235,7 +3563,7 @@ function App() {
                     <option value="superadmin">Super Admin</option>
                     <option value="developer">Developer</option>
                     <option value="branchadmin">Branch Admin</option>
-                    <option value="coordinator">Batch Inspector</option>
+                    <option value="trainer">Trainer</option>
                   </select>
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
@@ -3585,7 +3913,19 @@ function App() {
 
         {/* Login History */}
         <div>
-          <h4 style={{ margin: '0 0 1rem 0', color: '#fff', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.5px' }}>Device Login History</h4>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h4 style={{ margin: 0, color: '#fff', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.5px' }}>Device Login History</h4>
+            {devLoginHistory.length > 0 && (
+              <button
+                type="button"
+                className="dev-btn dev-btn-secondary"
+                style={{ padding: '4px 12px', fontSize: '0.75rem', color: '#ff453a', background: 'rgba(255, 69, 58, 0.08)', border: '1px solid rgba(255, 69, 58, 0.15)', cursor: 'pointer' }}
+                onClick={handleClearAllLoginHistory}
+              >
+                Clear All History
+              </button>
+            )}
+          </div>
           <div className="dev-table-container">
             <table className="dev-table">
               <thead>
@@ -3595,6 +3935,7 @@ function App() {
                   <th>IP Address</th>
                   <th>Status</th>
                   <th>Timestamp</th>
+                  <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -3608,11 +3949,21 @@ function App() {
                         <span className={`dev-badge ${h.status === 'Success' ? 'dev-badge-green' : 'dev-badge-red'}`}>{h.status}</span>
                       </td>
                       <td>{new Date(h.createdAt).toLocaleString()}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          type="button"
+                          className="dev-btn dev-btn-secondary"
+                          style={{ padding: '2px 8px', fontSize: '0.7rem', color: '#ff453a', background: 'rgba(255, 69, 58, 0.05)', border: '1px solid rgba(255, 69, 58, 0.1)', cursor: 'pointer' }}
+                          onClick={() => handleDeleteLoginHistory(h._id)}
+                        >
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="5" style={{ textAlign: 'center', color: '#8e8e93', padding: '2rem' }}>No login attempts catalogued.</td>
+                    <td colSpan="6" style={{ textAlign: 'center', color: '#8e8e93', padding: '2rem' }}>No login attempts catalogued.</td>
                   </tr>
                 )}
               </tbody>
@@ -3675,8 +4026,8 @@ function App() {
                   <tr key={l._id}>
                     <td>
                       <span className={`dev-badge ${l.eventType === 'FailedLogin' ? 'dev-badge-red' :
-                          l.eventType === 'RoleChange' ? 'dev-badge-yellow' :
-                            l.eventType === 'SystemConfigUpdate' ? 'dev-badge-blue' : 'dev-badge-gray'
+                        l.eventType === 'RoleChange' ? 'dev-badge-yellow' :
+                          l.eventType === 'SystemConfigUpdate' ? 'dev-badge-blue' : 'dev-badge-gray'
                         }`}>{l.eventType}</span>
                     </td>
                     <td style={{ fontWeight: 600, color: '#fff' }}>{l.username || 'System'}</td>
@@ -4028,8 +4379,18 @@ function App() {
             <option value="SessionTermination">Session expiries</option>
           </select>
           <div style={{ flex: 1 }}></div>
-          <div style={{ color: '#8e8e93', fontSize: '0.85rem' }}>
-            Catalogued Events: <strong>{devAuditLogsTotalItems}</strong> records
+          <div style={{ color: '#8e8e93', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <span>Catalogued Events: <strong>{devAuditLogsTotalItems}</strong> records</span>
+            {devAuditLogs.length > 0 && (
+              <button
+                type="button"
+                className="dev-btn dev-btn-secondary"
+                style={{ padding: '4px 12px', fontSize: '0.75rem', color: '#ff453a', background: 'rgba(255, 69, 58, 0.08)', border: '1px solid rgba(255, 69, 58, 0.15)', cursor: 'pointer' }}
+                onClick={handleClearAllAuditLogs}
+              >
+                Clear All Audit Logs
+              </button>
+            )}
           </div>
         </div>
 
@@ -4042,6 +4403,7 @@ function App() {
                 <th>Operation Details</th>
                 <th>IP Address</th>
                 <th>Date & Time</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -4050,19 +4412,29 @@ function App() {
                   <tr key={l._id}>
                     <td>
                       <span className={`dev-badge ${l.eventType === 'DeveloperAudit' ? 'dev-badge-purple' :
-                          l.eventType === 'SystemConfigUpdate' ? 'dev-badge-blue' :
-                            l.eventType === 'RoleChange' ? 'dev-badge-yellow' : 'dev-badge-gray'
+                        l.eventType === 'SystemConfigUpdate' ? 'dev-badge-blue' :
+                          l.eventType === 'RoleChange' ? 'dev-badge-yellow' : 'dev-badge-gray'
                         }`}>{l.eventType}</span>
                     </td>
                     <td style={{ fontWeight: 600, color: '#fff' }}>{l.username || 'System'}</td>
                     <td>{l.description}</td>
                     <td>{l.ipAddress}</td>
                     <td>{new Date(l.createdAt).toLocaleString()}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button
+                        type="button"
+                        className="dev-btn dev-btn-secondary"
+                        style={{ padding: '2px 8px', fontSize: '0.7rem', color: '#ff453a', background: 'rgba(255, 69, 58, 0.05)', border: '1px solid rgba(255, 69, 58, 0.1)', cursor: 'pointer' }}
+                        onClick={() => handleDeleteAuditLog(l._id)}
+                      >
+                        Delete
+                      </button>
+                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan="5" style={{ textAlign: 'center', color: '#8e8e93', padding: '2rem' }}>No audit trail actions recorded.</td>
+                  <td colSpan="6" style={{ textAlign: 'center', color: '#8e8e93', padding: '2rem' }}>No audit trail actions recorded.</td>
                 </tr>
               )}
             </tbody>
@@ -4109,30 +4481,43 @@ function App() {
           System Control & Configuration Center
         </h4>
 
-        {devSettingsSuccess && (
-          <div className="dev-banner dev-banner-success">
-            <CheckCircle size={16} />
-            <span>{devSettingsSuccess}</span>
-          </div>
-        )}
-        {devSettingsError && (
-          <div className="dev-banner dev-banner-error">
-            <AlertTriangle size={16} />
-            <span>{devSettingsError}</span>
-          </div>
-        )}
+
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', alignItems: 'start' }}>
-          
+
           {/* LEFT COLUMN: System Config Forms */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-            
+
             {/* Announcement Management Section */}
             <div className="dev-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div className="dev-card-header">
                 <h4 className="dev-card-title">
-                  <Bell size={16} color="#5e5ce6" /> Announcement Management
+                  <Bell size={16} color="#5e5ce6" /> {editingNotificationId ? 'Edit Announcement' : 'Announcement Management'}
                 </h4>
+                {editingNotificationId && (
+                  <button
+                    type="button"
+                    className="dev-btn dev-btn-secondary"
+                    style={{ padding: '2px 8px', fontSize: '0.75rem', background: 'rgba(255, 69, 58, 0.1)', cursor: 'pointer', border: '1px solid rgba(255, 69, 58, 0.2)' }}
+                    onClick={() => {
+                      setEditingNotificationId(null);
+                      setAnnouncementForm({
+                        title: '',
+                        message: '',
+                        type: 'general',
+                        priority: 'medium',
+                        branch: 'all',
+                        batch: 'all',
+                        targetUser: 'all',
+                        expiryDate: '',
+                        scheduledAt: '',
+                        isScheduled: false
+                      });
+                    }}
+                  >
+                    Cancel Edit
+                  </button>
+                )}
               </div>
 
               {announcementSuccess && (
@@ -4147,9 +4532,9 @@ function App() {
               )}
 
               <div className="form-group" style={{ margin: 0 }}>
-                <label style={{ display: 'block', marginBottom: '6px', color: '#fff', fontSize: '0.85rem' }}>Announcement Title</label>
-                <input 
-                  type="text" 
+                <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem' }}>Announcement Title</label>
+                <input
+                  type="text"
                   className="dev-input"
                   placeholder="e.g. Scheduled System Upgrade"
                   value={announcementForm.title}
@@ -4158,39 +4543,103 @@ function App() {
               </div>
 
               <div className="form-group" style={{ margin: 0 }}>
-                <label style={{ display: 'block', marginBottom: '6px', color: '#fff', fontSize: '0.85rem' }}>Announcement Message</label>
-                <textarea 
+                <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem' }}>Announcement Message</label>
+                <textarea
                   className="dev-input"
-                  style={{ minHeight: '80px', resize: 'vertical' }}
+                  style={{ minHeight: '85px', resize: 'vertical' }}
                   placeholder="Enter details of the update, system status, or announcement..."
                   value={announcementForm.message}
                   onChange={(e) => setAnnouncementForm({ ...announcementForm, message: e.target.value })}
                 ></textarea>
               </div>
 
-              <button 
-                type="button" 
-                className="dev-btn dev-btn-primary" 
-                onClick={handlePublishAnnouncement}
-                disabled={devActionLoading}
-                style={{ alignSelf: 'flex-start' }}
-              >
-                {devActionLoading ? 'Publishing...' : 'Publish Announcement'}
-              </button>
-
-              {latestAnnouncement && (
-                <div style={{ marginTop: '0.75rem', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '0.75rem' }}>
-                  <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#8e8e93', fontWeight: 600, letterSpacing: '0.5px' }}>Current Active Announcement</span>
-                  <div style={{ background: 'rgba(0, 0, 0, 0.25)', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.03)', marginTop: '0.5rem' }}>
-                    <h5 style={{ margin: 0, color: '#fff', fontSize: '0.9rem', fontWeight: 600 }}>{latestAnnouncement.title}</h5>
-                    <p style={{ color: '#d1d1d6', fontSize: '0.8rem', marginTop: '0.4rem', whiteSpace: 'pre-wrap', lineHeight: '1.4', margin: '0.4rem 0 0 0' }}>{latestAnnouncement.message}</p>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: '#8e8e93', marginTop: '0.6rem', borderTop: '1px solid rgba(255, 255, 255, 0.03)', paddingTop: '0.4rem' }}>
-                      <span>By: {latestAnnouncement.sender}</span>
-                      <span>{new Date(latestAnnouncement.createdAt).toLocaleDateString()} {new Date(latestAnnouncement.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    </div>
-                  </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem' }}>Notification Type</label>
+                  <select
+                    className="dev-input"
+                    value={announcementForm.type || 'general'}
+                    onChange={(e) => setAnnouncementForm({ ...announcementForm, type: e.target.value })}
+                  >
+                    <option value="general">General</option>
+                    <option value="maintenance">Maintenance</option>
+                    <option value="update">Update</option>
+                    <option value="warning">Warning</option>
+                    <option value="system">System</option>
+                  </select>
                 </div>
-              )}
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem' }}>Priority Level</label>
+                  <select
+                    className="dev-input"
+                    value={announcementForm.priority || 'medium'}
+                    onChange={(e) => setAnnouncementForm({ ...announcementForm, priority: e.target.value })}
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
+              </div>
+
+
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem' }}>Target Specific Username</label>
+                  <input
+                    type="text"
+                    className="dev-input"
+                    placeholder="all or username"
+                    value={announcementForm.targetUser || 'all'}
+                    onChange={(e) => setAnnouncementForm({ ...announcementForm, targetUser: e.target.value })}
+                  />
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem' }}>Expiry Date & Time</label>
+                  <input
+                    type="datetime-local"
+                    className="dev-input"
+                    value={announcementForm.expiryDate || ''}
+                    onChange={(e) => setAnnouncementForm({ ...announcementForm, expiryDate: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fff', fontSize: '0.85rem', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!announcementForm.isScheduled}
+                    onChange={(e) => setAnnouncementForm({ ...announcementForm, isScheduled: e.target.checked })}
+                  />
+                  <span>Schedule this announcement for later release</span>
+                </label>
+
+                {announcementForm.isScheduled && (
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem' }}>Release Date & Time</label>
+                    <input
+                      type="datetime-local"
+                      className="dev-input"
+                      value={announcementForm.scheduledAt || ''}
+                      onChange={(e) => setAnnouncementForm({ ...announcementForm, scheduledAt: e.target.value })}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                className="dev-btn dev-btn-primary"
+                onClick={handleSaveAnnouncement}
+                disabled={devActionLoading}
+                style={{ alignSelf: 'flex-start', marginTop: '0.5rem' }}
+              >
+                {devActionLoading ? 'Saving...' : (editingNotificationId ? 'Save Changes' : 'Publish Announcement')}
+              </button>
             </div>
 
             {/* System Diagnostic Information */}
@@ -4253,17 +4702,48 @@ function App() {
             {/* Maintenance Mode Option */}
             <div className="form-group" style={{ margin: 0 }}>
               <label style={{ color: '#fff', display: 'block', marginBottom: '6px' }}>System Maintenance Scope Lockout</label>
-              <select
-                className="dev-input"
-                value={devSettings.maintenanceMode || 'none'}
-                onChange={(e) => setDevSettings({ ...devSettings, maintenanceMode: e.target.value })}
-              >
-                <option value="none">None (System Fully Open)</option>
-                <option value="all">All Portals (Lock everyone except Developers)</option>
-                <option value="branch">Branch Portals Only (Lock Branch Admins)</option>
-                <option value="batch">Coordinator Portals Only (Lock Coordinators)</option>
-                <option value="admin">Admin Panel Only (Lock Superadmins, Branch Admins, and Coordinators)</option>
-              </select>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <select
+                  className="dev-input"
+                  value={devSettings.maintenanceMode || 'none'}
+                  onChange={(e) => setDevSettings({ ...devSettings, maintenanceMode: e.target.value })}
+                  style={{
+                    flex: 1,
+                    borderColor:
+                      devSettings.maintenanceMode === 'none' ? '#30d158' :
+                        devSettings.maintenanceMode === 'all' ? '#ff453a' : '#ff9f0a',
+                    color:
+                      devSettings.maintenanceMode === 'none' ? '#30d158' :
+                        devSettings.maintenanceMode === 'all' ? '#ff453a' : '#ff9f0a',
+                    fontWeight: 'bold',
+                    transition: 'all 0.3s ease'
+                  }}
+                >
+                  <option value="none" style={{ color: '#fff', background: '#1c1c2e' }}>All Logins Open</option>
+                  <option value="batch" style={{ color: '#fff', background: '#1c1c2e' }}>Batch Login Only</option>
+                  <option value="branch" style={{ color: '#fff', background: '#1c1c2e' }}>Branch Login Only</option>
+                  <option value="admin" style={{ color: '#fff', background: '#1c1c2e' }}>Admin Login Only</option>
+                  <option value="all" style={{ color: '#fff', background: '#1c1c2e' }}>All Logins Except Developer</option>
+                </select>
+                <span className="badge" style={{
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  fontSize: '0.75rem',
+                  fontWeight: 'bold',
+                  background:
+                    devSettings.maintenanceMode === 'none' ? 'rgba(48, 209, 88, 0.15)' :
+                      devSettings.maintenanceMode === 'all' ? 'rgba(255, 69, 58, 0.15)' : 'rgba(255, 159, 10, 0.15)',
+                  color:
+                    devSettings.maintenanceMode === 'none' ? '#30d158' :
+                      devSettings.maintenanceMode === 'all' ? '#ff453a' : '#ff9f0a',
+                  border: `1px solid ${devSettings.maintenanceMode === 'none' ? 'rgba(48, 209, 88, 0.3)' :
+                      devSettings.maintenanceMode === 'all' ? 'rgba(255, 69, 58, 0.3)' : 'rgba(255, 159, 10, 0.3)'
+                    }`,
+                  transition: 'all 0.3s ease'
+                }}>
+                  {devSettings.maintenanceMode === 'none' ? 'Fully Open' : 'System Locked'}
+                </span>
+              </div>
             </div>
 
             {/* Maintenance Start Time */}
@@ -4294,47 +4774,11 @@ function App() {
               />
             </div>
 
-            {devSettings.maintenanceStart && devSettings.maintenanceEnd && (
-              <div style={{ padding: '0.75rem 0.85rem', background: 'rgba(255, 159, 10, 0.1)', border: '1px solid rgba(255, 159, 10, 0.25)', borderRadius: '8px', fontSize: '0.8rem', color: '#ff9f0a', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', fontSize: '0.725rem' }}>Maintenance Alert Summary</span>
-                  <button
-                    type="button"
-                    onClick={() => setDevSettings({ ...devSettings, maintenanceStart: null, maintenanceEnd: null })}
-                    style={{ background: 'rgba(255, 69, 58, 0.15)', border: '1px solid rgba(255, 69, 58, 0.3)', color: '#ff453a', padding: '2px 8px', borderRadius: '4px', fontSize: '0.7rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                  >
-                    <Trash2 size={11} /> Clear
-                  </button>
-                </div>
-                <div>
-                  <span style={{ display: 'block' }}><strong>Alert Pre-banner:</strong> Active now.</span>
-                  <span style={{ display: 'block', marginTop: '2px' }}><strong>Lockout window:</strong> {formatMaintenanceTime(devSettings.maintenanceStart)} to {formatMaintenanceTime(devSettings.maintenanceEnd)}.</span>
-                </div>
-              </div>
-            )}
 
-            {/* System Broadcast Alert Message */}
-            <div className="form-group" style={{ margin: 0 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <label style={{ color: '#fff', margin: 0 }}>System Alert Broadcast Message (All pages banner)</label>
-                {devSettings.systemAlertMessage && (
-                  <button
-                    type="button"
-                    onClick={() => setDevSettings({ ...devSettings, systemAlertMessage: '' })}
-                    style={{ background: 'rgba(255, 69, 58, 0.15)', border: '1px solid rgba(255, 69, 58, 0.3)', color: '#ff453a', padding: '2px 8px', borderRadius: '4px', fontSize: '0.725rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                  >
-                    <Trash2 size={12} /> Clear
-                  </button>
-                )}
-              </div>
-              <textarea
-                className="dev-input"
-                style={{ minHeight: '60px', resize: 'vertical' }}
-                value={devSettings.systemAlertMessage || ''}
-                onChange={(e) => setDevSettings({ ...devSettings, systemAlertMessage: e.target.value })}
-                placeholder="e.g. Scheduled database backup details..."
-              ></textarea>
-            </div>
+
+
+
+
 
             {/* Session Timeout */}
             <div className="form-group" style={{ margin: 0 }}>
@@ -4411,6 +4855,184 @@ function App() {
           </form>
 
         </div>
+
+        {/* Published Announcements Center */}
+        <div className="dev-card" style={{ width: '100%', marginTop: '1rem' }}>
+          <div className="dev-card-header">
+            <h4 className="dev-card-title">
+              <Bell size={16} color="#bf5af2" /> Published Announcements Center
+            </h4>
+          </div>
+
+          {devNotifications.length === 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: '#8e8e93', fontSize: '0.9rem' }}>
+              No announcements published yet.
+            </div>
+          ) : (
+            <div className="dev-table-container" style={{ marginTop: '0.5rem' }}>
+              <table className="dev-table">
+                <thead>
+                  <tr>
+                    <th>Title & Sender</th>
+                    <th>Type / Priority</th>
+                    <th>Target Scope</th>
+                    <th>Timing / Status</th>
+                    <th style={{ textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {devNotifications.map(n => {
+                    const isExpired = n.expiryDate && new Date(n.expiryDate) < new Date();
+                    const isFuture = n.isScheduled && n.scheduledAt && new Date(n.scheduledAt) > new Date();
+                    let timingText = 'Sent Immediately';
+                    let timingColor = '#30d158';
+                    if (isFuture) {
+                      timingText = `Scheduled: ${new Date(n.scheduledAt).toLocaleString()}`;
+                      timingColor = '#ff9f0a';
+                    } else if (n.scheduledAt) {
+                      timingText = `Released: ${new Date(n.scheduledAt).toLocaleString()}`;
+                      timingColor = '#30d158';
+                    }
+                    return (
+                      <tr key={n._id}>
+                        <td>
+                          <div style={{ fontWeight: 600, color: '#fff' }}>{n.title}</div>
+                          <div style={{ fontSize: '0.75rem', color: '#8e8e93' }}>By: {n.sender} • {new Date(n.createdAt).toLocaleDateString()}</div>
+                        </td>
+                        <td>
+                          <span className="badge" style={{
+                            marginRight: '6px',
+                            background: n.type === 'warning' || n.type === 'maintenance' ? 'rgba(255, 69, 58, 0.15)' : 'rgba(10, 132, 255, 0.15)',
+                            color: n.type === 'warning' || n.type === 'maintenance' ? '#ff453a' : '#0a84ff',
+                            fontSize: '0.7rem'
+                          }}>
+                            {n.type}
+                          </span>
+                          <span className="badge" style={{
+                            background: n.priority === 'high' ? 'rgba(255, 69, 58, 0.15)' : n.priority === 'medium' ? 'rgba(255, 159, 10, 0.15)' : 'rgba(48, 209, 88, 0.15)',
+                            color: n.priority === 'high' ? '#ff453a' : n.priority === 'medium' ? '#ff9f0a' : '#30d158',
+                            fontSize: '0.7rem'
+                          }}>
+                            {n.priority}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: '0.8rem', color: '#d1d1d6' }}>
+                          <div>Branch: <strong>{n.branch}</strong></div>
+                          <div>Batch: <strong>{n.batch}</strong></div>
+                          {n.targetUser && n.targetUser !== 'all' && (
+                            <div>User: <strong style={{ color: '#bf5af2' }}>{n.targetUser}</strong></div>
+                          )}
+                        </td>
+                        <td style={{ fontSize: '0.8rem' }}>
+                          <div style={{ color: timingColor }}>{timingText}</div>
+                          {n.expiryDate && (
+                            <div style={{ color: isExpired ? '#ff453a' : '#8e8e93', marginTop: '2px' }}>
+                              {isExpired ? 'Expired' : `Expires: ${new Date(n.expiryDate).toLocaleString()}`}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                            <button
+                              type="button"
+                              className="dev-btn dev-btn-secondary"
+                              style={{ padding: '4px 8px', fontSize: '0.75rem', cursor: 'pointer' }}
+                              onClick={() => handleStartEditAnnouncement(n)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="dev-btn dev-btn-secondary"
+                              style={{ padding: '4px 8px', fontSize: '0.75rem', color: '#ff453a', background: 'rgba(255, 69, 58, 0.08)', border: '1px solid rgba(255, 69, 58, 0.15)', cursor: 'pointer' }}
+                              onClick={() => handleDeleteNotification(n._id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Locked Accounts Center */}
+        <div className="dev-card" style={{ width: '100%', marginTop: '1rem' }}>
+          <div className="dev-card-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.75rem', marginBottom: '0.5rem' }}>
+            <h4 className="dev-card-title">
+              <Lock size={16} color="#ff453a" /> Brute-Force Locked Accounts
+            </h4>
+            <span style={{ fontSize: '0.75rem', color: '#8e8e93' }}>Locked out after excessive failed login attempts</span>
+          </div>
+
+          {lockedUsers.length === 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: '#8e8e93', fontSize: '0.9rem' }}>
+              No accounts are currently locked. System secure.
+            </div>
+          ) : (
+            <div className="dev-table-container">
+              <table className="dev-table">
+                <thead>
+                  <tr>
+                    <th>User Name</th>
+                    <th>Role</th>
+                    <th>Mobile Number</th>
+                    <th>Failed Attempts</th>
+                    <th>Lock Status</th>
+                    <th>Lock Date & Time</th>
+                    <th style={{ textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lockedUsers.map(u => {
+                    const isTempLocked = u.lockUntil && new Date(u.lockUntil) > new Date();
+                    const lockStatusText = u.isLocked 
+                      ? "Permanently Locked" 
+                      : (isTempLocked ? `Temporarily Blocked` : "Active");
+                    
+                    return (
+                      <tr key={u._id}>
+                        <td style={{ fontWeight: 600, color: '#fff' }}>{u.username}</td>
+                        <td>
+                          <span className="dev-badge dev-badge-gray" style={{ textTransform: 'capitalize' }}>{u.role}</span>
+                        </td>
+                        <td>{u.phone || 'N/A'}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: u.failedAttempts >= 10 ? '#ff453a' : '#ff9f0a' }}>
+                          {u.failedAttempts}
+                        </td>
+                        <td>
+                          <span className={`dev-badge ${u.isLocked ? 'dev-badge-purple' : (isTempLocked ? 'dev-badge-yellow' : 'dev-badge-blue')}`}>
+                            {lockStatusText}
+                          </span>
+                        </td>
+                        <td>{u.lockedAt ? new Date(u.lockedAt).toLocaleString() : (u.updatedAt ? new Date(u.updatedAt).toLocaleString() : 'N/A')}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <button
+                            type="button"
+                            className="dev-btn dev-btn-primary"
+                            style={{ padding: '4px 10px', fontSize: '0.75rem', background: 'linear-gradient(135deg, #30d158, #28a745)', border: 'none', cursor: 'pointer' }}
+                            onClick={() => {
+                              if (confirm(`Are you sure you want to unlock user account "${u.username}"?`)) {
+                                unlockUserAccount(u._id);
+                              }
+                            }}
+                          >
+                            <Unlock size={12} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Unlock Account
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
       </div>
     );
   };
@@ -4419,7 +5041,7 @@ function App() {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
         <h4 style={{ margin: 0, color: '#fff', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.5px' }}>Help Reports & Support Tickets</h4>
-        
+
         {devHelpReportsLoading ? (
           <div style={{ textAlign: 'center', color: '#8e8e93', padding: '3rem' }}>Loading support tickets...</div>
         ) : (
@@ -4635,12 +5257,7 @@ function App() {
               <span>Upcoming Maintenance: Portal login will be restricted from {formatMaintenanceTime(maintenanceStart)} to {formatMaintenanceTime(maintenanceEnd)}.</span>
             </div>
           )}
-          {systemAlertMessage && (
-            <div className="broadcast-alert-banner-static" style={{ margin: '1.25rem 1.5rem 0 1.5rem', background: 'linear-gradient(90deg, #0a84ff, #30d158)' }}>
-              <Bell size={16} className="shake-icon" />
-              <span>Announcement: {systemAlertMessage}</span>
-            </div>
-          )}
+
           {/* Header */}
           <header className="dev-header">
             <h1 className="dev-header-title">
@@ -4661,7 +5278,7 @@ function App() {
               <span style={{ fontWeight: 600 }}>{loggedInUser}</span>
             </div>
           </header>
- 
+
           {/* Body */}
           <div className="dev-body">
             {devView === 'dashboard' && renderDevDashboard()}
@@ -4728,15 +5345,9 @@ function App() {
 
   // --- Public Website View ---
   const renderPublic = () => (
-    <div className={`public-layout ${isMaintenanceUpcoming ? 'has-maintenance-banner' : ''} ${systemAlertMessage ? 'has-broadcast-banner' : ''}`}>
-      {systemAlertMessage && (
-        <div className="broadcast-alert-banner" style={{ zIndex: 1200 }}>
-          <Bell size={16} className="shake-icon" />
-          <span>{systemAlertMessage}</span>
-        </div>
-      )}
+    <div className={`public-layout ${isMaintenanceUpcoming ? 'has-maintenance-banner' : ''}`}>
       {isMaintenanceUpcoming && (
-        <div className="maintenance-alert-banner" style={{ zIndex: 1200, top: systemAlertMessage ? '35px' : '0px' }}>
+        <div className="maintenance-alert-banner" style={{ zIndex: 1200, top: '0px' }}>
           <AlertTriangle size={18} className="pulse-icon" />
           <span>Upcoming Maintenance: Portal login will be restricted from {formatMaintenanceTime(maintenanceStart)} to {formatMaintenanceTime(maintenanceEnd)}.</span>
         </div>
@@ -5393,7 +6004,7 @@ function App() {
             </div>
           </div>
 
-          <div className="filter-row" style={{ marginBottom: (!userRole || userRole !== 'coordinator') ? '0.75rem' : '1.5rem', marginTop: '1.25rem', paddingBottom: '0.25rem' }}>
+          <div className="filter-row" style={{ marginBottom: (!userRole || (userRole !== 'trainer' && userRole !== 'coordinator')) ? '0.75rem' : '1.5rem', marginTop: '1.25rem', paddingBottom: '0.25rem' }}>
             <span style={{ color: 'var(--color-text-muted)', width: '80px', fontSize: '0.85rem' }}>Time:</span>
             <button className={`btn-small ${feeBatchFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('All')}>All</button>
             <button className={`btn-small ${feeBatchFilter === 'Morning' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Morning')}>Morning</button>
@@ -6446,10 +7057,10 @@ function App() {
                   </div>
                 </div>
 
-                {/* Batch Inspector Accounts Panel */}
+                {/* Trainer Accounts Panel */}
                 <div className="panel">
                   <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-                    <h3 className="panel-title">Batch Inspector / Coach Accounts</h3>
+                    <h3 className="panel-title">Trainer Accounts</h3>
                   </div>
                   <div className="table-responsive">
                     <table className="data-table responsive-table-cards">
@@ -6465,7 +7076,7 @@ function App() {
                       <tbody>
                         {Object.entries(rawCredentials.batchCredentials || {}).length === 0 ? (
                           <tr>
-                            <td colSpan="5" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No batch inspectors configured.</td>
+                            <td colSpan="5" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No trainers configured.</td>
                           </tr>
                         ) : (
                           Object.entries(rawCredentials.batchCredentials || {}).map(([batchKey, info]) => {
@@ -6515,7 +7126,7 @@ function App() {
                                         oldUsername: info.username,
                                         username: info.username,
                                         password: '••••••',
-                                        displayName: `Batch Inspector (${branchName} - ${batchNameText})`
+                                        displayName: `Trainer (${branchName} - ${batchNameText})`
                                       });
                                       setIsCredentialModalOpen(true);
                                     }}
@@ -6863,7 +7474,7 @@ function App() {
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Coordinator Password</label>
+                  <label>Trainer Password</label>
                   <input
                     type="password"
                     placeholder="••••••••"
@@ -6886,7 +7497,7 @@ function App() {
                   {newBatchPasswordError && <span style={{ color: '#ff453a', fontSize: '0.75rem', marginTop: '4px', display: 'block' }}>{newBatchPasswordError}</span>}
                 </div>
               </div>
-              <button className="btn-primary" type="submit" style={{ width: '100%', justifyContent: 'center', marginTop: '1.5rem' }}>Create Configured Batch & Mapped Coordinator Account</button>
+              <button className="btn-primary" type="submit" style={{ width: '100%', justifyContent: 'center', marginTop: '1.5rem' }}>Create Configured Batch & Mapped Trainer Account</button>
             </form>
           </div>
 
@@ -6960,7 +7571,7 @@ function App() {
                 <tr>
                   <th>Batch Name</th>
                   <th>Schedule Pattern</th>
-                  <th>Mapped Coordinator Accounts</th>
+                  <th>Mapped Trainer Accounts</th>
                   <th>Students Active</th>
                   <th>Type</th>
                 </tr>
@@ -6996,7 +7607,7 @@ function App() {
                     <tr key={b.id}>
                       <td data-label="Batch Name" style={{ fontWeight: 600, color: 'white' }}>{b.name}</td>
                       <td data-label="Schedule Pattern" style={{ color: 'var(--color-primary)' }}>{b.schedule}</td>
-                      <td data-label="Mapped Coordinator Accounts">
+                      <td data-label="Mapped Trainer Accounts">
                         {matchedCreds.length > 0 ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                             {matchedCreds.map((cred, idx) => (
@@ -7006,7 +7617,7 @@ function App() {
                             ))}
                           </div>
                         ) : (
-                          <span style={{ color: 'var(--color-text-muted)' }}>No Coordinator Creds configurated</span>
+                          <span style={{ color: 'var(--color-text-muted)' }}>No Trainer Creds configured</span>
                         )}
                       </td>
                       <td data-label="Students Active"><span className="badge badge-green">{studentCount} Students</span></td>
@@ -7045,7 +7656,7 @@ function App() {
     const scopedAdmins = adminsList.filter(admin => {
       if (isBranchAdm) {
         const branchKey = getLoggedInUserBranch().toLowerCase();
-        return admin.branch && admin.branch.toLowerCase().trim() === branchKey && admin.role === 'coordinator';
+        return admin.branch && admin.branch.toLowerCase().trim() === branchKey && (admin.role === 'trainer' || admin.role === 'coordinator');
       }
       return true;
     });
@@ -7140,7 +7751,7 @@ function App() {
                 <option value="All">All Roles</option>
                 <option value="superadmin">Super Admins</option>
                 <option value="branchadmin">Branch Admins</option>
-                <option value="coordinator">Coordinators</option>
+                <option value="trainer">Trainers</option>
               </select>
               <select
                 className="form-control"
@@ -7215,7 +7826,7 @@ function App() {
                       <td data-label="Role / Code">
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                           <span className={`badge ${admin.role === 'superadmin' ? 'badge-green' : admin.role === 'branchadmin' ? 'badge-blue' : 'badge-yellow'}`}>
-                            {admin.role === 'superadmin' ? 'Super Admin' : admin.role === 'branchadmin' ? 'Branch Admin' : 'Coordinator'}
+                            {admin.role === 'superadmin' ? 'Super Admin' : admin.role === 'branchadmin' ? 'Branch Admin' : (admin.role === 'trainer' || admin.role === 'coordinator' ? 'Trainer' : admin.role)}
                           </span>
                           {admin.batch && <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>Batch: {admin.batch}</span>}
                         </div>
@@ -7302,7 +7913,7 @@ function App() {
                   <input
                     type="text"
                     className="form-control"
-                    placeholder="e.g. admin@perambra or coordinator_name"
+                    placeholder="e.g. admin@perambra or trainer_name"
                     value={newAdminForm.username}
                     onChange={(e) => setNewAdminForm(prev => ({ ...prev, username: e.target.value }))}
                     required
@@ -7363,10 +7974,10 @@ function App() {
                         <>
                           <option value="superadmin">Super Admin</option>
                           <option value="branchadmin">Branch Admin</option>
-                          <option value="coordinator">Coordinator / Inspector</option>
+                          <option value="trainer">Trainer</option>
                         </>
                       ) : (
-                        <option value="coordinator">Coordinator / Inspector</option>
+                        <option value="trainer">Trainer</option>
                       )}
                     </select>
                   </div>
@@ -7391,7 +8002,7 @@ function App() {
                         )}
                       </select>
                     </div>
-                    {newAdminForm.role === 'coordinator' && (
+                    {(newAdminForm.role === 'trainer' || newAdminForm.role === 'coordinator') && (
                       <div className="form-group">
                         <label>Assigned Batch</label>
                         <select
@@ -7517,10 +8128,10 @@ function App() {
                         <>
                           <option value="superadmin">Super Admin</option>
                           <option value="branchadmin">Branch Admin</option>
-                          <option value="coordinator">Coordinator / Inspector</option>
+                          <option value="trainer">Trainer</option>
                         </>
                       ) : (
-                        <option value="coordinator">Coordinator / Inspector</option>
+                        <option value="trainer">Trainer</option>
                       )}
                     </select>
                   </div>
@@ -7545,7 +8156,7 @@ function App() {
                         )}
                       </select>
                     </div>
-                    {editingAdmin.role === 'coordinator' && (
+                    {(editingAdmin.role === 'trainer' || editingAdmin.role === 'coordinator') && (
                       <div className="form-group">
                         <label>Assigned Batch</label>
                         <select
@@ -7985,7 +8596,7 @@ function App() {
         .then(res => res.json())
         .then(data => {
           setBatchCredentials(data.batchCredentials || {});
-          setSettingsSuccess(`Batch Inspector credentials for "${br.toUpperCase()} - ${bt.toUpperCase()}" updated successfully!`);
+          setSettingsSuccess(`Trainer credentials for "${br.toUpperCase()} - ${bt.toUpperCase()}" updated successfully!`);
           setBatchForm({ branch: br, batch: bt, newUsername: '', newPassword: '', confirmPassword: '' });
         })
         .catch(err => {
@@ -8341,16 +8952,10 @@ function App() {
   // --- Admin Login View ---
   const renderLogin = () => {
     return (
-      <div className={`login-layout ${isMaintenanceUpcoming ? 'has-maintenance-banner' : ''} ${systemAlertMessage ? 'has-broadcast-banner' : ''}`} style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', overflowY: 'auto', padding: '1rem 0.5rem' }}>
+      <div className={`login-layout ${isMaintenanceUpcoming ? 'has-maintenance-banner' : ''}`} style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', overflowY: 'auto', padding: '1rem 0.5rem' }}>
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(5,5,5,0.85)' }}></div>
-        {systemAlertMessage && (
-          <div className="broadcast-alert-banner" style={{ zIndex: 100 }}>
-            <Bell size={16} className="shake-icon" />
-            <span>{systemAlertMessage}</span>
-          </div>
-        )}
         {isMaintenanceUpcoming && (
-          <div className="maintenance-alert-banner" style={{ zIndex: 100, top: systemAlertMessage ? '35px' : '0px' }}>
+          <div className="maintenance-alert-banner" style={{ zIndex: 100, top: '0px' }}>
             <AlertTriangle size={18} className="pulse-icon" />
             <span>Upcoming Maintenance: Portal login will be restricted from {formatMaintenanceTime(maintenanceStart)} to {formatMaintenanceTime(maintenanceEnd)}.</span>
           </div>
@@ -8417,7 +9022,7 @@ function App() {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    loginType: 'coordinator',
+                    loginType: 'trainer',
                     username: enteredUser,
                     password: enteredPassword,
                     branch: branchKey,
@@ -8516,7 +9121,7 @@ function App() {
                 </button>
               </form>
               <button type="button" className="btn-secondary animate-item-7" style={{ width: '100%', justifyContent: 'center', marginTop: '0.5rem', display: 'inline-flex', alignItems: 'center', gap: '8px', height: '38px' }} disabled={isLoggingIn} onClick={() => {
-                setNewStudent({ name: '', age: '', phone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: selectedBranchLogin, photo: null });
+                setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: selectedBranchLogin, photo: null });
                 setIsAddModalOpen(true);
               }}>
                 <UserPlus size={16} /> Enroll New Student
@@ -8538,16 +9143,10 @@ function App() {
 
   // --- Admin Login View ---
   const renderSuperAdminLogin = () => (
-    <div className={`login-layout ${isMaintenanceUpcoming ? 'has-maintenance-banner' : ''} ${systemAlertMessage ? 'has-broadcast-banner' : ''}`} style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', overflowY: 'auto', padding: '1rem 0.5rem' }}>
+    <div className={`login-layout ${isMaintenanceUpcoming ? 'has-maintenance-banner' : ''}`} style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1599058917212-d750089bc07e?q=80&w=2069&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', overflowY: 'auto', padding: '1rem 0.5rem' }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(5,5,5,0.85)' }}></div>
-      {systemAlertMessage && (
-        <div className="broadcast-alert-banner" style={{ zIndex: 100 }}>
-          <Bell size={16} className="shake-icon" />
-          <span>{systemAlertMessage}</span>
-        </div>
-      )}
       {isMaintenanceUpcoming && (
-        <div className="maintenance-alert-banner" style={{ zIndex: 100, top: systemAlertMessage ? '35px' : '0px' }}>
+        <div className="maintenance-alert-banner" style={{ zIndex: 100, top: '0px' }}>
           <AlertTriangle size={18} className="pulse-icon" />
           <span>Upcoming Maintenance: Portal login will be restricted from {formatMaintenanceTime(maintenanceStart)} to {formatMaintenanceTime(maintenanceEnd)}.</span>
         </div>
@@ -8942,7 +9541,7 @@ function App() {
             </form>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '1rem' }} className="animate-item-6">
               <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', padding: '4px 0', fontSize: '0.9rem' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('login'); }}>
-                Switch to Inspector Login
+                Switch to Trainer Login
               </button>
               <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', padding: '4px 0', fontSize: '0.9rem' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('website'); }}>
                 Back to Website
@@ -8953,6 +9552,151 @@ function App() {
       </div>
     </div>
   );
+
+  const isMaintenanceBlocked = () => {
+    if (!loggedInUser) {
+      return false;
+    }
+    if (isSystemUnderMaintenance) {
+      if (userRole === 'developer') {
+        return false;
+      }
+      if (maintenanceMode === 'all') return true;
+      if (maintenanceMode === 'admin' && userRole === 'superadmin') return true;
+      if (maintenanceMode === 'branch' && userRole === 'branchadmin') return true;
+      if (maintenanceMode === 'batch' && (userRole === 'trainer' || userRole === 'coordinator')) return true;
+    }
+    return false;
+  };
+
+  const renderMaintenancePage = () => {
+    return (
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '100vh',
+        background: 'radial-gradient(circle at center, #1c1c2e 0%, #0d0d15 100%)',
+        color: '#fff',
+        fontFamily: 'Outfit, sans-serif',
+        padding: '2rem',
+        textAlign: 'center'
+      }}>
+        <div style={{
+          background: 'rgba(255, 255, 255, 0.03)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: '24px',
+          padding: '3rem 2.5rem',
+          maxWidth: '500px',
+          boxShadow: '0 20px 50px rgba(0, 0, 0, 0.5)',
+          backdropFilter: 'blur(20px)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '1.5rem'
+        }}>
+          <div style={{
+            background: 'rgba(94, 92, 230, 0.15)',
+            border: '2px solid #5e5ce6',
+            borderRadius: '50%',
+            width: '80px',
+            height: '80px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#5e5ce6'
+          }}>
+            <AlertTriangle size={40} className="pulse-icon" />
+          </div>
+
+          <h1 style={{
+            fontSize: '2.25rem',
+            fontWeight: '800',
+            margin: 0,
+            textTransform: 'uppercase',
+            letterSpacing: '1px',
+            background: 'linear-gradient(90deg, #5e5ce6, #bf5af2)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            fontFamily: 'Outfit, sans-serif'
+          }}>
+            System Maintenance
+          </h1>
+
+          <p style={{
+            color: '#a2a2b5',
+            fontSize: '1rem',
+            lineHeight: '1.6',
+            margin: 0
+          }}>
+            Masterfit Complete System Update is in progress. The application portal is temporarily locked for maintenance.
+          </p>
+
+          {maintenanceEnd && (
+            <div style={{
+              background: 'rgba(255, 255, 255, 0.02)',
+              border: '1px solid rgba(255, 255, 255, 0.04)',
+              padding: '0.75rem 1.25rem',
+              borderRadius: '12px',
+              fontSize: '0.85rem',
+              color: '#fff',
+              marginTop: '0.5rem'
+            }}>
+              Expected back online: <strong style={{ color: '#bf5af2' }}>{formatMaintenanceTime(maintenanceEnd)}</strong>
+            </div>
+          )}
+
+          <div style={{
+            display: 'flex',
+            gap: '1rem',
+            width: '100%',
+            marginTop: '1rem'
+          }}>
+            <button
+              onClick={() => window.location.reload()}
+              className="btn-primary"
+              style={{
+                flex: 1,
+                padding: '0.75rem',
+                borderRadius: '10px',
+                fontWeight: 600,
+                fontSize: '0.9rem',
+                justifyContent: 'center'
+              }}
+            >
+              Check Again
+            </button>
+            <button
+              onClick={() => {
+                sessionStorage.clear();
+                localStorage.clear();
+                setLoggedInUser(null);
+                setUserRole('');
+                setAppMode('login');
+              }}
+              className="btn-secondary"
+              style={{
+                padding: '0.75rem 1.25rem',
+                borderRadius: '10px',
+                fontWeight: 600,
+                fontSize: '0.9rem',
+                color: '#ff453a',
+                border: '1px solid rgba(255, 69, 58, 0.2)',
+                background: 'rgba(255, 69, 58, 0.05)'
+              }}
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (isMaintenanceBlocked()) {
+    return renderMaintenancePage();
+  }
 
   if (appMode === 'website') {
     return renderPublic();
@@ -9050,12 +9794,7 @@ function App() {
             <span><strong>Upcoming Maintenance Notice:</strong> Portal login will be restricted from {formatMaintenanceTime(maintenanceStart)} to {formatMaintenanceTime(maintenanceEnd)}. Please save your work beforehand.</span>
           </div>
         )}
-        {systemAlertMessage && (
-          <div className="broadcast-alert-banner-static">
-            <Bell size={16} className="shake-icon" />
-            <span>Announcement: {systemAlertMessage}</span>
-          </div>
-        )}
+
         <header className="header">
           <div className="header-main-row">
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -9144,6 +9883,163 @@ function App() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
+
+            {/* Notification Bell Dropdown */}
+            <div style={{ position: 'relative' }}>
+              <button
+                type="button"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: '8px',
+                  width: '38px',
+                  height: '38px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  cursor: 'pointer',
+                  position: 'relative'
+                }}
+                onClick={() => setShowNotificationsDropdown(!showNotificationsDropdown)}
+              >
+                <Bell size={18} className={unreadNotificationsCount > 0 ? "shake-icon" : ""} />
+                {unreadNotificationsCount > 0 && (
+                  <span style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    background: '#ff453a',
+                    color: 'white',
+                    fontSize: '0.65rem',
+                    fontWeight: 700,
+                    borderRadius: '50%',
+                    padding: '2px 6px',
+                    lineHeight: 1,
+                    boxShadow: '0 2px 5px rgba(0,0,0,0.5)'
+                  }}>
+                    {unreadNotificationsCount}
+                  </span>
+                )}
+              </button>
+
+              {showNotificationsDropdown && (
+                <div style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: '46px',
+                  width: '320px',
+                  background: 'rgba(15, 15, 25, 0.98)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: '12px',
+                  boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)',
+                  backdropFilter: 'blur(20px)',
+                  zIndex: 1000,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  maxHeight: '400px'
+                }}>
+                  <div style={{
+                    padding: '12px 16px',
+                    borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <span style={{ fontWeight: 600, fontSize: '0.85rem', color: '#fff' }}>Announcements</span>
+                    {unreadNotificationsCount > 0 && (
+                      <span style={{ fontSize: '0.75rem', color: '#8e8e93' }}>{unreadNotificationsCount} unread</span>
+                    )}
+                  </div>
+
+                  <div style={{ overflowY: 'auto', flex: 1, padding: '8px 0' }}>
+                    {notifications.length === 0 ? (
+                      <div style={{ padding: '24px 16px', textAlign: 'center', color: '#8e8e93', fontSize: '0.8rem' }}>
+                        No announcements at the moment.
+                      </div>
+                    ) : (
+                      notifications.map(n => {
+                        const currentUserClean = getSessionUser() ? getSessionUser().toLowerCase().trim() : '';
+                        const isRead = n.readBy && n.readBy.includes(currentUserClean);
+                        return (
+                          <div
+                            key={n._id}
+                            style={{
+                              padding: '10px 16px',
+                              borderBottom: '1px solid rgba(255, 255, 255, 0.03)',
+                              background: isRead ? 'transparent' : 'rgba(94, 92, 230, 0.05)',
+                              transition: 'background 0.2s',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '4px'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                              <span style={{
+                                fontWeight: isRead ? 500 : 700,
+                                fontSize: '0.825rem',
+                                color: isRead ? '#e2e2ee' : '#fff'
+                              }}>
+                                {n.title}
+                              </span>
+                              <span className="badge" style={{
+                                background: n.priority === 'high' ? 'rgba(255, 69, 58, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                                color: n.priority === 'high' ? '#ff453a' : '#8e8e93',
+                                fontSize: '0.6rem',
+                                padding: '1px 4px'
+                              }}>
+                                {n.priority}
+                              </span>
+                            </div>
+                            <p style={{
+                              margin: 0,
+                              fontSize: '0.75rem',
+                              color: '#a2a2b5',
+                              lineHeight: '1.4',
+                              whiteSpace: 'pre-wrap',
+                              textAlign: 'left'
+                            }}>
+                              {n.message}
+                            </p>
+                            <div style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              marginTop: '6px',
+                              fontSize: '0.65rem',
+                              color: '#8e8e93'
+                            }}>
+                              <span>{new Date(n.createdAt).toLocaleDateString()}</span>
+                              <button
+                                type="button"
+                                style={{
+                                  background: 'transparent',
+                                  border: 'none',
+                                  color: isRead ? '#8e8e93' : '#5e5ce6',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  padding: '2px 0'
+                                }}
+                                onClick={() => {
+                                  if (isRead) {
+                                    handleMarkAsUnread(n._id);
+                                  } else {
+                                    handleMarkAsRead(n._id);
+                                  }
+                                }}
+                              >
+                                {isRead ? 'Mark Unread' : 'Mark Read'}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="user-profile">
               <span style={{ fontSize: '0.9rem', color: 'var(--color-text-light)', fontWeight: 500, textTransform: 'capitalize' }}>
                 {loggedInUser} Panel
@@ -9288,22 +10184,45 @@ function App() {
             </div>
 
             {isEditingStudent ? (
-              <form onSubmit={(e) => {
-                e.preventDefault();
-                setStudents(students.map(s => s.id === editingStudentData.id ? editingStudentData : s));
-                setSelectedStudent(editingStudentData);
-                setIsEditingStudent(false);
+               <form onSubmit={(e) => {
+                 e.preventDefault();
 
-                fetch(`${API_BASE_URL}/students/${editingStudentData.id}`, {
-                  method: 'PUT',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(editingStudentData)
-                })
-                  .then(res => res.json())
-                  .catch(err => console.error("Error updating student profile:", err));
+                 const phoneClean = editingStudentData.phone.trim();
+                 if (!/^\d{10}$/.test(phoneClean)) {
+                   setGlobalError("Mobile number must be exactly 10 digits.");
+                   return;
+                 }
 
-                setEditingStudentData(null);
-              }}>
+                 const updatedStudent = { ...editingStudentData, phone: phoneClean };
+                 setStudents(sortStudentsAlphabetically(students.map(s => s.id === updatedStudent.id ? updatedStudent : s)));
+                 setSelectedStudent(updatedStudent);
+                 setIsEditingStudent(false);
+
+                 fetch(`${API_BASE_URL}/students/${updatedStudent.id}`, {
+                   method: 'PUT',
+                   headers: { 'Content-Type': 'application/json' },
+                   body: JSON.stringify(updatedStudent)
+                 })
+                   .then(res => {
+                     if (!res.ok) {
+                       return res.json().then(errData => {
+                         throw new Error(errData.error || 'Failed to update student profile');
+                       });
+                     }
+                     return res.json();
+                   })
+                   .then(() => {
+                     setGlobalSuccess("Student profile updated successfully.");
+                     reloadAllAppData();
+                   })
+                   .catch(err => {
+                     console.error("Error updating student profile:", err);
+                     setGlobalError(`Failed to update student: ${err.message}`);
+                     reloadAllAppData();
+                   });
+
+                 setEditingStudentData(null);
+               }}>
                 <div style={{ padding: '1rem 0' }}>
                   <div className="form-group">
                     <label>Full Name</label>
@@ -9327,26 +10246,74 @@ function App() {
                       />
                     </div>
                     <div className="form-group">
-                      <label>Phone</label>
+                      <label>Date of Birth (DOB)</label>
                       <input
-                        type="tel"
+                        type="date"
                         className="form-control"
-                        value={editingStudentData.phone}
-                        onChange={(e) => setEditingStudentData({ ...editingStudentData, phone: e.target.value })}
+                        value={editingStudentData.dob || ''}
+                        onChange={(e) => setEditingStudentData({ ...editingStudentData, dob: e.target.value })}
                         required
                       />
                     </div>
                   </div>
+
                   <div className="grid-2-col">
                     <div className="form-group">
-                      <label>Batch Schedule</label>
+                      <label>Student Mobile Number</label>
+                      <input
+                        type="tel"
+                        className="form-control"
+                        value={editingStudentData.phone}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/\D/g, '');
+                          if (val.length <= 10) {
+                            setEditingStudentData({ ...editingStudentData, phone: val });
+                          }
+                        }}
+                        required
+                        maxLength="10"
+                        pattern="\d{10}"
+                        title="Please enter exactly 10 digits"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Parent Mobile Number</label>
+                      <input
+                        type="tel"
+                        className="form-control"
+                        value={editingStudentData.parentPhone || ''}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/\D/g, '');
+                          if (val.length <= 10) {
+                            setEditingStudentData({ ...editingStudentData, parentPhone: val });
+                          }
+                        }}
+                        required
+                        maxLength="10"
+                        pattern="\d{10}"
+                        title="Please enter exactly 10 digits"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid-2-col">
+                    <div className="form-group">
+                      <label>Batch Selection Dropdown</label>
                       <select
                         className="form-control"
                         value={editingStudentData.schedule}
-                        onChange={(e) => setEditingStudentData({ ...editingStudentData, schedule: e.target.value })}
+                        onChange={(e) => {
+                          const selectedSched = e.target.value;
+                          const correspondingOpt = batchOptions.find(b => b.schedule === selectedSched);
+                          setEditingStudentData({
+                            ...editingStudentData,
+                            schedule: selectedSched,
+                            batch: correspondingOpt ? correspondingOpt.name : editingStudentData.batch
+                          });
+                        }}
                       >
                         {getFilteredBatchOptions(editingStudentData.branch).map(opt => (
-                          <option key={opt.id} value={opt.schedule}>{opt.name}</option>
+                          <option key={opt.id} value={opt.schedule}>{opt.name} ({opt.schedule})</option>
                         ))}
                       </select>
                     </div>
@@ -9480,12 +10447,25 @@ function App() {
 
                   <div className="grid-2-col" style={{ marginBottom: '1.5rem', background: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--glass-border)', gap: '1rem' }}>
                     <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Age</span><div style={{ fontWeight: 600 }}>{selectedStudent.age} Years</div></div>
+                    <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Date of Birth (DOB)</span><div style={{ fontWeight: 600 }}>{selectedStudent.dob || 'N/A'}</div></div>
                     <div>
-                      <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Phone</span>
+                      <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Student Phone</span>
                       <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
                         {selectedStudent.phone}
                         <a href={`tel:${selectedStudent.phone}`} style={{ color: '#2196F3', display: 'flex' }} title="Call"><Phone size={14} /></a>
                         <a href={`https://wa.me/${selectedStudent.phone}`} target="_blank" rel="noreferrer" style={{ color: '#25D366', display: 'flex' }} title="WhatsApp"><MessageCircle size={14} /></a>
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Parent Phone</span>
+                      <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {selectedStudent.parentPhone || 'N/A'}
+                        {selectedStudent.parentPhone && (
+                          <>
+                            <a href={`tel:${selectedStudent.parentPhone}`} style={{ color: '#2196F3', display: 'flex' }} title="Call"><Phone size={14} /></a>
+                            <a href={`https://wa.me/${selectedStudent.parentPhone}`} target="_blank" rel="noreferrer" style={{ color: '#25D366', display: 'flex' }} title="WhatsApp"><MessageCircle size={14} /></a>
+                          </>
+                        )}
                       </div>
                     </div>
                     <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Join Date</span><div style={{ fontWeight: 600 }}>{selectedStudent.joinDate}</div></div>
@@ -9499,6 +10479,52 @@ function App() {
                       <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>{getBatchNameFromSchedule(selectedStudent.schedule)}</span>
                       <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>{selectedStudent.batch} Batch</span>
                     </div>
+                  </div>
+
+                  {/* Monthly Attendance Summary */}
+                  <div style={{ marginBottom: '1.5rem', background: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '10px' }}>
+                      <h4 style={{ margin: 0, color: 'var(--color-secondary)', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Monthly Attendance</h4>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>Month:</span>
+                        <input
+                          type="month"
+                          className="form-control"
+                          style={{ width: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.85rem', height: '30px', background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                          value={profileAttendanceMonth}
+                          onChange={(e) => setProfileAttendanceMonth(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    {(() => {
+                      let present = 0;
+                      let absent = 0;
+                      Object.keys(attendanceRecords).forEach(dateStr => {
+                        if (dateStr.startsWith(profileAttendanceMonth)) {
+                          const status = attendanceRecords[dateStr]?.[selectedStudent.id];
+                          if (status === 'present') present++;
+                          else if (status === 'absent') absent++;
+                        }
+                      });
+                      const totalMarked = present + absent;
+                      const attendanceRate = totalMarked > 0 ? Math.round((present / totalMarked) * 100) : 0;
+                      return (
+                        <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <div style={{ flex: 1, minWidth: '120px', background: 'rgba(76, 175, 80, 0.08)', border: '1px solid rgba(76, 175, 80, 0.25)', padding: '0.75rem 1rem', borderRadius: '10px', textAlign: 'center' }}>
+                            <span style={{ color: '#4CAF50', display: 'block', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Total Present</span>
+                            <strong style={{ fontSize: '1.5rem', color: '#4CAF50' }}>{present} Days</strong>
+                          </div>
+                          <div style={{ flex: 1, minWidth: '120px', background: 'rgba(244, 67, 54, 0.08)', border: '1px solid rgba(244, 67, 54, 0.25)', padding: '0.75rem 1rem', borderRadius: '10px', textAlign: 'center' }}>
+                            <span style={{ color: '#F44336', display: 'block', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Total Absent</span>
+                            <strong style={{ fontSize: '1.5rem', color: '#F44336' }}>{absent} Days</strong>
+                          </div>
+                          <div style={{ flex: 1, minWidth: '120px', background: 'rgba(94, 92, 230, 0.08)', border: '1px solid rgba(94, 92, 230, 0.25)', padding: '0.75rem 1rem', borderRadius: '10px', textAlign: 'center' }}>
+                            <span style={{ color: '#5e5ce6', display: 'block', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Attendance Rate</span>
+                            <strong style={{ fontSize: '1.5rem', color: '#5e5ce6' }}>{attendanceRate}%</strong>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {(() => {
@@ -9874,16 +10900,70 @@ function App() {
                   <input type="number" className="form-control" required value={newStudent.age} onChange={(e) => setNewStudent({ ...newStudent, age: e.target.value })} placeholder="21" />
                 </div>
                 <div className="form-group">
-                  <label>Phone</label>
-                  <input type="tel" className="form-control" required value={newStudent.phone} onChange={(e) => setNewStudent({ ...newStudent, phone: e.target.value })} placeholder="Phone number" />
+                  <label>Date of Birth (DOB)</label>
+                  <input type="date" className="form-control" required value={newStudent.dob} onChange={(e) => setNewStudent({ ...newStudent, dob: e.target.value })} />
                 </div>
               </div>
+
               <div className="grid-2-col">
                 <div className="form-group">
-                  <label>Batch Schedule</label>
-                  <select className="form-control" value={newStudent.schedule} onChange={(e) => setNewStudent({ ...newStudent, schedule: e.target.value })}>
+                  <label>Student Mobile Number</label>
+                  <input
+                    type="tel"
+                    className="form-control"
+                    required
+                    value={newStudent.phone}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '');
+                      if (val.length <= 10) {
+                        setNewStudent({ ...newStudent, phone: val });
+                      }
+                    }}
+                    placeholder="Student number"
+                    maxLength="10"
+                    pattern="\d{10}"
+                    title="Please enter exactly 10 digits"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Parent Mobile Number</label>
+                  <input
+                    type="tel"
+                    className="form-control"
+                    required
+                    value={newStudent.parentPhone}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '');
+                      if (val.length <= 10) {
+                        setNewStudent({ ...newStudent, parentPhone: val });
+                      }
+                    }}
+                    placeholder="Parent number"
+                    maxLength="10"
+                    pattern="\d{10}"
+                    title="Please enter exactly 10 digits"
+                  />
+                </div>
+              </div>
+
+              <div className="grid-2-col">
+                <div className="form-group">
+                  <label>Batch Selection Dropdown</label>
+                  <select
+                    className="form-control"
+                    value={newStudent.schedule}
+                    onChange={(e) => {
+                      const selectedSched = e.target.value;
+                      const correspondingOpt = batchOptions.find(b => b.schedule === selectedSched);
+                      setNewStudent({
+                        ...newStudent,
+                        schedule: selectedSched,
+                        batch: correspondingOpt ? correspondingOpt.name : newStudent.batch
+                      });
+                    }}
+                  >
                     {getFilteredBatchOptions(newStudent.branch).map(opt => (
-                      <option key={opt.id} value={opt.schedule}>{opt.name}</option>
+                      <option key={opt.id} value={opt.schedule}>{opt.name} ({opt.schedule})</option>
                     ))}
                   </select>
                 </div>
@@ -9996,17 +11076,22 @@ function App() {
       {/* Delete Confirmation */}
       {studentToDelete !== null && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: '400px', textAlign: 'center' }}>
+          <div className="modal-content" style={{ maxWidth: '450px', textAlign: 'center', padding: '2rem' }}>
             <div style={{ marginBottom: '1.5rem' }}>
               <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '60px', height: '60px', borderRadius: '50%', background: 'rgba(229, 9, 20, 0.1)', color: '#E50914', marginBottom: '1rem' }}>
                 <AlertTriangle size={32} />
               </div>
               <h2 style={{ margin: '0 0 0.5rem 0', fontFamily: 'var(--font-heading)' }}>Delete Student?</h2>
-              <p style={{ color: 'var(--color-text-muted)', margin: 0 }}>This action cannot be undone.</p>
+              <p style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem', lineHeight: '1.4', margin: 0 }}>
+                Choose **Soft Delete** to disable the student and hide them from normal view (keeping their logs), or **Permanent Delete** to erase their record entirely.
+              </p>
             </div>
-            <div className="modal-actions">
-              <button className="btn-secondary" onClick={() => setStudentToDelete(null)}>Cancel</button>
-              <button className="btn-primary" onClick={confirmDelete}>Delete</button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => confirmDelete(false)}>Soft Delete</button>
+                <button className="btn-primary" style={{ flex: 1, justifyContent: 'center', background: '#ff453a' }} onClick={() => confirmDelete(true)}>Permanent Delete</button>
+              </div>
+              <button className="btn-secondary" style={{ width: '100%', justifyContent: 'center', marginTop: '4px' }} onClick={() => setStudentToDelete(null)}>Cancel</button>
             </div>
           </div>
         </div>
@@ -10202,25 +11287,25 @@ function App() {
                 New System Announcement
               </h2>
             </div>
-            
+
             <h3 style={{ fontSize: '1.15rem', color: '#fff', fontWeight: '600', margin: '0 0 0.85rem 0' }}>
               {activeAnnouncementPopup.title}
             </h3>
-            
+
             <p style={{ color: '#d1d1d6', fontSize: '0.9rem', lineHeight: '1.55', margin: '0 0 1.5rem 0', whiteSpace: 'pre-wrap' }}>
               {activeAnnouncementPopup.message}
             </p>
-            
+
             <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)', fontSize: '0.725rem', color: '#8e8e93', display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '8px' }}>
               <span>Published by: <strong style={{ color: '#e2e2ee' }}>{activeAnnouncementPopup.sender}</strong></span>
               <span>
                 {new Date(activeAnnouncementPopup.createdAt).toLocaleDateString()} at {new Date(activeAnnouncementPopup.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </span>
             </div>
-            
+
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button 
-                className="btn-primary" 
+              <button
+                className="btn-primary"
                 style={{ padding: '0.55rem 1.75rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 600 }}
                 onClick={() => {
                   handleMarkAsRead(activeAnnouncementPopup._id);
@@ -10310,6 +11395,73 @@ function App() {
             <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', textAlign: 'center' }}>
               Please review and mark each ticket resolution response as read.
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Global & Settings Feedback Popup Modal */}
+      {(devSettingsSuccess || devSettingsError || globalSuccess || globalError) && (
+        <div className="modal-overlay" style={{ zIndex: 12000 }}>
+          <div className="modal-content glass-panel" style={{
+            maxWidth: '400px',
+            padding: '2.25rem 2rem',
+            textAlign: 'center',
+            border: `1px solid ${(devSettingsSuccess || globalSuccess) ? 'rgba(48, 209, 88, 0.35)' : 'rgba(255, 69, 58, 0.35)'}`,
+            background: 'rgba(5, 5, 10, 0.96)',
+            boxShadow: '0 20px 50px rgba(0, 0, 0, 0.75)',
+            borderRadius: '16px',
+            backdropFilter: 'blur(25px)',
+            animation: 'fadeIn 0.3s ease'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'center',
+              marginBottom: '1.25rem',
+              color: (devSettingsSuccess || globalSuccess) ? '#30d158' : '#ff453a'
+            }}>
+              {(devSettingsSuccess || globalSuccess) ? <CheckCircle size={48} className="pulse-icon" /> : <AlertTriangle size={48} className="pulse-icon" />}
+            </div>
+            <h2 style={{
+              fontFamily: 'Outfit, sans-serif',
+              fontWeight: 800,
+              textTransform: 'uppercase',
+              fontSize: '1.35rem',
+              marginBottom: '0.85rem',
+              color: '#fff',
+              letterSpacing: '0.5px'
+            }}>
+              {(devSettingsSuccess || globalSuccess) ? 'Success' : 'Notice / Error'}
+            </h2>
+            <p style={{
+              color: '#a2a2b5',
+              fontSize: '0.925rem',
+              lineHeight: '1.6',
+              marginBottom: '1.75rem'
+            }}>
+              {devSettingsSuccess || devSettingsError || globalSuccess || globalError}
+            </p>
+            <button
+              className="btn-primary"
+              style={{
+                width: '100%',
+                padding: '0.8rem',
+                borderRadius: '10px',
+                background: (devSettingsSuccess || globalSuccess) ? 'linear-gradient(135deg, #30d158, #28a745)' : 'linear-gradient(135deg, #ff453a, #dc3545)',
+                border: 'none',
+                color: '#fff',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                fontSize: '0.95rem'
+              }}
+              onClick={() => {
+                setDevSettingsSuccess('');
+                setDevSettingsError('');
+                setGlobalSuccess('');
+                setGlobalError('');
+              }}
+            >
+              OK
+            </button>
           </div>
         </div>
       )}

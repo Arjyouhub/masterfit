@@ -228,6 +228,8 @@ function encryptStudentData(data) {
   const doc = { ...data };
   if (doc.name) doc.name = encrypt(doc.name);
   if (doc.phone) doc.phone = encrypt(doc.phone);
+  if (doc.parentPhone) doc.parentPhone = encrypt(doc.parentPhone);
+  if (doc.dob) doc.dob = encrypt(doc.dob);
   if (doc.photo) doc.photo = encrypt(doc.photo);
   return doc;
 }
@@ -237,6 +239,8 @@ function decryptStudent(student) {
   const doc = student.toObject ? student.toObject({ flattenMaps: true }) : { ...student };
   if (doc.name) doc.name = decrypt(doc.name);
   if (doc.phone) doc.phone = decrypt(doc.phone);
+  if (doc.parentPhone) doc.parentPhone = decrypt(doc.parentPhone);
+  if (doc.dob) doc.dob = decrypt(doc.dob);
   if (doc.photo) doc.photo = decrypt(doc.photo);
   return doc;
 }
@@ -297,7 +301,7 @@ function getAuthDetails(username) {
   if (userPart === 'admin') {
     return { role: 'branchadmin', branch: branchPart, batch: 'all' };
   }
-  return { role: 'coordinator', branch: branchPart, batch: userPart };
+  return { role: 'trainer', branch: branchPart, batch: userPart };
 }
 
 // Authentication Middleware
@@ -356,13 +360,13 @@ const authenticateSession = async (req, res, next) => {
         const userRole = req.user.role;
         if (userRole !== 'developer') {
           if (mode === 'all') {
-            return res.status(503).json({ error: 'System is undergoing scheduled maintenance. Access is restricted to developers.' });
-          } else if (mode === 'admin' && ['superadmin', 'branchadmin', 'coordinator'].includes(userRole)) {
-            return res.status(503).json({ error: 'Admin portals are undergoing maintenance. Access is temporarily restricted.' });
+            return res.status(503).json({ error: 'System is undergoing scheduled maintenance. Access is restricted.' });
+          } else if (mode === 'admin' && userRole === 'superadmin') {
+            return res.status(503).json({ error: 'Admin portal is undergoing maintenance. Access is temporarily restricted.' });
           } else if (mode === 'branch' && userRole === 'branchadmin') {
             return res.status(503).json({ error: 'Branch Admin portal is undergoing maintenance. Access is restricted.' });
-          } else if (mode === 'batch' && userRole === 'coordinator') {
-            return res.status(503).json({ error: 'Coordinator portal is undergoing maintenance. Access is restricted.' });
+          } else if (mode === 'batch' && userRole === 'trainer') {
+            return res.status(503).json({ error: 'Trainer portal is undergoing maintenance. Access is restricted.' });
           }
         }
       }
@@ -520,7 +524,7 @@ async function syncUsersAndSeed() {
         const br = parts[0];
         const bt = parts.slice(1).join('_');
         const username = info.username || `${bt}@${br}`;
-        await upsertUser(username, info.password, 'coordinator', br, bt);
+        await upsertUser(username, info.password, 'trainer', br, bt);
       }
     }
 
@@ -717,19 +721,57 @@ async function loadSettingsCache() {
 
 // Connect to MongoDB Atlas (Sanitize printed URI log for security)
 const sanitizedMongoUri = (process.env.MONGO_URI || '').replace(/:([^:@]+)@/, ': [REDACTED] @');
-console.log('Connecting to MongoDB URI:', sanitizedMongoUri);
-mongoose.connect(process.env.MONGO_URI, { 
-  dbName: 'attendance',
-  maxPoolSize: 5
-})
-  .then(async () => {
-    console.log('Successfully connected to MongoDB Atlas');
-    await loadSettingsCache();
-    await migratePlaintextPasswords();
-    await migrateDefaultRates();
-    await syncUsersAndSeed();
-  })
-  .catch(err => console.error('MongoDB connection error:', err));
+
+let isInitialConnect = true;
+
+const connectDb = async () => {
+  console.log('Connecting to MongoDB URI:', sanitizedMongoUri);
+  try {
+    await mongoose.connect(process.env.MONGO_URI, { 
+      dbName: 'attendance',
+      maxPoolSize: 5
+    });
+    if (isInitialConnect) {
+      isInitialConnect = false;
+      await loadSettingsCache();
+      await migratePlaintextPasswords();
+      await migrateDefaultRates();
+      
+      // Automatic role migration coordinator -> trainer
+      try {
+        const updateRes = await User.updateMany({ role: 'coordinator' }, { role: 'trainer' });
+        if (updateRes.modifiedCount > 0) {
+          console.log(`[Migration] Successfully migrated ${updateRes.modifiedCount} coordinator accounts to trainer accounts.`);
+        }
+      } catch (migrationErr) {
+        console.error('[Migration] Error migrating coordinator accounts to trainer accounts:', migrationErr);
+      }
+
+      await syncUsersAndSeed();
+    }
+  } catch (err) {
+    console.error('MongoDB connection error:', err);
+    console.log('Retrying MongoDB connection in 5 seconds...');
+    setTimeout(connectDb, 5000);
+  }
+};
+
+
+// Event Listeners for MongoDB connection status changes
+mongoose.connection.on('connected', () => {
+  console.log('Successfully connected/reconnected to MongoDB Atlas');
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.warn('MongoDB disconnected! Mongoose will automatically attempt to reconnect.');
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error('MongoDB connection event error:', err);
+});
+
+// Start the connection process
+connectDb();
 
 // Routes
 
@@ -741,7 +783,7 @@ app.get('/api/students', authenticateSession, async (req, res) => {
     if (role !== 'superadmin' && role !== 'developer') {
       filter.branch = new RegExp(`^${branch}$`, 'i');
     }
-    if (role === 'coordinator') {
+    if (role === 'trainer') {
       const schedule = await getBatchSchedule(batch);
       if (schedule) {
         filter.schedule = schedule;
@@ -763,7 +805,7 @@ app.get('/api/students/:id/photo', authenticateSession, async (req, res) => {
     if (role !== 'superadmin' && role !== 'developer') {
       filter.branch = new RegExp(`^${branch}$`, 'i');
     }
-    if (role === 'coordinator') {
+    if (role === 'trainer') {
       const schedule = await getBatchSchedule(batch);
       if (schedule) {
         filter.schedule = schedule;
@@ -774,6 +816,88 @@ app.get('/api/students/:id/photo', authenticateSession, async (req, res) => {
     res.json({ photo: decrypt(student.photo) });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Public student self-enrollment endpoint
+app.post('/api/public/students', async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      const dbErr = 'Database connection is not active';
+      console.error(`[Student Creation Error] ${dbErr}`);
+      addLog('error', dbErr);
+      return res.status(500).json({ error: dbErr });
+    }
+
+    if (!req.body.name || typeof req.body.name !== 'string' || !req.body.name.trim()) {
+      return res.status(400).json({ error: 'Valid student name is required' });
+    }
+    if (req.body.age === undefined || isNaN(Number(req.body.age))) {
+      return res.status(400).json({ error: 'Valid student age is required' });
+    }
+    if (!req.body.dob || typeof req.body.dob !== 'string' || !req.body.dob.trim()) {
+      return res.status(400).json({ error: 'Valid Date of Birth is required' });
+    }
+    if (!req.body.phone || typeof req.body.phone !== 'string' || !/^\d{10}$/.test(req.body.phone.trim())) {
+      return res.status(400).json({ error: 'Student Mobile number must be exactly 10 digits' });
+    }
+    if (!req.body.parentPhone || typeof req.body.parentPhone !== 'string' || !/^\d{10}$/.test(req.body.parentPhone.trim())) {
+      return res.status(400).json({ error: 'Parent Mobile number must be exactly 10 digits' });
+    }
+    if (!req.body.branch || typeof req.body.branch !== 'string' || !req.body.branch.trim()) {
+      return res.status(400).json({ error: 'Valid branch name is required' });
+    }
+
+    const existingStudents = await Student.find({ branch: req.body.branch }).select('name phone').lean();
+    const isDuplicate = existingStudents.some(s => {
+      const decryptedName = decrypt(s.name);
+      const decryptedPhone = decrypt(s.phone);
+      return decryptedName.toLowerCase().trim() === req.body.name.toLowerCase().trim() &&
+             decryptedPhone.trim() === req.body.phone.trim();
+    });
+
+    if (isDuplicate) {
+      const dupErr = 'A student with the same name and phone number already exists in this branch';
+      console.error(`[Student Creation Error] ${dupErr}`);
+      addLog('error', dupErr);
+      return res.status(400).json({ error: dupErr });
+    }
+
+    console.log(`[Student Creation] Creating public student: Name: ${req.body.name}, Age: ${req.body.age}, Branch: ${req.body.branch}`);
+    addLog('api', `Creating public student: Name: ${req.body.name}, Branch: ${req.body.branch}`);
+
+    let nextId;
+    let saved = null;
+    let attempts = 0;
+    while (!saved && attempts < 5) {
+      attempts++;
+      const lastStudent = await Student.findOne().sort({ id: -1 });
+      nextId = lastStudent && lastStudent.id ? lastStudent.id + 1 : 1;
+      
+      req.body.id = nextId;
+      const encryptedBody = encryptStudentData(req.body);
+      const newStudent = new Student(encryptedBody);
+      
+      try {
+        saved = await newStudent.save();
+      } catch (saveErr) {
+        if (saveErr.code === 11000) {
+          continue;
+        }
+        throw saveErr;
+      }
+    }
+
+    if (!saved) {
+      throw new Error('Failed to generate a unique student ID after multiple attempts');
+    }
+
+    console.log(`[Student Creation] Successfully saved public student to database. ID: ${saved.id}`);
+    res.status(201).json(decryptStudent(saved));
+  } catch (err) {
+    console.error(`[Student Creation Error] Exception caught: ${err.message}`);
+    addLog('error', `Failed to create student: ${err.message}`);
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -807,8 +931,14 @@ app.post('/api/students', authenticateSession, async (req, res) => {
     if (req.body.age === undefined || isNaN(Number(req.body.age))) {
       return res.status(400).json({ error: 'Valid student age is required' });
     }
-    if (!req.body.phone || typeof req.body.phone !== 'string' || !req.body.phone.trim()) {
-      return res.status(400).json({ error: 'Valid phone number is required' });
+    if (!req.body.dob || typeof req.body.dob !== 'string' || !req.body.dob.trim()) {
+      return res.status(400).json({ error: 'Valid Date of Birth is required' });
+    }
+    if (!req.body.phone || typeof req.body.phone !== 'string' || !/^\d{10}$/.test(req.body.phone.trim())) {
+      return res.status(400).json({ error: 'Student Mobile number must be exactly 10 digits' });
+    }
+    if (!req.body.parentPhone || typeof req.body.parentPhone !== 'string' || !/^\d{10}$/.test(req.body.parentPhone.trim())) {
+      return res.status(400).json({ error: 'Parent Mobile number must be exactly 10 digits' });
     }
 
     // Check for duplicate student (same name & phone number in the branch)
@@ -889,6 +1019,15 @@ app.put('/api/students/:id', authenticateSession, async (req, res) => {
     if (req.body.name !== undefined && (typeof req.body.name !== 'string' || !req.body.name.trim())) {
       return res.status(400).json({ error: 'Student name must be a non-empty string' });
     }
+    if (req.body.dob !== undefined && (typeof req.body.dob !== 'string' || !req.body.dob.trim())) {
+      return res.status(400).json({ error: 'Valid Date of Birth is required' });
+    }
+    if (req.body.phone !== undefined && (typeof req.body.phone !== 'string' || !/^\d{10}$/.test(req.body.phone.trim()))) {
+      return res.status(400).json({ error: 'Student Mobile number must be exactly 10 digits' });
+    }
+    if (req.body.parentPhone !== undefined && (typeof req.body.parentPhone !== 'string' || !/^\d{10}$/.test(req.body.parentPhone.trim()))) {
+      return res.status(400).json({ error: 'Parent Mobile number must be exactly 10 digits' });
+    }
 
     const encryptedBody = encryptStudentData(req.body);
     const updated = await Student.findOneAndUpdate({ id: Number(id) }, encryptedBody, { new: true });
@@ -939,7 +1078,7 @@ app.get('/api/attendance', authenticateSession, async (req, res) => {
     let allowedStudentIds = null;
     if (role !== 'superadmin' && role !== 'developer') {
       let studentFilter = { branch: new RegExp(`^${branch}$`, 'i') };
-      if (role === 'coordinator') {
+      if (role === 'trainer') {
         const schedule = await getBatchSchedule(batch);
         if (schedule) {
           studentFilter.schedule = schedule;
@@ -986,7 +1125,7 @@ app.post('/api/attendance', authenticateSession, async (req, res) => {
     let studentFilter = {};
     if (role !== 'superadmin' && role !== 'developer') {
       studentFilter.branch = new RegExp(`^${branch}$`, 'i');
-      if (role === 'coordinator') {
+      if (role === 'trainer') {
         const schedule = await getBatchSchedule(batch);
         if (schedule) {
           studentFilter.schedule = schedule;
@@ -1114,20 +1253,64 @@ app.put('/api/help-reports/:id/seen', authenticateSession, async (req, res) => {
 });
 
 // Notifications API Endpoints
-// Retrieve all notifications
+// Retrieve notifications (scoped for regular users, supports ?all=true for developer/superadmin)
 app.get('/api/notifications', authenticateSession, async (req, res) => {
   try {
-    const notifications = await Notification.find().sort({ createdAt: -1 }).lean();
+    const { role, username, branch, batch } = req.user;
+    const showAll = req.query.all === 'true';
+
+    if (showAll && (role === 'developer' || role === 'superadmin')) {
+      const notifications = await Notification.find().sort({ createdAt: -1 }).lean();
+      return res.json(notifications);
+    }
+
+    const now = new Date();
+    const filter = {
+      $and: [
+        {
+          $or: [
+            { isScheduled: { $ne: true } },
+            { scheduledAt: { $lte: now } }
+          ]
+        },
+        {
+          $or: [
+            { expiryDate: null },
+            { expiryDate: { $gt: now } }
+          ]
+        },
+        {
+          $or: [
+            { branch: 'all' },
+            { branch: new RegExp(`^${branch}$`, 'i') }
+          ]
+        },
+        {
+          $or: [
+            { batch: 'all' },
+            { batch: new RegExp(`^${batch}$`, 'i') }
+          ]
+        },
+        {
+          $or: [
+            { targetUser: 'all' },
+            { targetUser: new RegExp(`^${username}$`, 'i') }
+          ]
+        }
+      ]
+    };
+
+    const notifications = await Notification.find(filter).sort({ createdAt: -1 }).lean();
     res.json(notifications);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Create a new global notification
+// Create a new notification (restricted to developer/superadmin)
 app.post('/api/notifications', authenticateSession, authorizeRoles('developer', 'superadmin'), async (req, res) => {
   try {
-    const { title, message, type } = req.body;
+    const { title, message, type, priority, branch, batch, targetUser, expiryDate, scheduledAt, isScheduled } = req.body;
     if (!title || !title.trim()) {
       return res.status(400).json({ error: 'Notification title is required' });
     }
@@ -1139,12 +1322,56 @@ app.post('/api/notifications', authenticateSession, authorizeRoles('developer', 
       title: title.trim(),
       message: message.trim(),
       type: type || 'general',
-      sender: req.user.username
+      sender: req.user.username,
+      priority: priority || 'medium',
+      branch: branch || 'all',
+      batch: batch || 'all',
+      targetUser: targetUser || 'all',
+      expiryDate: expiryDate ? new Date(expiryDate) : null,
+      scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
+      isScheduled: !!isScheduled
     });
     
     const saved = await notification.save();
-    console.log(`[Notification] Created new global notification: "${saved.title}" by ${saved.sender}`);
+    console.log(`[Notification] Created new notification: "${saved.title}" by ${saved.sender}`);
     res.status(201).json(saved);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Edit an existing notification (restricted to developer/superadmin)
+app.put('/api/notifications/:id', authenticateSession, authorizeRoles('developer', 'superadmin'), async (req, res) => {
+  try {
+    const { title, message, type, priority, branch, batch, targetUser, expiryDate, scheduledAt, isScheduled } = req.body;
+    if (title !== undefined && !title.trim()) {
+      return res.status(400).json({ error: 'Notification title cannot be empty' });
+    }
+    if (message !== undefined && !message.trim()) {
+      return res.status(400).json({ error: 'Notification message cannot be empty' });
+    }
+
+    const updateFields = {};
+    if (title !== undefined) updateFields.title = title.trim();
+    if (message !== undefined) updateFields.message = message.trim();
+    if (type !== undefined) updateFields.type = type || 'general';
+    if (priority !== undefined) updateFields.priority = priority || 'medium';
+    if (branch !== undefined) updateFields.branch = branch || 'all';
+    if (batch !== undefined) updateFields.batch = batch || 'all';
+    if (targetUser !== undefined) updateFields.targetUser = targetUser || 'all';
+    if (expiryDate !== undefined) updateFields.expiryDate = expiryDate ? new Date(expiryDate) : null;
+    if (scheduledAt !== undefined) updateFields.scheduledAt = scheduledAt ? new Date(scheduledAt) : null;
+    if (isScheduled !== undefined) updateFields.isScheduled = !!isScheduled;
+
+    const updated = await Notification.findByIdAndUpdate(
+      req.params.id,
+      { $set: updateFields },
+      { new: true }
+    );
+
+    if (!updated) return res.status(404).json({ error: 'Notification not found' });
+    console.log(`[Notification] Updated notification: "${updated.title}" by ${req.user.username}`);
+    res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -1205,8 +1432,20 @@ app.get('/api/system/maintenance', async (req, res) => {
       if (cachedSettings.maintenanceStart && cachedSettings.maintenanceEnd) {
         const start = new Date(cachedSettings.maintenanceStart);
         const end = new Date(cachedSettings.maintenanceEnd);
-        isUpcoming = now < start;
-        isActive = now >= start && now <= end;
+        if (now > end) {
+          let settings = await SystemSetting.findOne({ configKey: 'main' });
+          if (settings) {
+            settings.maintenanceMode = 'none';
+            settings.maintenanceStart = null;
+            settings.maintenanceEnd = null;
+            await settings.save();
+            cachedSettings = settings.toObject();
+            console.log('[Maintenance schedule] Ended. Auto-reset mode to none.');
+          }
+        } else {
+          isUpcoming = now < start;
+          isActive = now >= start && now <= end;
+        }
       } else {
         isActive = true;
       }
@@ -1245,6 +1484,8 @@ app.post('/api/login', async (req, res) => {
 
     const user = await User.findOne({ username: enteredUser });
 
+    const userRole = user ? user.role : '';
+
     // --- ENFORCE MAINTENANCE MODE ON LOGIN ---
     if (cachedSettings.maintenanceMode && cachedSettings.maintenanceMode !== 'none' && enteredUser !== 'developer') {
       let active = true;
@@ -1255,43 +1496,33 @@ app.post('/api/login', async (req, res) => {
         active = now >= start && now <= end;
       }
       
-      if (active) {
+      if (active && userRole !== 'developer') {
         const mode = cachedSettings.maintenanceMode;
-        const userRole = user ? user.role : '';
-        
         if (mode === 'all') {
           return res.status(503).json({ success: false, error: 'System is under maintenance. Login is currently locked.' });
-        } else if (mode === 'admin' && ['superadmin', 'branchadmin', 'coordinator'].includes(userRole)) {
+        } else if (mode === 'admin' && userRole === 'superadmin') {
           return res.status(503).json({ success: false, error: 'Admin portal login is currently under maintenance.' });
         } else if (mode === 'branch' && userRole === 'branchadmin') {
           return res.status(503).json({ success: false, error: 'Branch Admin portal login is currently under maintenance.' });
-        } else if (mode === 'batch' && userRole === 'coordinator') {
-          return res.status(503).json({ success: false, error: 'Coordinator portal login is currently under maintenance.' });
+        } else if (mode === 'batch' && userRole === 'trainer') {
+          return res.status(503).json({ success: false, error: 'Trainer portal login is currently under maintenance.' });
         }
       }
     }
 
-    // --- ENFORCE ACCOUNT LOCKED STATE ---
-    if (user && user.isLocked) {
-      return res.status(423).json({ success: false, error: 'Your account is locked due to security limits. Please contact the administrator.' });
-    }
-
-    // --- BRUTE FORCE LOCKOUT GUARD ---
-    const blockTimeMs = (cachedSettings.failedLoginBlockTimeMinutes || 15) * 60 * 1000;
-    const failedCount = await SecurityLog.countDocuments({
-      eventType: 'FailedLogin',
-      username: enteredUser,
-      createdAt: { $gte: new Date(Date.now() - blockTimeMs) }
-    });
-    if (failedCount >= (cachedSettings.failedLoginThreshold || 5) && enteredUser !== 'developer') {
-      if (user && !user.isLocked) {
-        user.isLocked = true;
-        await user.save();
+    // --- ENFORCE ACCOUNT LOCKED STATE (Level 1, Level 2, Permanent) ---
+    if (user && user.role !== 'developer') {
+      if (user.isLocked) {
+        return res.status(423).json({ success: false, error: 'Your account is locked due to security limits. Please contact the administrator.' });
       }
-      return res.status(429).json({
-        success: false,
-        error: `Too many failed login attempts. Account is locked. Please try again in ${cachedSettings.failedLoginBlockTimeMinutes} minutes.`
-      });
+
+      if (user.lockUntil && new Date() < user.lockUntil) {
+        if (user.failedAttempts >= 10) {
+          return res.status(423).json({ success: false, error: 'Account temporarily locked. Please try again after 15 minutes.' });
+        } else if (user.failedAttempts >= 5) {
+          return res.status(423).json({ success: false, error: 'Too many failed login attempts. Please try again after 5 minutes.' });
+        }
+      }
     }
 
     if (!user) {
@@ -1308,9 +1539,11 @@ app.post('/api/login', async (req, res) => {
       await new SecurityLog({
         eventType: 'FailedLogin',
         username: enteredUser,
+        role: 'guest',
         description: `Failed login attempt: account username not found.`,
         ipAddress: clientIp,
-        userAgent
+        userAgent,
+        deviceInfo: `${deviceName || 'Unknown Device'} (${deviceDetails.browser || 'Unknown Browser'} on ${deviceDetails.os || 'Unknown OS'})`
       }).save();
 
       return res.status(401).json({ success: false, error: 'Invalid username or password' });
@@ -1325,9 +1558,9 @@ app.post('/api/login', async (req, res) => {
 
     if (verifyPassword(password, user.password)) {
       const isSuper = loginType === 'superadmin' && (user.role === 'superadmin' || user.role === 'developer');
-      const isCoord = loginType === 'coordinator' && (user.role === 'branchadmin' || user.role === 'coordinator');
+      const isTrainer = (loginType === 'trainer' || loginType === 'coordinator') && (user.role === 'branchadmin' || user.role === 'trainer');
 
-      if (!isSuper && !isCoord) {
+      if (!isSuper && !isTrainer) {
         // Log unauthorized type attempts
         await new LoginHistory({
           username: user.username,
@@ -1369,6 +1602,8 @@ app.post('/api/login', async (req, res) => {
       user.failedAttempts = 0;
       user.failedLoginCount = 0;
       user.isLocked = false;
+      user.lockUntil = null;
+      user.lockedAt = null;
       await user.save();
 
       return res.json({ success: true, username: user.username, token, role: user.role, branch: user.branch, batch: user.batch, loginCount: user.loginCount });
@@ -1377,9 +1612,26 @@ app.post('/api/login', async (req, res) => {
     // Password verification failed
     user.failedAttempts = (user.failedAttempts || 0) + 1;
     user.failedLoginCount = (user.failedLoginCount || 0) + 1;
-    if (user.failedAttempts >= (cachedSettings.failedLoginThreshold || 5) && user.role !== 'developer') {
-      user.isLocked = true;
+
+    let lockoutError = null;
+
+    if (user.role !== 'developer') {
+      if (user.failedAttempts > 10) {
+        user.isLocked = true;
+        user.lockUntil = null;
+        user.lockedAt = new Date();
+        lockoutError = 'Your account is locked due to security limits. Please contact the administrator.';
+      } else if (user.failedAttempts === 10) {
+        user.lockUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 mins lock
+        user.lockedAt = new Date();
+        lockoutError = 'Account temporarily locked. Please try again after 15 minutes.';
+      } else if (user.failedAttempts === 5) {
+        user.lockUntil = new Date(Date.now() + 5 * 60 * 1000); // 5 mins lock
+        user.lockedAt = new Date();
+        lockoutError = 'Too many failed login attempts. Please try again after 5 minutes.';
+      }
     }
+
     await user.save();
 
     await new LoginHistory({
@@ -1395,13 +1647,19 @@ app.post('/api/login', async (req, res) => {
     await new SecurityLog({
       eventType: 'FailedLogin',
       username: user.username,
-      description: `Failed login attempt: invalid password.`,
+      role: user.role,
+      description: lockoutError || `Failed login attempt: invalid password. Attempts: ${user.failedAttempts}`,
       ipAddress: clientIp,
-      userAgent
+      userAgent,
+      deviceInfo: `${deviceName || 'Unknown Device'} (${deviceDetails.browser || 'Unknown Browser'} on ${deviceDetails.os || 'Unknown OS'})`
     }).save();
 
+    if (lockoutError) {
+      return res.status(423).json({ success: false, error: lockoutError });
+    }
+
     if (user.isLocked) {
-      return res.status(423).json({ success: false, error: 'Too many failed password attempts. Your account has been locked.' });
+      return res.status(423).json({ success: false, error: 'Your account is locked due to security limits. Please contact the administrator.' });
     }
 
     return res.status(401).json({ success: false, error: 'Invalid username or password' });
@@ -1796,8 +2054,8 @@ app.get('/api/credentials/raw', authenticateSession, authorizeRoles('superadmin'
   }
 });
 
-// Get credentials (passwords masked for security - Super Admin and Developer)
-app.get('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
+// Get credentials (passwords masked for security - All authenticated roles)
+app.get('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
   try {
     const creds = await Credential.findOne({ configType: 'main' }).lean();
     if (!creds) {
@@ -2237,7 +2495,7 @@ developerRouter.put('/users/:id', async (req, res) => {
               }
             }
           }
-        } else if (oldRole === 'coordinator') {
+        } else if (oldRole === 'trainer') {
           const key = `${oldBranch}_${oldBatch}`;
           const entry = creds.batchCredentials instanceof Map ? creds.batchCredentials.get(key) : creds.batchCredentials[key];
           if (entry) {
@@ -2271,7 +2529,7 @@ developerRouter.put('/users/:id', async (req, res) => {
             } else {
               creds.branchCredentials[key] = newEntry;
             }
-          } else if (newRole === 'coordinator') {
+          } else if (newRole === 'trainer') {
             const key = `${newBranch}_${newBatch}`;
             const newEntry = { username: newUsername, password };
             if (creds.batchCredentials instanceof Map) {
@@ -2303,6 +2561,22 @@ developerRouter.put('/users/:id', async (req, res) => {
   }
 });
 
+// Get all locked accounts (temporary or permanent locks)
+developerRouter.get('/locked-users', async (req, res) => {
+  try {
+    const lockedUsers = await User.find({
+      $or: [
+        { isLocked: true },
+        { lockUntil: { $ne: null, $gt: new Date() } }
+      ]
+    }).select('username role phone failedAttempts isLocked lockUntil lockedAt updatedAt').lean();
+    
+    res.json(lockedUsers);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Lock/Unlock account
 developerRouter.put('/users/:id/lock', async (req, res) => {
   try {
@@ -2315,6 +2589,8 @@ developerRouter.put('/users/:id/lock', async (req, res) => {
     if (!isLocked) {
       user.failedAttempts = 0;
       user.failedLoginCount = 0;
+      user.lockUntil = null;
+      user.lockedAt = null;
     }
     await user.save();
 
@@ -2399,7 +2675,7 @@ developerRouter.put('/users/:id/reset-password', async (req, res) => {
             }
           }
         }
-      } else if (user.role === 'coordinator') {
+      } else if (user.role === 'trainer') {
         const key = `${user.branch}_${user.batch}`;
         const entry = creds.batchCredentials instanceof Map ? creds.batchCredentials.get(key) : creds.batchCredentials[key];
         if (entry) {
@@ -2433,26 +2709,31 @@ developerRouter.put('/users/:id/reset-password', async (req, res) => {
   }
 });
 
-// Soft Delete User
+// Delete User (Supports Soft and Permanent delete)
 developerRouter.delete('/users/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const isPermanent = req.query.permanent === 'true';
     const userToEdit = await User.findById(id);
     if (!userToEdit) {
       return res.status(404).json({ error: 'User not found' });
     }
     
-    userToEdit.status = 'SoftDeleted';
-    await userToEdit.save();
+    const uName = userToEdit.username;
+    const uRole = userToEdit.role;
+    const uBranch = userToEdit.branch;
+    const uBatch = userToEdit.batch;
+
+    if (isPermanent) {
+      await User.findByIdAndDelete(id);
+    } else {
+      userToEdit.status = 'SoftDeleted';
+      await userToEdit.save();
+    }
     
     // Sync to Credential model by removing the user entry
     const creds = await Credential.findOne({ configType: 'main' });
     if (creds) {
-      const uName = userToEdit.username;
-      const uRole = userToEdit.role;
-      const uBranch = userToEdit.branch;
-      const uBatch = userToEdit.batch;
-      
       if (uRole === 'superadmin' || uRole === 'developer') {
         if (creds.adminCredentials instanceof Map) {
           creds.adminCredentials.delete(uName);
@@ -2468,7 +2749,7 @@ developerRouter.delete('/users/:id', async (req, res) => {
             delete creds.branchCredentials[key];
           }
         }
-      } else if (uRole === 'coordinator') {
+      } else if (uRole === 'trainer') {
         const key = `${uBranch}_${uBatch}`;
         if (creds.batchCredentials instanceof Map) {
           creds.batchCredentials.delete(key);
@@ -2484,14 +2765,14 @@ developerRouter.delete('/users/:id', async (req, res) => {
     }
 
     await new SecurityLog({
-      eventType: 'UserStatusUpdate',
+      eventType: isPermanent ? 'UserPermanentDelete' : 'UserStatusUpdate',
       username: req.user.username,
-      description: `Soft-deleted user ${userToEdit.username}`,
+      description: isPermanent ? `Permanently deleted user ${uName}` : `Soft-deleted user ${uName}`,
       ipAddress: req.ip,
       userAgent: req.headers['user-agent']
     }).save();
     
-    res.json({ success: true, message: 'User soft-deleted successfully' });
+    res.json({ success: true, message: isPermanent ? 'User permanently deleted successfully' : 'User soft-deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2558,6 +2839,48 @@ developerRouter.delete('/sessions', async (req, res) => {
       userAgent: req.headers['user-agent']
     }).save();
 
+    res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete specific login history entry (restricted to developer)
+developerRouter.delete('/login-history/:id', async (req, res) => {
+  try {
+    const deleted = await LoginHistory.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Login history entry not found' });
+    res.json({ success: true, message: 'Login history entry deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete all login history entries (restricted to developer)
+developerRouter.delete('/login-history', async (req, res) => {
+  try {
+    const result = await LoginHistory.deleteMany({});
+    res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete specific security log entry (restricted to developer)
+developerRouter.delete('/security-logs/:id', async (req, res) => {
+  try {
+    const deleted = await SecurityLog.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Security log entry not found' });
+    res.json({ success: true, message: 'Security log entry deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete all security log entries (restricted to developer)
+developerRouter.delete('/security-logs', async (req, res) => {
+  try {
+    const result = await SecurityLog.deleteMany({});
     res.json({ success: true, deletedCount: result.deletedCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2908,8 +3231,42 @@ developerRouter.post('/settings', async (req, res) => {
     if (failedLoginBlockTimeMinutes !== undefined) settings.failedLoginBlockTimeMinutes = parseInt(failedLoginBlockTimeMinutes, 10);
     if (logRetentionLimit !== undefined) settings.logRetentionLimit = parseInt(logRetentionLimit, 10);
     
+    // If maintenance schedule has already ended, clear the dates so it applies immediately
+    if (settings.maintenanceStart && settings.maintenanceEnd) {
+      const end = new Date(settings.maintenanceEnd);
+      if (new Date() > end) {
+        settings.maintenanceStart = null;
+        settings.maintenanceEnd = null;
+      }
+    }
+    
     await settings.save();
     cachedSettings = settings.toObject();
+
+    // Immediately terminate active sessions of blocked roles
+    if (settings.maintenanceMode && settings.maintenanceMode !== 'none') {
+      let blockedRoles = [];
+      if (settings.maintenanceMode === 'all') {
+        blockedRoles = ['superadmin', 'branchadmin', 'trainer'];
+      } else if (settings.maintenanceMode === 'admin') {
+        blockedRoles = ['superadmin'];
+      } else if (settings.maintenanceMode === 'branch') {
+        blockedRoles = ['branchadmin'];
+      } else if (settings.maintenanceMode === 'batch') {
+        blockedRoles = ['trainer'];
+      }
+
+      if (blockedRoles.length > 0) {
+        // Find users matching these roles
+        const usersToBlock = await User.find({ role: { $in: blockedRoles } }).select('username').lean();
+        const usernamesToBlock = usersToBlock.map(u => u.username.toLowerCase().trim());
+        
+        if (usernamesToBlock.length > 0) {
+          const deleteResult = await Session.deleteMany({ username: { $in: usernamesToBlock } });
+          console.log(`[Maintenance Lockout] Immediately logged out ${deleteResult.deletedCount} sessions for roles: ${blockedRoles.join(', ')}`);
+        }
+      }
+    }
     
     if (appLogs.length > cachedSettings.logRetentionLimit) {
       appLogs.splice(0, appLogs.length - cachedSettings.logRetentionLimit);
@@ -2938,9 +3295,9 @@ app.get('/api/admins', authenticateSession, authorizeRoles('superadmin', 'develo
     };
     if (role === 'branchadmin') {
       query.branch = new RegExp(`^${branch}$`, 'i');
-      query.role = 'coordinator';
+      query.role = 'trainer';
     } else {
-      query.role = { $in: ['superadmin', 'branchadmin', 'coordinator'] };
+      query.role = { $in: ['superadmin', 'branchadmin', 'trainer'] };
     }
 
     const admins = await User.find(query).lean();
@@ -2977,11 +3334,11 @@ app.post('/api/admins', authenticateSession, authorizeRoles('superadmin', 'devel
     // Strict scoping for branch admins
     const { role: userRole, branch: userBranch } = req.user;
     if (userRole === 'branchadmin') {
-      if (role !== 'coordinator') {
-        return res.status(403).json({ error: 'Access denied: Branch admins can only create coordinators.' });
+      if (role !== 'trainer') {
+        return res.status(403).json({ error: 'Access denied: Branch admins can only create trainers.' });
       }
       if (!branch || String(branch).toLowerCase().trim() !== userBranch.toLowerCase().trim()) {
-        return res.status(403).json({ error: 'Access denied: Cannot create coordinator for another branch.' });
+        return res.status(403).json({ error: 'Access denied: Cannot create trainer for another branch.' });
       }
     }
 
@@ -3023,7 +3380,7 @@ app.post('/api/admins', authenticateSession, authorizeRoles('superadmin', 'devel
         } else {
           creds.branchCredentials[key] = entry;
         }
-      } else if (role === 'coordinator') {
+      } else if (role === 'trainer') {
         const key = `${branch || 'Kuttiady'}_${batch || 'batch1'}`;
         const entry = { username: cleanUser, password };
         if (creds.batchCredentials instanceof Map) {
@@ -3068,14 +3425,14 @@ app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'de
 
     // Strict scoping for branch admins
     if (req.user.role === 'branchadmin') {
-      if (user.role !== 'coordinator' || user.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
-        return res.status(403).json({ error: 'Access denied: Cannot modify admin/coordinator from another branch or role.' });
+      if (user.role !== 'trainer' || user.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot modify admin/trainer from another branch or role.' });
       }
-      if (role && role !== 'coordinator') {
-        return res.status(403).json({ error: 'Access denied: Cannot change coordinator to another role.' });
+      if (role && role !== 'trainer') {
+        return res.status(403).json({ error: 'Access denied: Cannot change trainer to another role.' });
       }
       if (branch && branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
-        return res.status(403).json({ error: 'Access denied: Cannot change coordinator branch.' });
+        return res.status(403).json({ error: 'Access denied: Cannot change trainer branch.' });
       }
     }
 
@@ -3123,7 +3480,7 @@ app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'de
         } else if (oldRole === 'branchadmin') {
           const entry = creds.branchCredentials instanceof Map ? creds.branchCredentials.get(oldBranch) : creds.branchCredentials[oldBranch];
           plainPass = entry?.password;
-        } else if (oldRole === 'coordinator') {
+        } else if (oldRole === 'trainer') {
           const key = `${oldBranch}_${oldBatch}`;
           const entry = creds.batchCredentials instanceof Map ? creds.batchCredentials.get(key) : creds.batchCredentials[key];
           plainPass = entry?.password;
@@ -3138,7 +3495,7 @@ app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'de
       } else if (oldRole === 'branchadmin') {
         if (creds.branchCredentials instanceof Map) creds.branchCredentials.delete(oldBranch);
         else delete creds.branchCredentials[oldBranch];
-      } else if (oldRole === 'coordinator') {
+      } else if (oldRole === 'trainer') {
         const key = `${oldBranch}_${oldBatch}`;
         if (creds.batchCredentials instanceof Map) creds.batchCredentials.delete(key);
         else delete creds.batchCredentials[key];
@@ -3158,7 +3515,7 @@ app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'de
           const entry = { username: newUsername, password: plainPass };
           if (creds.branchCredentials instanceof Map) creds.branchCredentials.set(newBranch, entry);
           else creds.branchCredentials[newBranch] = entry;
-        } else if (newRole === 'coordinator') {
+        } else if (newRole === 'trainer') {
           const key = `${newBranch}_${newBatch}`;
           const entry = { username: newUsername, password: plainPass };
           if (creds.batchCredentials instanceof Map) creds.batchCredentials.set(key, entry);
@@ -3189,6 +3546,7 @@ app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'de
 app.delete('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
   try {
     const { id } = req.params;
+    const isPermanent = req.query.permanent === 'true';
     const user = await User.findById(id);
     if (!user) return res.status(404).json({ error: 'Admin user not found' });
 
@@ -3198,25 +3556,34 @@ app.delete('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 
 
     // Strict scoping for branch admins
     if (req.user.role === 'branchadmin') {
-      if (user.role !== 'coordinator' || user.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
-        return res.status(403).json({ error: 'Access denied: Cannot delete admin/coordinator from another branch or role.' });
+      if (user.role !== 'trainer' || user.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot delete admin/trainer from another branch or role.' });
       }
     }
 
-    user.status = 'SoftDeleted';
-    await user.save();
+    const uName = user.username;
+    const uRole = user.role;
+    const uBranch = user.branch;
+    const uBatch = user.batch;
+
+    if (isPermanent) {
+      await User.findByIdAndDelete(id);
+    } else {
+      user.status = 'SoftDeleted';
+      await user.save();
+    }
 
     // Delete from credentials mapping
     const creds = await Credential.findOne({ configType: 'main' });
     if (creds) {
-      if (user.role === 'superadmin') {
-        if (creds.adminCredentials instanceof Map) creds.adminCredentials.delete(user.username);
-        else delete creds.adminCredentials[user.username];
-      } else if (user.role === 'branchadmin') {
-        if (creds.branchCredentials instanceof Map) creds.branchCredentials.delete(user.branch);
-        else delete creds.branchCredentials[user.branch];
-      } else if (user.role === 'coordinator') {
-        const key = `${user.branch}_${user.batch}`;
+      if (uRole === 'superadmin') {
+        if (creds.adminCredentials instanceof Map) creds.adminCredentials.delete(uName);
+        else delete creds.adminCredentials[uName];
+      } else if (uRole === 'branchadmin') {
+        if (creds.branchCredentials instanceof Map) creds.branchCredentials.delete(uBranch);
+        else delete creds.branchCredentials[uBranch];
+      } else if (uRole === 'trainer') {
+        const key = `${uBranch}_${uBatch}`;
         if (creds.batchCredentials instanceof Map) creds.batchCredentials.delete(key);
         else delete creds.batchCredentials[key];
       }
@@ -3227,14 +3594,14 @@ app.delete('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 
     }
 
     await new SecurityLog({
-      eventType: 'DeveloperAudit',
+      eventType: isPermanent ? 'UserPermanentDelete' : 'DeveloperAudit',
       username: req.user.username,
-      description: `Soft deleted Admin account: ${user.username}`,
+      description: isPermanent ? `Permanently deleted Admin account: ${uName}` : `Soft deleted Admin account: ${uName}`,
       ipAddress: getClientIp(req),
       userAgent: req.headers['user-agent']
     }).save();
 
-    res.json({ success: true });
+    res.json({ success: true, message: isPermanent ? 'Admin permanently deleted successfully' : 'Admin soft deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3252,8 +3619,8 @@ app.get('/api/admins/:id/details', authenticateSession, authorizeRoles('superadm
 
     // Strict scoping for branch admins
     if (req.user.role === 'branchadmin') {
-      if (user.role !== 'coordinator' || user.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
-        return res.status(403).json({ error: 'Access denied: Cannot view details of admin/coordinator from another branch or role.' });
+      if (user.role !== 'trainer' || user.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot view details of admin/trainer from another branch or role.' });
       }
     }
 

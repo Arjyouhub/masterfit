@@ -1182,7 +1182,7 @@ html.admin-html, body.admin-body {
   }
   
   .panel { 
-    overflow-x: auto; 
+    overflow: visible; 
     padding: 1.25rem;
   }
   
@@ -2635,6 +2635,201 @@ p, span, h1, h2, h3, h4, h5, h6, th, td, label, div, li, a {
 
 /* Modals & Dialog Box Responsiveness */
 .modal-overlay {
+}
+.public-layout.has-maintenance-banner.has-broadcast-banner .public-nav {
+  top: 70px;
+}
+
+.login-layout.has-broadcast-banner {
+  padding-top: 35px;
+}
+.login-layout.has-maintenance-banner.has-broadcast-banner {
+  padding-top: 70px;
+}
+
+@keyframes shake {
+  0% { transform: rotate(0); }
+  15% { transform: rotate(10deg); }
+  30% { transform: rotate(-10deg); }
+  45% { transform: rotate(5deg); }
+  60% { transform: rotate(-5deg); }
+  75% { transform: rotate(2deg); }
+  85% { transform: rotate(-2deg); }
+  100% { transform: rotate(0); }
+}
+
+.shake-icon {
+  animation: shake 2.5s infinite ease-in-out;
+  display: inline-flex;
+}
+
+@media (max-width: 768px) {
+  .broadcast-alert-banner-static {
+    margin: 0.75rem;
+    padding: 0.6rem 1rem;
+    font-size: 0.8rem;
+  }
+  .broadcast-alert-banner {
+    padding: 0.5rem 0.85rem;
+    font-size: 0.75rem;
+  }
+  .public-layout.has-broadcast-banner {
+    padding-top: 30px;
+  }
+  .public-layout.has-broadcast-banner .public-nav {
+    top: 30px;
+  }
+  .public-layout.has-maintenance-banner.has-broadcast-banner {
+    padding-top: 60px;
+  }
+  .public-layout.has-maintenance-banner.has-broadcast-banner .public-nav {
+    top: 60px;
+  }
+  .login-layout.has-broadcast-banner {
+    padding-top: 30px;
+  }
+  .login-layout.has-maintenance-banner.has-broadcast-banner {
+    padding-top: 60px;
+  }
+}
+
+/* Responsive Developer Panel styles for mobile devices */
+@media (max-width: 992px) {
+  .developer-panel {
+    flex-direction: column !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .dev-sidebar {
+    width: 100% !important;
+    height: auto !important;
+    border-right: none !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  }
+  .dev-sidebar-header {
+    padding: 1rem 1.5rem !important;
+  }
+  .dev-nav {
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    padding: 0.5rem 1rem !important;
+    gap: 8px !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .dev-nav-item {
+    padding: 0.5rem 1rem !important;
+    border-left: none !important;
+    border-bottom: 3px solid transparent !important;
+    display: inline-flex !important;
+    align-items: center;
+    gap: 8px !important;
+    flex-shrink: 0 !important;
+  }
+  .dev-nav-item.active {
+    border-bottom-color: #5e5ce6 !important;
+    background: rgba(94, 92, 230, 0.1) !important;
+  }
+  .dev-sidebar-footer {
+    display: none !important;
+  }
+  .dev-mobile-logout-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    background: none !important;
+    border: none !important;
+    color: #ff453a !important;
+    cursor: pointer;
+    padding: 6px !important;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+  }
+  .dev-mobile-logout-btn:hover {
+    transform: scale(1.1);
+    opacity: 0.9;
+  }
+  .dev-mobile-logout-btn:active {
+    transform: scale(0.95);
+  }
+  .dev-main {
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .dev-header {
+    height: auto !important;
+    padding: 1.25rem 1rem !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0.75rem !important;
+  }
+  .dev-body {
+    padding: 1rem !important;
+  }
+  .dev-table-container {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Custom styles for WebKit calendar and clock picker indicators in dark theme */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+/* Calendar input focus glow */
+input[type="datetime-local"].dev-input:focus {
+  border-color: #ff9f0a;
+  box-shadow: 0 0 8px rgba(255, 159, 10, 0.25);
+}
+
+/* ==========================================================================
+   PREMIUM RESPONSIVENESS AND DEVICE COMPATIBILITY LAYER
+   ========================================================================== */
+
+/* Universal Layout & Text Wrapping Safeguard */
+p, span, h1, h2, h3, h4, h5, h6, th, td, label, div, li, a {
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+}
+
+/* Touch Device Target Optimization (iOS / Android guidelines) */
+@media (pointer: coarse) {
+  a.nav-item,
+  a.nav-link,
+  .btn-primary,
+  .btn-secondary,
+  .btn-outline-primary,
+  .btn-small,
+  button,
+  .form-control,
+  .dev-input,
+  select,
+  input {
+    min-height: 44px; /* Minimum ergonomic touch-target dimension */
+  }
+
+  .btn-icon,
+  .dev-mobile-logout-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* Modals & Dialog Box Responsiveness */
+.modal-overlay {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2687,6 +2882,11 @@ p, span, h1, h2, h3, h4, h5, h6, th, td, label, div, li, a {
   .dev-table {
     width: 100% !important;
     min-width: 650px; /* Forces custom scroll indicator instead of squishing fields */
+  }
+
+  .table-responsive .data-table {
+    width: 100% !important;
+    min-width: 1000px !important;
   }
 
   .stats-grid {
@@ -2760,7 +2960,47 @@ p, span, h1, h2, h3, h4, h5, h6, th, td, label, div, li, a {
   }
 }
 
+/* Premium Custom Scrollbars & Scrolling Cleanups */
+* {
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(229, 9, 20, 0.45) rgba(10, 10, 10, 0.5);
+}
 
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
 
+::-webkit-scrollbar-track {
+  background: rgba(10, 10, 10, 0.5);
+  border-radius: 4px;
+  }
 
+::-webkit-scrollbar-thumb {
+  background: rgba(229, 9, 20, 0.45);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
 
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(229, 9, 20, 0.7);
+}
+
+/* Fix dual scrolling layers on desktop */
+html, body {
+  scrollbar-width: none; /* Hide root scrollbars if main container scrolls */
+}
+html::-webkit-scrollbar, body::-webkit-scrollbar {
+  width: 0px;
+  height: 0px;
+}
+
+.main-content {
+  -webkit-overflow-scrolling: touch;
+}
+
+.modal-content {
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
