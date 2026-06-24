@@ -4522,7 +4522,7 @@ developerRouter.post('/settings', async (req, res) => {
 });
 
 // Admin Users MongoDB CRUD APIs
-app.get('/api/admins', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+app.get('/api/admins', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
   try {
     const { role, branch } = req.user;
     let query = {
@@ -4556,7 +4556,7 @@ app.get('/api/admins', authenticateSession, authorizeRoles('superadmin', 'develo
   }
 });
 
-app.post('/api/admins', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+app.post('/api/admins', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
   try {
     const { username, password, role, branch, batch, schedule, status, fullName, phone, employeeId } = req.body;
     if (!username || !password || !role) {
@@ -4662,7 +4662,7 @@ app.post('/api/admins', authenticateSession, authorizeRoles('superadmin', 'devel
   }
 });
 
-app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
   try {
     const { id } = req.params;
     const { username, password, role, branch, batch, schedule, status, fullName, phone, employeeId, isLocked } = req.body;
@@ -4815,7 +4815,7 @@ app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'de
   }
 });
 
-app.delete('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+app.delete('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
   try {
     const { id } = req.params;
     const isPermanent = req.query.permanent === 'true';
@@ -4879,7 +4879,7 @@ app.delete('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 
   }
 });
 
-app.get('/api/admins/:id/details', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+app.get('/api/admins/:id/details', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
   try {
     const { id } = req.params;
     const user = await User.findById(id).lean();

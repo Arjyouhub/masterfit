@@ -1482,12 +1482,11 @@ function App() {
     }
   }, [currentView, loggedInUser]);
 
-  // Default mapping tab for non-superadmin / non-branchadmin users
+  // Default mapping tab
   useEffect(() => {
     if (currentView === 'credentials-list') {
       const isSuper = isAdminUser(loggedInUser);
-      const isBranchAdm = isBranchAdmin(loggedInUser);
-      if (!isSuper && !isBranchAdm) {
+      if (!isSuper) {
         setMappingSubTab('batches');
       } else {
         setMappingSubTab('credentials');
@@ -7859,7 +7858,7 @@ function App() {
       <div className="credentials-view" style={{ maxWidth: '1100px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
         {/* Consolidated Sub-tab Navigation */}
         <div style={{ display: 'flex', gap: '10px', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', flexWrap: 'wrap' }}>
-          {(isSuper || isBranchAdm) && (
+          {isSuper && (
             <button
               className={`btn-primary ${mappingSubTab === 'credentials' ? '' : 'btn-secondary'}`}
               style={mappingSubTab === 'credentials' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
@@ -7898,7 +7897,7 @@ function App() {
         )}
 
         {/* Tab Contents */}
-        {mappingSubTab === 'credentials' && (isSuper || isBranchAdm) && renderAdminsPage()}
+        {mappingSubTab === 'credentials' && isSuper && renderAdminsPage()}
 
         {mappingSubTab === 'branches' && isSuper && renderBranchesPage()}
         {mappingSubTab === 'batches' && renderBatchesPage()}
