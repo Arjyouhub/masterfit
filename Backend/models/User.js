@@ -7,6 +7,7 @@ const userSchema = new mongoose.Schema({
   role: { type: String, required: true, enum: ['superadmin', 'branchadmin', 'trainer', 'developer'] },
   branch: { type: String, default: '' },
   batch: { type: String, default: '' },
+  schedule: { type: String, default: '' },
   status: { type: String, required: true, default: 'Active', enum: ['Active', 'Disabled', 'SoftDeleted'] },
   fullName: { type: String, default: '' },
   phone: { type: String, default: '' },

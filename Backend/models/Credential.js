@@ -24,7 +24,8 @@ const credentialsSchema = new mongoose.Schema({
     type: [new mongoose.Schema({
       id: { type: String, required: true },
       name: { type: String, required: true },
-      schedule: { type: String, required: true }
+      schedule: { type: String, required: true },
+      branch: { type: String }
     }, { _id: false })],
     default: []
   },

@@ -280,14 +280,29 @@ function decryptAttendanceRecords(records) {
 }
 
 // Helper to retrieve custom batch schedule
-async function getBatchSchedule(batchId) {
+async function getBatchSchedule(batchId, branchName) {
   if (!batchId) return null;
+  const key = String(batchId).toLowerCase().trim();
+  
+  // Try querying from Batch model first
+  try {
+    let query = { code: key };
+    if (branchName) {
+      query.branchName = new RegExp(`^${branchName.trim()}$`, 'i');
+    }
+    const dbBatch = await Batch.findOne(query).lean();
+    if (dbBatch) {
+      return dbBatch.schedule;
+    }
+  } catch (e) {
+    console.error('Error fetching batch schedule from DB:', e);
+  }
+
   const defaults = {
     batch1: 'Mon-Thu',
     batch2: 'Tue-Fri',
     batch3: 'Wed-Sat'
   };
-  const key = String(batchId).toLowerCase().trim();
   if (defaults[key]) {
     return defaults[key];
   }
@@ -636,25 +651,85 @@ async function seedBranchesAndBatches() {
     const customBatches = creds.customBatches || [];
     const batchEntries = creds.batchCredentials instanceof Map ? Array.from(creds.batchCredentials.entries()) : Object.entries(creds.batchCredentials || {});
 
-    // First, process any custom batches (we'll seed them for all branches as standard)
+    // First, process any custom batches (restricting to their correct branches)
     for (const cb of customBatches) {
       const cbId = cb.id.trim();
       const cbName = cb.name.trim();
       const cbSchedule = cb.schedule.trim();
 
-      // Seed this custom batch for each branch
-      for (const brName of allBranchNames) {
+      // Determine target branches for this custom batch
+      let targetBranchesForBatch = [];
+      if (cb.branch) {
+        const matchedBr = allBranchNames.find(b => b.toLowerCase().trim() === cb.branch.toLowerCase().trim());
+        if (matchedBr) targetBranchesForBatch.push(matchedBr);
+      } else {
+        // Fallback: try to find branch from batchCredentials keys
+        const matchingCredKey = batchEntries.find(([key]) => key.toLowerCase().endsWith(`_${cbId.toLowerCase()}`));
+        if (matchingCredKey) {
+          const brKey = matchingCredKey[0].split('_')[0];
+          const matchedBr = allBranchNames.find(b => b.toLowerCase().trim() === brKey.toLowerCase().trim());
+          if (matchedBr) targetBranchesForBatch.push(matchedBr);
+        }
+      }
+
+      // If still not resolved, try parsing from name or code
+      if (targetBranchesForBatch.length === 0) {
+        const nameLower = cbName.toLowerCase();
+        if (nameLower.includes('ork')) {
+          const br = allBranchNames.find(b => b.toLowerCase() === 'orkatteri');
+          if (br) targetBranchesForBatch.push(br);
+        } else if (nameLower.includes('prkdv') || nameLower.includes('paarakadav')) {
+          const br = allBranchNames.find(b => b.toLowerCase() === 'paarakadav');
+          if (br) targetBranchesForBatch.push(br);
+        } else if (nameLower.includes('pba') || nameLower.includes('perambra')) {
+          const br = allBranchNames.find(b => b.toLowerCase() === 'perambra');
+          if (br) targetBranchesForBatch.push(br);
+        } else if (nameLower.includes('klkndy') || nameLower.includes('kallikandy')) {
+          const br = allBranchNames.find(b => b.toLowerCase() === 'kallikandy');
+          if (br) targetBranchesForBatch.push(br);
+        } else if (nameLower.includes('ktdy') || nameLower.includes('kuttiady')) {
+          const br = allBranchNames.find(b => b.toLowerCase() === 'kuttiady');
+          if (br) targetBranchesForBatch.push(br);
+        } else {
+          // If totally generic (like batch1, batch2), seed to all branches as a default standard
+          targetBranchesForBatch = allBranchNames;
+        }
+      }
+
+      for (const brName of targetBranchesForBatch) {
         const brClean = brName.trim();
+        const branchObj = await Branch.findOne({ code: brClean.toLowerCase().replace(/\s+/g, '-') });
         const existing = await Batch.findOne({ branch: brClean, code: cbId.toLowerCase() });
-        if (!existing) {
+        const cbStartTime = cb.startTime || '09:00';
+        const cbEndTime = cb.endTime || '10:30';
+        const cbSlotType = cb.slotType || 'Morning';
+        if (!existing && branchObj) {
           await new Batch({
             name: cbName,
             code: cbId.toLowerCase(),
+            batchName: cbName,
+            batchCode: cbId.toLowerCase(),
             branch: brClean,
+            branchId: branchObj._id,
+            branchName: branchObj.name,
             schedule: cbSchedule,
+            startTime: cbStartTime,
+            endTime: cbEndTime,
+            slotType: cbSlotType,
             status: 'Active'
           }).save();
           console.log(`[Seed] Created Batch: ${cbName} for Branch: ${brClean}`);
+        } else if (existing) {
+          let changed = false;
+          if (existing.schedule !== cbSchedule) { existing.schedule = cbSchedule; changed = true; }
+          if (existing.startTime !== cbStartTime) { existing.startTime = cbStartTime; changed = true; }
+          if (existing.endTime !== cbEndTime) { existing.endTime = cbEndTime; changed = true; }
+          if (existing.slotType !== cbSlotType) { existing.slotType = cbSlotType; changed = true; }
+          if (existing.name !== cbName) { existing.name = cbName; existing.batchName = cbName; changed = true; }
+          if (changed) {
+            await existing.save();
+            console.log(`[Seed] Synced Batch Config: ${cbId} of Branch: ${brClean}`);
+          }
         }
       }
     }
@@ -671,32 +746,133 @@ async function seedBranchesAndBatches() {
         const trainerUser = info.username || `${btCode}@${brClean}`;
         
         if (existing) {
+          let changed = false;
           if (existing.trainer !== trainerUser) {
             existing.trainer = trainerUser;
+            changed = true;
+          }
+          const cb = customBatches.find(b => b.id.trim().toLowerCase() === btCode);
+          if (cb) {
+            const cbStartTime = cb.startTime || '09:00';
+            const cbEndTime = cb.endTime || '10:30';
+            const cbSlotType = cb.slotType || 'Morning';
+            const cbName = cb.name.trim();
+            const cbSchedule = cb.schedule.trim();
+            if (existing.startTime !== cbStartTime) { existing.startTime = cbStartTime; changed = true; }
+            if (existing.endTime !== cbEndTime) { existing.endTime = cbEndTime; changed = true; }
+            if (existing.slotType !== cbSlotType) { existing.slotType = cbSlotType; changed = true; }
+            if (existing.schedule !== cbSchedule) { existing.schedule = cbSchedule; changed = true; }
+            if (existing.name !== cbName) { existing.name = cbName; existing.batchName = cbName; changed = true; }
+          }
+          if (changed) {
             await existing.save();
-            console.log(`[Seed] Updated Trainer for Batch: ${btCode} of Branch: ${brClean} to ${trainerUser}`);
+            console.log(`[Seed] Updated Batch info for: ${btCode} of Branch: ${brClean}`);
           }
         } else {
           // Find matching customBatch name and schedule
           const cb = customBatches.find(b => b.id.trim().toLowerCase() === btCode);
           const name = cb ? cb.name.trim() : (parts.slice(1).join('_').trim());
           const schedule = cb ? cb.schedule.trim() : 'Mon-Thu';
+          const startTime = cb ? (cb.startTime || '09:00') : '09:00';
+          const endTime = cb ? (cb.endTime || '10:30') : '10:30';
+          const slotType = cb ? (cb.slotType || 'Morning') : 'Morning';
+          const branchObj = await Branch.findOne({ code: brClean.toLowerCase().replace(/\s+/g, '-') });
           
-          await new Batch({
-            name,
-            code: btCode,
-            branch: brClean,
-            trainer: trainerUser,
-            schedule,
-            status: 'Active'
-          }).save();
-          console.log(`[Seed] Created Batch: ${name} for Branch: ${brClean} with Trainer: ${trainerUser}`);
+          if (branchObj) {
+            await new Batch({
+              name,
+              code: btCode,
+              batchName: name,
+              batchCode: btCode,
+              branch: brClean,
+              branchId: branchObj._id,
+              branchName: branchObj.name,
+              trainer: trainerUser,
+              schedule,
+              startTime,
+              endTime,
+              slotType,
+              status: 'Active'
+            }).save();
+            console.log(`[Seed] Created Batch: ${name} for Branch: ${brClean} with Trainer: ${trainerUser}`);
+          }
         }
       }
     }
   } catch (err) {
     console.error('[Seed] Error seeding branches and batches:', err);
   }
+}
+
+async function validateBatchesBranchMapping() {
+  try {
+    const branches = await Branch.find({});
+    const batches = await Batch.find({});
+    
+    console.log(`[Validation] Validating branch mappings for ${batches.length} batches...`);
+    
+    let flaggedCount = 0;
+    let mappedCount = 0;
+    let deletedCount = 0;
+    const seen = new Set();
+    
+    for (const batch of batches) {
+      const normBranch = batch.branch.toLowerCase().trim();
+      const normCode = batch.code.toLowerCase().trim();
+      const match = branches.find(br => 
+        br.code === normBranch || 
+        br.name.toLowerCase().trim() === normBranch
+      );
+      
+      if (match) {
+        const uniqKey = `${match._id.toString()}_${normCode}`;
+        if (seen.has(uniqKey)) {
+          // Duplicate mapping found! Delete it.
+          await Batch.deleteOne({ _id: batch._id });
+          deletedCount++;
+          console.log(`[Validation] Deleted duplicate batch: "${batch.name}" (code: ${batch.code}) for branch "${match.name}"`);
+          continue;
+        }
+        seen.add(uniqKey);
+
+        batch.branchId = match._id;
+        batch.branchName = match.name;
+        batch.batchName = batch.name;
+        batch.batchCode = batch.code;
+        batch.flaggedForReview = false;
+        mappedCount++;
+        await batch.save();
+      } else {
+        batch.branchId = undefined;
+        batch.branchName = undefined;
+        batch.flaggedForReview = true;
+        flaggedCount++;
+        console.warn(`[Validation WARNING] Batch "${batch.name}" (code: ${batch.code}) has no valid branch mapping for branch: "${batch.branch}"! Flagged for admin review.`);
+        await batch.save();
+      }
+    }
+    
+    console.log(`[Validation] Done. Mapped: ${mappedCount}, Flagged: ${flaggedCount}, Deleted Duplicates: ${deletedCount}.`);
+  } catch (err) {
+    console.error('[Validation] Error validating batch branch mapping:', err);
+  }
+}
+
+async function validateBranchBatchMapping(branchVal, batchVal) {
+  if (!branchVal || !batchVal) return null;
+  const branchDoc = await Branch.findOne({
+    $or: [
+      { name: new RegExp(`^${branchVal.trim()}$`, 'i') },
+      { code: branchVal.toLowerCase().trim() }
+    ]
+  });
+  if (!branchDoc) return null;
+  
+  const batchDoc = await Batch.findOne({
+    branchId: branchDoc._id,
+    code: batchVal.toLowerCase().trim()
+  });
+  return batchDoc;
 }
 
 // Startup Password Migration Function
@@ -879,6 +1055,7 @@ const connectDb = async () => {
 
       await syncUsersAndSeed();
       await seedBranchesAndBatches();
+      await validateBatchesBranchMapping();
     }
   } catch (err) {
     console.error('MongoDB connection error:', err);
@@ -992,7 +1169,20 @@ app.get('/api/public/batches', async (req, res) => {
   try {
     const creds = await Credential.findOne({ configType: 'main' }).lean();
     const batchCreds = creds?.batchCredentials || {};
-    const list = await Batch.find({ status: 'Active' }).sort({ name: 1 }).lean();
+    
+    let query = { status: 'Active' };
+    const { branchId, branch } = req.query;
+    
+    // Always enforce valid branch mapping
+    query.branchId = { $ne: null, $exists: true };
+    
+    if (branchId) {
+      query.branchId = branchId;
+    } else if (branch) {
+      query.branch = new RegExp(`^${branch}$`, 'i');
+    }
+    
+    const list = await Batch.find(query).sort({ name: 1 }).lean();
     
     // Filter the list to only include batches that have credentials for their branch
     const filteredList = list.filter(b => {
@@ -1010,12 +1200,28 @@ app.get('/api/batches', authenticateSession, async (req, res) => {
   try {
     const { role, branch, batch } = req.user;
     let query = {};
+    
+    // Always enforce valid branch mapping
+    query.branchId = { $ne: null, $exists: true };
+    
+    const { branchId } = req.query;
+    if (branchId) {
+      query.branchId = branchId;
+    }
+    
     if (role !== 'superadmin' && role !== 'developer') {
-      query.branch = new RegExp(`^${branch}$`, 'i');
+      const branchObj = await Branch.findOne({ code: branch.toLowerCase().trim().replace(/\s+/g, '-') });
+      if (branchObj) {
+        query.branchId = branchObj._id;
+      } else {
+        query.branch = new RegExp(`^${branch}$`, 'i');
+      }
+      
       if (role === 'trainer') {
         query.code = new RegExp(`^${batch}$`, 'i');
       }
     }
+    
     const list = await Batch.find(query).sort({ name: 1 }).lean();
     res.json(list);
   } catch (err) {
@@ -1025,7 +1231,7 @@ app.get('/api/batches', authenticateSession, async (req, res) => {
 
 app.post('/api/batches', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
   try {
-    const { name, code, branch, trainer, schedule, status } = req.body;
+    const { name, code, branch, trainer, schedule, status, startTime, endTime, slotType } = req.body;
     if (!name || !code || !branch) {
       return res.status(400).json({ error: 'Name, Code, and Branch are required' });
     }
@@ -1051,6 +1257,9 @@ app.post('/api/batches', authenticateSession, authorizeRoles('superadmin', 'deve
       branch: cleanBranch,
       trainer: trainer || '',
       schedule: schedule || 'Mon-Thu',
+      startTime: startTime || '09:00',
+      endTime: endTime || '10:30',
+      slotType: slotType || 'Morning',
       status: status || 'Active'
     });
     await newBatch.save();
@@ -1062,7 +1271,7 @@ app.post('/api/batches', authenticateSession, authorizeRoles('superadmin', 'deve
 
 app.put('/api/batches/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
   try {
-    const { name, code, branch, trainer, schedule, status } = req.body;
+    const { name, code, branch, trainer, schedule, status, startTime, endTime, slotType } = req.body;
     const batch = await Batch.findById(req.params.id);
     if (!batch) return res.status(404).json({ error: 'Batch not found' });
 
@@ -1091,8 +1300,30 @@ app.put('/api/batches/:id', authenticateSession, authorizeRoles('superadmin', 'd
     if (trainer !== undefined) batch.trainer = trainer;
     if (schedule) batch.schedule = schedule;
     if (status) batch.status = status;
+    if (startTime) batch.startTime = startTime;
+    if (endTime) batch.endTime = endTime;
+    if (slotType) batch.slotType = slotType;
 
     await batch.save();
+    // Sync with today's persisted Class if it exists
+    try {
+      const todayStr = new Date().toLocaleDateString('en-CA');
+      const classObj = await Class.findOne({
+        date: todayStr,
+        branch: new RegExp(`^${batch.branch.toLowerCase().trim()}$`, 'i'),
+        batch: new RegExp(`^${batch.code.toLowerCase().trim()}$`, 'i')
+      });
+      if (classObj) {
+        if (name) classObj.className = name.trim();
+        if (trainer !== undefined) classObj.trainer = trainer.trim();
+        if (schedule) classObj.schedule = schedule;
+        if (slotType) classObj.slotType = slotType;
+        await classObj.save();
+      }
+    } catch (classErr) {
+      console.error("Error updating corresponding today's Class during batch update:", classErr);
+    }
+
     res.json(batch);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1122,15 +1353,138 @@ app.delete('/api/batches/:id', authenticateSession, authorizeRoles('superadmin',
 app.get('/api/classes', authenticateSession, async (req, res) => {
   try {
     const { role, branch, batch } = req.user;
-    let query = {};
+    const dateStr = req.query.date || new Date().toLocaleDateString('en-CA');
+    
+    // Parse the dateStr (YYYY-MM-DD) in local time
+    const dateParts = dateStr.split('-');
+    const year = parseInt(dateParts[0], 10);
+    const month = parseInt(dateParts[1], 10) - 1;
+    const day = parseInt(dateParts[2], 10);
+    const dateObj = new Date(year, month, day);
+    
+    // Query active batches
+    let batchQuery = { status: 'Active' };
     if (role !== 'superadmin' && role !== 'developer') {
-      query.branch = new RegExp(`^${branch}$`, 'i');
+      batchQuery.branch = new RegExp(`^${branch}$`, 'i');
       if (role === 'trainer') {
-        query.batch = new RegExp(`^${batch}$`, 'i');
+        batchQuery.code = new RegExp(`^${batch}$`, 'i');
       }
     }
-    const list = await Class.find(query).sort({ startTime: 1 }).lean();
-    res.json(list);
+    
+    const allActiveBatches = await Batch.find(batchQuery).lean();
+    
+    // Helper to check if batch runs on the day of dateObj
+    const dayIndex = dateObj.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+    const dayNamesLong = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const dayNamesShort = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    
+    const isDayInSchedule = (schedule) => {
+      if (!schedule) return false;
+      const cleanSched = schedule.toLowerCase().replace(/\s+/g, '');
+      if (cleanSched === 'daily') return true;
+      if (cleanSched === 'weekend' || cleanSched === 'weekends') {
+        return dayIndex === 0 || dayIndex === 6;
+      }
+      if (cleanSched === 'weekday' || cleanSched === 'weekdays') {
+        return dayIndex >= 1 && dayIndex <= 5;
+      }
+      if (cleanSched.includes('-')) {
+        const parts = cleanSched.split('-');
+        if (parts.length === 2) {
+          const getIndex = (str) => {
+            let idx = dayNamesShort.indexOf(str.substring(0, 3));
+            if (idx === -1) idx = dayNamesLong.indexOf(str);
+            return idx;
+          };
+          const startIdx = getIndex(parts[0]);
+          const endIdx = getIndex(parts[1]);
+          if (startIdx !== -1 && endIdx !== -1) {
+            // Only treat as contiguous range if startIdx is Monday (1)
+            // or if startIdx <= endIdx and the span doesn't represent Tue-Fri / Wed-Sat
+            const isMonStart = startIdx === 1;
+            if (isMonStart) {
+              if (startIdx <= endIdx) {
+                return dayIndex >= startIdx && dayIndex <= endIdx;
+              } else {
+                return dayIndex >= startIdx || dayIndex <= endIdx;
+              }
+            } else {
+              // Otherwise treat as individual specific days (e.g. Tue-Fri means only Tue and Fri)
+              return dayIndex === startIdx || dayIndex === endIdx;
+            }
+          }
+        }
+      }
+      const items = cleanSched.split(',');
+      for (const item of items) {
+        const trimmed = item.trim();
+        if (trimmed.substring(0, 3) === dayNamesShort[dayIndex] || trimmed === dayNamesLong[dayIndex]) {
+          return true;
+        }
+      }
+      return false;
+    };
+    
+    const todayBatches = allActiveBatches.filter(b => isDayInSchedule(b.schedule));
+    
+    // Fetch persisted class states for this date
+    let classQuery = { date: dateStr };
+    if (role !== 'superadmin' && role !== 'developer') {
+      classQuery.branch = new RegExp(`^${branch}$`, 'i');
+      if (role === 'trainer') {
+        classQuery.batch = new RegExp(`^${batch}$`, 'i');
+      }
+    }
+    
+    const persistedClasses = await Class.find(classQuery).lean();
+    const activePersistedClasses = persistedClasses.filter(pc => {
+      if (!pc.schedule) return true;
+      return isDayInSchedule(pc.schedule);
+    });
+    
+    const resultList = [];
+    
+    for (const b of todayBatches) {
+      const persisted = activePersistedClasses.find(c => 
+        c.batch.toLowerCase().trim() === b.code.toLowerCase().trim() && 
+        c.branch.toLowerCase().trim() === b.branch.toLowerCase().trim()
+      );
+      
+      if (persisted) {
+        resultList.push(persisted);
+      } else {
+        resultList.push({
+          _id: `virtual_${b._id}`,
+          className: b.name,
+          branch: b.branch,
+          batch: b.code,
+          trainer: b.trainer || 'TBA',
+          startTime: b.startTime || b.slotType || 'Morning',
+          endTime: b.endTime || '',
+          subject: '',
+          date: dateStr,
+          status: 'scheduled',
+          cancellationReason: '',
+          schedule: b.schedule || '',
+          slotType: b.slotType || 'Morning',
+          isVirtual: true
+        });
+      }
+    }
+    
+    // Add ad-hoc manual classes
+    for (const pc of activePersistedClasses) {
+      const isBatchDerived = todayBatches.some(b => 
+        pc.batch.toLowerCase().trim() === b.code.toLowerCase().trim() && 
+        pc.branch.toLowerCase().trim() === b.branch.toLowerCase().trim()
+      );
+      if (!isBatchDerived) {
+        resultList.push(pc);
+      }
+    }
+    
+    resultList.sort((a, b) => a.startTime.localeCompare(b.startTime));
+    res.json(resultList);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1138,9 +1492,9 @@ app.get('/api/classes', authenticateSession, async (req, res) => {
 
 app.post('/api/classes', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
   try {
-    const { className, branch, batch, trainer, startTime, endTime, subject } = req.body;
-    if (!className || !branch || !batch || !trainer || !startTime || !endTime) {
-      return res.status(400).json({ error: 'className, branch, batch, trainer, startTime, and endTime are required' });
+    const { className, branch, batch, trainer, startTime, endTime, subject, date, status, cancellationReason, schedule, slotType } = req.body;
+    if (!className || !branch || !batch || !trainer) {
+      return res.status(400).json({ error: 'className, branch, batch, and trainer are required' });
     }
 
     // Scoping for branchadmin / trainer
@@ -1158,11 +1512,35 @@ app.post('/api/classes', authenticateSession, authorizeRoles('superadmin', 'deve
       branch: branch.trim(),
       batch: batch.trim(),
       trainer: trainer.trim(),
-      startTime: startTime.trim(),
-      endTime: endTime.trim(),
-      subject: subject || ''
+      startTime: (startTime || '').trim(),
+      endTime: (endTime || '').trim(),
+      subject: subject || '',
+      date: date || new Date().toLocaleDateString('en-CA'),
+      status: status || 'scheduled',
+      cancellationReason: cancellationReason || '',
+      schedule: schedule || '',
+      slotType: slotType || 'Morning'
     });
     await newClass.save();
+
+    // Sync with corresponding Batch in DB
+    try {
+      const batchObj = await Batch.findOne({
+        branch: new RegExp(`^${newClass.branch.toLowerCase().trim()}$`, 'i'),
+        code: new RegExp(`^${newClass.batch.toLowerCase().trim()}$`, 'i')
+      });
+      if (batchObj) {
+        batchObj.name = newClass.className;
+        batchObj.batchName = newClass.className;
+        batchObj.trainer = newClass.trainer;
+        if (newClass.schedule) batchObj.schedule = newClass.schedule;
+        if (newClass.slotType) batchObj.slotType = newClass.slotType;
+        await batchObj.save();
+      }
+    } catch (batchErr) {
+      console.error("Error updating corresponding Batch during class post:", batchErr);
+    }
+
     res.status(201).json(newClass);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1171,9 +1549,28 @@ app.post('/api/classes', authenticateSession, authorizeRoles('superadmin', 'deve
 
 app.put('/api/classes/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
   try {
-    const { className, branch, batch, trainer, startTime, endTime, subject } = req.body;
-    const cls = await Class.findById(req.params.id);
-    if (!cls) return res.status(404).json({ error: 'Class not found' });
+    const { className, branch, batch, trainer, startTime, endTime, subject, status, cancellationReason, date, schedule, slotType } = req.body;
+    let cls;
+    
+    if (req.params.id.startsWith('virtual_')) {
+      cls = new Class({
+        className: className ? className.trim() : 'Class',
+        branch: branch ? branch.trim() : req.user.branch,
+        batch: batch ? batch.trim() : '',
+        trainer: trainer ? trainer.trim() : 'TBA',
+        startTime: startTime ? startTime.trim() : '09:00',
+        endTime: endTime ? endTime.trim() : '10:30',
+        subject: subject || '',
+        date: date || new Date().toLocaleDateString('en-CA'),
+        status: status || 'scheduled',
+        cancellationReason: cancellationReason || '',
+        schedule: schedule || '',
+        slotType: slotType || 'Morning'
+      });
+    } else {
+      cls = await Class.findById(req.params.id);
+      if (!cls) return res.status(404).json({ error: 'Class not found' });
+    }
 
     // Scoping
     if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
@@ -1200,8 +1597,31 @@ app.put('/api/classes/:id', authenticateSession, authorizeRoles('superadmin', 'd
     if (startTime) cls.startTime = startTime.trim();
     if (endTime) cls.endTime = endTime.trim();
     if (subject !== undefined) cls.subject = subject;
+    if (status) cls.status = status;
+    if (cancellationReason !== undefined) cls.cancellationReason = cancellationReason;
+    if (date) cls.date = date;
+    if (schedule !== undefined) cls.schedule = schedule;
+    if (slotType !== undefined) cls.slotType = slotType;
 
     await cls.save();
+    // Sync with corresponding Batch in DB
+    try {
+      const batchObj = await Batch.findOne({
+        branch: new RegExp(`^${cls.branch.toLowerCase().trim()}$`, 'i'),
+        code: new RegExp(`^${cls.batch.toLowerCase().trim()}$`, 'i')
+      });
+      if (batchObj) {
+        batchObj.name = cls.className;
+        batchObj.batchName = cls.className;
+        batchObj.trainer = cls.trainer;
+        if (cls.schedule) batchObj.schedule = cls.schedule;
+        if (cls.slotType) batchObj.slotType = cls.slotType;
+        await batchObj.save();
+      }
+    } catch (batchErr) {
+      console.error("Error updating corresponding Batch during class update:", batchErr);
+    }
+
     res.json(cls);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1233,8 +1653,11 @@ app.delete('/api/classes/:id', authenticateSession, authorizeRoles('superadmin',
 // --- Dashboard Stats API ---
 app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
   try {
-    const { role, branch, batch } = req.user;
+    const { role, branch: userBranch, batch: userBatch } = req.user;
     
+    const targetBranch = req.query.branch || '';
+    const targetBatch = req.query.batch || '';
+
     // Scopes for queries
     let studentQuery = { status: 'Active' };
     let trainerQuery = { role: 'trainer', status: 'Active' };
@@ -1242,15 +1665,33 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
     let branchQuery = { status: 'Active' };
     let batchQuery = { status: 'Active' };
 
-    if (role !== 'superadmin' && role !== 'developer') {
-      const brRegex = new RegExp(`^${branch}$`, 'i');
+    let selectedBranchName = '';
+    let selectedBatchCode = '';
+
+    if (role === 'superadmin' || role === 'developer') {
+      selectedBranchName = targetBranch;
+      selectedBatchCode = targetBatch;
+    } else {
+      selectedBranchName = userBranch;
+      if (role === 'trainer') {
+        selectedBatchCode = userBatch;
+      } else {
+        selectedBatchCode = targetBatch;
+      }
+    }
+
+    if (selectedBranchName && selectedBranchName.toLowerCase() !== 'all') {
+      const brRegex = new RegExp(`^${selectedBranchName.trim()}$`, 'i');
       studentQuery.branch = brRegex;
       trainerQuery.branch = brRegex;
       adminQuery.branch = brRegex;
       batchQuery.branch = brRegex;
-
-      if (role === 'trainer') {
-        const btRegex = new RegExp(`^${batch}$`, 'i');
+    }
+    if (selectedBatchCode && selectedBatchCode.toLowerCase() !== 'all') {
+      const btRegex = new RegExp(`^${selectedBatchCode.trim()}$`, 'i');
+      if (selectedBatchCode.includes('-')) {
+        studentQuery.schedule = btRegex;
+      } else {
         studentQuery.batch = btRegex;
         batchQuery.code = btRegex;
       }
@@ -1425,10 +1866,11 @@ app.get('/api/students', authenticateSession, async (req, res) => {
       filter.branch = new RegExp(`^${branch}$`, 'i');
     }
     if (role === 'trainer') {
-      const schedule = await getBatchSchedule(batch);
+      const schedule = await getBatchSchedule(batch, branch);
       if (schedule) {
         filter.schedule = schedule;
       }
+      filter.batch = batch.toLowerCase().trim();
     }
     const students = await Student.find(filter).select('-photo').lean();
     res.json(students.map(decryptStudent));
@@ -1447,10 +1889,11 @@ app.get('/api/students/:id/photo', authenticateSession, async (req, res) => {
       filter.branch = new RegExp(`^${branch}$`, 'i');
     }
     if (role === 'trainer') {
-      const schedule = await getBatchSchedule(batch);
+      const schedule = await getBatchSchedule(batch, branch);
       if (schedule) {
         filter.schedule = schedule;
       }
+      filter.batch = batch.toLowerCase().trim();
     }
     const student = await Student.findOne(filter).select('photo').lean();
     if (!student) return res.status(404).json({ error: 'Student not found or unauthorized' });
@@ -1488,6 +1931,17 @@ app.post('/api/public/students', async (req, res) => {
     if (!req.body.branch || typeof req.body.branch !== 'string' || !req.body.branch.trim()) {
       return res.status(400).json({ error: 'Valid branch name is required' });
     }
+    if (!req.body.batch || typeof req.body.batch !== 'string' || !req.body.batch.trim()) {
+      return res.status(400).json({ error: 'Valid batch code is required' });
+    }
+
+    const dbBatch = await validateBranchBatchMapping(req.body.branch, req.body.batch);
+    if (!dbBatch) {
+      return res.status(400).json({ error: `Selected batch '${req.body.batch}' is not actively mapped to the branch '${req.body.branch}'` });
+    }
+    req.body.branch = dbBatch.branchName;
+    req.body.batch = dbBatch.code;
+    req.body.schedule = dbBatch.schedule;
 
     const existingStudents = await Student.find({ branch: req.body.branch }).select('name phone').lean();
     const isDuplicate = existingStudents.some(s => {
@@ -1564,6 +2018,21 @@ app.post('/api/students', authenticateSession, async (req, res) => {
         return res.status(403).json({ error: authErr });
       }
     }
+
+    if (!req.body.branch || typeof req.body.branch !== 'string' || !req.body.branch.trim()) {
+      return res.status(400).json({ error: 'Valid branch name is required' });
+    }
+    if (!req.body.batch || typeof req.body.batch !== 'string' || !req.body.batch.trim()) {
+      return res.status(400).json({ error: 'Valid batch code is required' });
+    }
+
+    const dbBatch = await validateBranchBatchMapping(req.body.branch, req.body.batch);
+    if (!dbBatch) {
+      return res.status(400).json({ error: `Selected batch '${req.body.batch}' is not actively mapped to the branch '${req.body.branch}'` });
+    }
+    req.body.branch = dbBatch.branchName;
+    req.body.batch = dbBatch.code;
+    req.body.schedule = dbBatch.schedule;
 
     // Input Validation
     if (!req.body.name || typeof req.body.name !== 'string' || !req.body.name.trim()) {
@@ -1656,6 +2125,21 @@ app.put('/api/students/:id', authenticateSession, async (req, res) => {
       }
     }
 
+    const targetBranch = req.body.branch !== undefined ? req.body.branch : student.branch;
+    const targetBatch = req.body.batch !== undefined ? req.body.batch : student.batch;
+    if (req.body.branch !== undefined || req.body.batch !== undefined) {
+      if (!targetBranch || !targetBatch) {
+        return res.status(400).json({ error: 'Branch and Batch are required' });
+      }
+      const dbBatch = await validateBranchBatchMapping(targetBranch, targetBatch);
+      if (!dbBatch) {
+        return res.status(400).json({ error: `Selected batch '${targetBatch}' is not actively mapped to the branch '${targetBranch}'` });
+      }
+      req.body.branch = dbBatch.branchName;
+      req.body.batch = dbBatch.code;
+      req.body.schedule = dbBatch.schedule;
+    }
+
     // Input Validation
     if (req.body.name !== undefined && (typeof req.body.name !== 'string' || !req.body.name.trim())) {
       return res.status(400).json({ error: 'Student name must be a non-empty string' });
@@ -1716,14 +2200,14 @@ app.get('/api/attendance', authenticateSession, async (req, res) => {
       date: { $gte: `${queryYear}-01-01`, $lte: `${queryYear}-12-31` }
     }).lean();
     
-    let allowedStudentIds = null;
     if (role !== 'superadmin' && role !== 'developer') {
       let studentFilter = { branch: new RegExp(`^${branch}$`, 'i') };
       if (role === 'trainer') {
-        const schedule = await getBatchSchedule(batch);
+        const schedule = await getBatchSchedule(batch, branch);
         if (schedule) {
           studentFilter.schedule = schedule;
         }
+        studentFilter.batch = batch.toLowerCase().trim();
       }
       const students = await Student.find(studentFilter).select('id').lean();
       allowedStudentIds = new Set(students.map(s => String(s.id)));
@@ -1767,10 +2251,11 @@ app.post('/api/attendance', authenticateSession, async (req, res) => {
     if (role !== 'superadmin' && role !== 'developer') {
       studentFilter.branch = new RegExp(`^${branch}$`, 'i');
       if (role === 'trainer') {
-        const schedule = await getBatchSchedule(batch);
+        const schedule = await getBatchSchedule(batch, branch);
         if (schedule) {
           studentFilter.schedule = schedule;
         }
+        studentFilter.batch = batch.toLowerCase().trim();
       }
     }
     
@@ -4073,7 +4558,7 @@ app.get('/api/admins', authenticateSession, authorizeRoles('superadmin', 'develo
 
 app.post('/api/admins', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
   try {
-    const { username, password, role, branch, batch, fullName, phone, employeeId } = req.body;
+    const { username, password, role, branch, batch, schedule, status, fullName, phone, employeeId } = req.body;
     if (!username || !password || !role) {
       return res.status(400).json({ error: 'Username, password, and role are required' });
     }
@@ -4092,6 +4577,23 @@ app.post('/api/admins', authenticateSession, authorizeRoles('superadmin', 'devel
       }
     }
 
+    let resolvedBranch = branch || '';
+    let resolvedBatch = batch || '';
+    let resolvedSchedule = schedule || '';
+
+    if (role === 'superadmin' || role === 'branchadmin' || role === 'trainer') {
+      if (!branch || !batch) {
+        return res.status(400).json({ error: 'Branch and Batch are required' });
+      }
+      const dbBatch = await validateBranchBatchMapping(branch, batch);
+      if (!dbBatch) {
+        return res.status(400).json({ error: `Selected batch '${batch}' is not actively mapped to the branch '${branch}'` });
+      }
+      resolvedBranch = dbBatch.branchName;
+      resolvedBatch = dbBatch.code;
+      resolvedSchedule = dbBatch.schedule;
+    }
+
     const cleanUser = username.toLowerCase().trim();
     const existing = await User.findOne({ username: cleanUser });
     if (existing) {
@@ -4103,12 +4605,13 @@ app.post('/api/admins', authenticateSession, authorizeRoles('superadmin', 'devel
       username: cleanUser,
       password: hashedPassword,
       role,
-      branch: branch || '',
-      batch: batch || '',
+      branch: resolvedBranch,
+      batch: resolvedBatch,
+      schedule: resolvedSchedule,
+      status: status || 'Active',
       fullName: fullName || '',
       phone: phone || '',
       employeeId: employeeId || '',
-      status: 'Active',
       passwordChangedAt: new Date()
     });
     await newUser.save();
@@ -4123,7 +4626,7 @@ app.post('/api/admins', authenticateSession, authorizeRoles('superadmin', 'devel
           creds.adminCredentials[cleanUser] = password;
         }
       } else if (role === 'branchadmin') {
-        const key = branch || 'Kuttiady';
+        const key = resolvedBranch || 'Kuttiady';
         const entry = { username: cleanUser, password };
         if (creds.branchCredentials instanceof Map) {
           creds.branchCredentials.set(key, entry);
@@ -4131,7 +4634,7 @@ app.post('/api/admins', authenticateSession, authorizeRoles('superadmin', 'devel
           creds.branchCredentials[key] = entry;
         }
       } else if (role === 'trainer') {
-        const key = `${branch || 'Kuttiady'}_${batch || 'batch1'}`;
+        const key = `${resolvedBranch || 'Kuttiady'}_${resolvedBatch || 'batch1'}`;
         const entry = { username: cleanUser, password };
         if (creds.batchCredentials instanceof Map) {
           creds.batchCredentials.set(key, entry);
@@ -4162,7 +4665,7 @@ app.post('/api/admins', authenticateSession, authorizeRoles('superadmin', 'devel
 app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { username, password, role, branch, batch, fullName, phone, employeeId, status, isLocked } = req.body;
+    const { username, password, role, branch, batch, schedule, status, fullName, phone, employeeId, isLocked } = req.body;
     const user = await User.findById(id);
     if (!user) return res.status(404).json({ error: 'Admin user not found' });
 
@@ -4191,6 +4694,27 @@ app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'de
     const oldBranch = user.branch;
     const oldBatch = user.batch;
 
+    const targetRole = role || user.role;
+    const targetBranch = branch !== undefined ? branch : user.branch;
+    const targetBatch = batch !== undefined ? batch : user.batch;
+
+    if (targetRole === 'superadmin' || targetRole === 'branchadmin' || targetRole === 'trainer') {
+      if (!targetBranch || !targetBatch) {
+        return res.status(400).json({ error: 'Branch and Batch are required' });
+      }
+      const dbBatch = await validateBranchBatchMapping(targetBranch, targetBatch);
+      if (!dbBatch) {
+        return res.status(400).json({ error: `Selected batch '${targetBatch}' is not actively mapped to the branch '${targetBranch}'` });
+      }
+      user.branch = dbBatch.branchName;
+      user.batch = dbBatch.code;
+      user.schedule = schedule !== undefined ? schedule : dbBatch.schedule;
+    } else {
+      if (branch !== undefined) user.branch = branch;
+      if (batch !== undefined) user.batch = batch;
+      if (schedule !== undefined) user.schedule = schedule;
+    }
+
     if (username && username.toLowerCase().trim() !== user.username) {
       const cleanUser = username.toLowerCase().trim();
       const duplicate = await User.findOne({ username: cleanUser });
@@ -4204,8 +4728,6 @@ app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'de
     }
 
     if (role) user.role = role;
-    if (branch !== undefined) user.branch = branch;
-    if (batch !== undefined) user.batch = batch;
     if (fullName !== undefined) user.fullName = fullName;
     if (phone !== undefined) user.phone = phone;
     if (employeeId !== undefined) user.employeeId = employeeId;
@@ -4251,8 +4773,8 @@ app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'de
         else delete creds.batchCredentials[key];
       }
 
-      // Insert new mapping if status is not soft-deleted
-      if (user.status !== 'SoftDeleted') {
+      // Insert new mapping if status is Active
+      if (user.status === 'Active') {
         const newRole = user.role;
         const newUsername = user.username;
         const newBranch = user.branch || 'Kuttiady';
@@ -4530,5 +5052,4 @@ app.use('/api/developer', developerRouter);
 app.listen(PORT, () => {
   console.log(`Express server is running on port ${PORT}`);
 });
-// Nodemon reload trigger
-
+// Nodemon reload trigger 1

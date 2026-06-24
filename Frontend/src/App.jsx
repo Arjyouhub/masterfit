@@ -38,6 +38,97 @@ const sortStudentsAlphabetically = (arr) => {
   });
 };
 
+const formatSelectedDays = (days) => {
+  const allDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const checked = allDays.filter(d => days[d]);
+  
+  if (checked.length === 0) return '';
+  if (checked.length === 7) return 'Daily';
+  
+  const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  const weekends = ['Sat', 'Sun'];
+  
+  const isWeekdays = weekdays.every(d => days[d]) && !days.Sat && !days.Sun;
+  if (isWeekdays) return 'Weekdays';
+  
+  const isWeekends = weekends.every(d => days[d]) && weekdays.every(d => !days[d]);
+  if (isWeekends) return 'Weekends';
+  
+  // Detect contiguous range circular-aware
+  const doubleDays = [...allDays, ...allDays];
+  const checkedSet = new Set(checked);
+  let bestRange = null;
+  
+  for (let start = 0; start < 7; start++) {
+    let len = 0;
+    while (len < 7 && checkedSet.has(doubleDays[start + len])) {
+      len++;
+    }
+    if (len === checked.length && len > 1) {
+      const rangeStart = doubleDays[start];
+      const rangeEnd = doubleDays[start + len - 1];
+      bestRange = `${rangeStart}-${rangeEnd}`;
+      break;
+    }
+  }
+  
+  if (bestRange) return bestRange;
+  
+  return checked.join(', ');
+};
+
+const parseScheduleToDays = (schedule) => {
+  const defaults = { Mon: false, Tue: false, Wed: false, Thu: false, Fri: false, Sat: false, Sun: false };
+  if (!schedule) return defaults;
+  
+  const cleanSched = schedule.toLowerCase().replace(/\s+/g, '');
+  if (cleanSched === 'daily') {
+    return { Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true };
+  }
+  if (cleanSched === 'weekday' || cleanSched === 'weekdays') {
+    return { Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: false, Sun: false };
+  }
+  if (cleanSched === 'weekend' || cleanSched === 'weekends') {
+    return { Mon: false, Tue: false, Wed: false, Thu: false, Fri: false, Sat: true, Sun: true };
+  }
+  
+  const dayNamesShort = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const dayKeys = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  
+  if (cleanSched.includes('-')) {
+    const parts = cleanSched.split('-');
+    if (parts.length === 2) {
+      const startIdx = dayNamesShort.indexOf(parts[0].substring(0, 3));
+      const endIdx = dayNamesShort.indexOf(parts[1].substring(0, 3));
+      if (startIdx !== -1 && endIdx !== -1) {
+        const res = { ...defaults };
+        let curr = startIdx;
+        while (true) {
+          res[dayKeys[curr]] = true;
+          if (curr === endIdx) break;
+          curr = (curr + 1) % 7;
+        }
+        return res;
+      }
+    }
+  }
+  
+  const items = cleanSched.split(',');
+  const res = { ...defaults };
+  let foundAny = false;
+  for (const item of items) {
+    const trimmed = item.trim().substring(0, 3);
+    const dayIdx = dayNamesShort.indexOf(trimmed);
+    if (dayIdx !== -1) {
+      res[dayKeys[dayIdx]] = true;
+      foundAny = true;
+    }
+  }
+  
+  if (foundAny) return res;
+  return defaults;
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || (
   window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || /^192\.168\./.test(window.location.hostname) || /^10\./.test(window.location.hostname) || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(window.location.hostname) || window.location.hostname.endsWith('.local')
     ? `http://${window.location.hostname}:5000/api`
@@ -250,6 +341,8 @@ function App() {
   const [isClassModalOpen, setIsClassModalOpen] = useState(false);
   const [editingClass, setEditingClass] = useState(null);
   const [classForm, setClassForm] = useState({ className: '', branch: '', batch: '', trainer: '', startTime: '', endTime: '', subject: '' });
+  const [classFormDays, setClassFormDays] = useState({ Mon: false, Tue: false, Wed: false, Thu: false, Fri: false, Sat: false, Sun: false });
+  const [classFormSlotType, setClassFormSlotType] = useState('Morning');
 
   const handleOpenAddClass = () => {
     setClassForm({
@@ -261,6 +354,8 @@ function App() {
       endTime: '',
       subject: ''
     });
+    setClassFormDays({ Mon: false, Tue: false, Wed: false, Thu: false, Fri: false, Sat: false, Sun: false });
+    setClassFormSlotType('Morning');
     setEditingClass(null);
     setIsClassModalOpen(true);
   };
@@ -276,23 +371,31 @@ function App() {
       endTime: cls.endTime,
       subject: cls.subject || ''
     });
+    setClassFormDays(parseScheduleToDays(cls.schedule || ''));
+    setClassFormSlotType(cls.slotType || 'Morning');
     setIsClassModalOpen(true);
   };
 
   const handleSaveClass = (e) => {
     e.preventDefault();
-    if (!classForm.className || !classForm.branch || !classForm.batch || !classForm.trainer || !classForm.startTime || !classForm.endTime) {
-      alert("All fields except subject are required.");
+    if (!classForm.className || !classForm.branch || !classForm.batch || !classForm.trainer) {
+      setGlobalError("All fields except subject are required.");
       return;
     }
 
     const method = editingClass ? 'PUT' : 'POST';
     const url = editingClass ? `${API_BASE_URL}/classes/${editingClass._id}` : `${API_BASE_URL}/classes`;
 
+    const payload = {
+      ...classForm,
+      schedule: formatSelectedDays(classFormDays),
+      slotType: classFormSlotType
+    };
+
     fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(classForm)
+      body: JSON.stringify(payload)
     })
       .then(res => {
         if (!res.ok) {
@@ -301,11 +404,11 @@ function App() {
         return res.json();
       })
       .then(() => {
-        alert(editingClass ? "Class updated successfully!" : "Class scheduled successfully!");
+        setGlobalSuccess(editingClass ? "Class updated successfully!" : "Class scheduled successfully!");
         setIsClassModalOpen(false);
         reloadAllAppData();
       })
-      .catch(err => alert("Error saving class: " + err.message));
+      .catch(err => setGlobalError("Error saving class: " + err.message));
   };
 
   const handleDeleteClass = (id) => {
@@ -321,10 +424,63 @@ function App() {
         return res.json();
       })
       .then(() => {
-        alert("Class deleted successfully!");
+        setGlobalSuccess("Class deleted successfully!");
         reloadAllAppData();
       })
-      .catch(err => alert("Error deleting class: " + err.message));
+      .catch(err => setGlobalError("Error deleting class: " + err.message));
+  };
+
+  const handleCancelClass = (cls) => {
+    const reason = prompt("Enter cancellation reason (optional):");
+    if (reason === null) return; // User cancelled prompt
+    
+    fetch(`${API_BASE_URL}/classes/${cls._id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...cls,
+        status: 'cancelled',
+        cancellationReason: reason,
+        date: cls.date || new Date().toLocaleDateString('en-CA')
+      })
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to cancel class') });
+        }
+        return res.json();
+      })
+      .then(() => {
+        setGlobalSuccess("Class marked as cancelled!");
+        reloadAllAppData();
+      })
+      .catch(err => setGlobalError("Error cancelling class: " + err.message));
+  };
+
+  const handleRestoreClass = (cls) => {
+    if (!confirm("Are you sure you want to restore this class?")) return;
+
+    fetch(`${API_BASE_URL}/classes/${cls._id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...cls,
+        status: 'scheduled',
+        cancellationReason: '',
+        date: cls.date || new Date().toLocaleDateString('en-CA')
+      })
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to restore class') });
+        }
+        return res.json();
+      })
+      .then(() => {
+        setGlobalSuccess("Class successfully restored!");
+        reloadAllAppData();
+      })
+      .catch(err => setGlobalError("Error restoring class: " + err.message));
   };
 
   // Developer resolving ticket modal states
@@ -343,6 +499,11 @@ function App() {
   const [loggedInUser, setLoggedInUser] = useState(() => {
     return getSessionUser() || '';
   });
+
+  // Roster Filter State
+  const [branchFilter, setBranchFilter] = useState('Kuttiady');
+  const [batchFilter, setBatchFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('Active');
 
   const handleSelectStudent = (student) => {
     if (!student) {
@@ -396,6 +557,9 @@ function App() {
   const [isEditBatchModalOpen, setIsEditBatchModalOpen] = useState(false);
   const [newBatchNameField, setNewBatchNameField] = useState('');
   const [newBatchScheduleField, setNewBatchScheduleField] = useState('');
+  const [newBatchStartTimeField, setNewBatchStartTimeField] = useState('09:00');
+  const [newBatchEndTimeField, setNewBatchEndTimeField] = useState('10:30');
+  const [editBatchSlotType, setEditBatchSlotType] = useState('Morning');
   const [credentialModalError, setCredentialModalError] = useState('');
   const [credentialModalSuccess, setCredentialModalSuccess] = useState('');
   const [userRole, setUserRole] = useState(() => getCookieValue('umai_session_role') || '');
@@ -404,14 +568,17 @@ function App() {
   const [branches, setBranches] = useState(DEFAULT_BRANCHES);
   const [customBranches, setCustomBranches] = useState([]);
   const [customBatches, setCustomBatches] = useState([]);
+  const [modalBatches, setModalBatches] = useState([]);
   const [batchOptions, setBatchOptions] = useState(DEFAULT_BATCH_OPTIONS);
   const [newBranchForm, setNewBranchForm] = useState({ name: '', username: '', password: '', confirmPassword: '' });
-  const [newBatchForm, setNewBatchForm] = useState({ name: '', schedule: '', branch: 'kuttiady', username: '', password: '', confirmPassword: '' });
+  const [newBatchForm, setNewBatchForm] = useState({ name: '', schedule: '', branch: 'kuttiady', username: '', password: '', confirmPassword: '', startTime: '09:00', endTime: '10:30', slotType: 'Morning' });
+  const [newBatchDays, setNewBatchDays] = useState({ Mon: true, Tue: true, Wed: true, Thu: true, Fri: false, Sat: false, Sun: false });
+  const [editBatchDays, setEditBatchDays] = useState({ Mon: false, Tue: false, Wed: false, Thu: false, Fri: false, Sat: false, Sun: false });
   const [activeSessions, setActiveSessions] = useState([]);
   const [adminsList, setAdminsList] = useState([]);
   const [selectedUserDetail, setSelectedUserDetail] = useState(null);
   const [selectedUserDetailLoading, setSelectedUserDetailLoading] = useState(false);
-  const [newAdminForm, setNewAdminForm] = useState({ username: '', password: '', confirmPassword: '', role: 'branchadmin', branch: 'Kuttiady', batch: 'batch1', fullName: '', phone: '', employeeId: '' });
+  const [newAdminForm, setNewAdminForm] = useState({ username: '', password: '', confirmPassword: '', role: 'branchadmin', branch: 'Kuttiady', batch: 'batch1', schedule: 'Mon-Thu', status: 'Active', fullName: '', phone: '', employeeId: '' });
   const [adminSearchQuery, setAdminSearchQuery] = useState('');
   const [adminRoleFilter, setAdminRoleFilter] = useState('All');
   const [adminStatusFilter, setAdminStatusFilter] = useState('All');
@@ -662,7 +829,7 @@ function App() {
     if (branchKey === 'all') {
       const seenIds = new Set();
       const seenNames = new Set();
-      return batchOptions.filter(opt => {
+      const res = batchOptions.filter(opt => {
         const idKey = opt.id.toLowerCase();
         const nameKey = `${opt.name.toLowerCase().replace(/\s+/g, '')}_${opt.schedule.toLowerCase()}`;
         if (seenIds.has(idKey) || seenNames.has(nameKey)) return false;
@@ -670,6 +837,7 @@ function App() {
         seenNames.add(nameKey);
         return true;
       });
+      return sortBatchesAlphabetically(res);
     }
 
     // Filter by branch
@@ -697,7 +865,7 @@ function App() {
     // Deduplicate by id and by normalized name + schedule
     const seenIds = new Set();
     const seenNames = new Set();
-    return filtered.filter(opt => {
+    const res = filtered.filter(opt => {
       const idKey = opt.id.toLowerCase();
       const nameKey = `${opt.name.toLowerCase().replace(/\s+/g, '')}_${opt.schedule.toLowerCase()}`;
       if (seenIds.has(idKey) || seenNames.has(nameKey)) return false;
@@ -705,6 +873,7 @@ function App() {
       seenNames.add(nameKey);
       return true;
     });
+    return sortBatchesAlphabetically(res);
   };
 
   const isBatchAdminUser = (user) => {
@@ -784,7 +953,7 @@ function App() {
   const reloadAllAppData = () => {
     const token = getSessionToken();
     if (!token) {
-      // Not logged in: only fetch public branches and batches for the login page
+      // Not logged in: only fetch public branches for the login page
       fetch(`${API_BASE_URL}/public/branches`)
         .then(res => res.ok ? res.json() : [])
         .then(data => {
@@ -797,18 +966,6 @@ function App() {
           setBranches(sortBranchesAlphabetically(uniqueBranches));
         })
         .catch(err => console.error('Error fetching public branches:', err));
-
-      fetch(`${API_BASE_URL}/public/batches`)
-        .then(res => res.ok ? res.json() : [])
-        .then(data => {
-          setCustomBatches(data || []);
-          const uniqueBatches = [
-            ...DEFAULT_BATCH_OPTIONS.map(b => ({ ...b, branch: 'all' })),
-            ...(data || []).map(b => ({ id: b.code, name: b.name, schedule: b.schedule, branch: b.branch }))
-          ];
-          setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
-        })
-        .catch(err => console.error('Error fetching public batches:', err));
         
       return;
     }
@@ -881,7 +1038,8 @@ function App() {
       .catch(err => console.error('Error fetching batches:', err));
 
     // 3.3 Fetch Scheduled Classes
-    fetch(`${API_BASE_URL}/classes`)
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    fetch(`${API_BASE_URL}/classes?date=${todayStr}`)
       .then(res => res.ok ? res.json() : [])
       .then(data => {
         setTodayClasses(data || []);
@@ -890,7 +1048,9 @@ function App() {
 
     // 3.4 Fetch Dashboard Scoped Statistics
     setLoadingStats(true);
-    fetch(`${API_BASE_URL}/dashboard/stats`)
+    const branchParam = branchFilter ? encodeURIComponent(branchFilter) : '';
+    const batchParam = batchFilter ? encodeURIComponent(batchFilter) : '';
+    fetch(`${API_BASE_URL}/dashboard/stats?branch=${branchParam}&batch=${batchParam}`)
       .then(res => res.ok ? res.json() : null)
       .then(data => {
         setDashboardStats(data);
@@ -951,7 +1111,7 @@ function App() {
       })
       .then(data => {
         alert(`Admin user "${data.username}" created successfully.`);
-        setNewAdminForm({ username: '', password: '', confirmPassword: '', role: 'branchadmin', branch: 'Kuttiady', batch: 'batch1', fullName: '', phone: '', employeeId: '' });
+        setNewAdminForm({ username: '', password: '', confirmPassword: '', role: 'branchadmin', branch: 'Kuttiady', batch: 'batch1', schedule: 'Mon-Thu', status: 'Active', fullName: '', phone: '', employeeId: '' });
         setIsAdminModalOpen(false);
         reloadAllAppData();
       })
@@ -1089,6 +1249,55 @@ function App() {
   useEffect(() => {
     reloadAllAppData();
   }, []);
+
+  // Fetch dashboard stats whenever filters change
+  useEffect(() => {
+    const token = getSessionToken();
+    if (!token) return; // Only if logged in
+    
+    setLoadingStats(true);
+    const branchParam = branchFilter ? encodeURIComponent(branchFilter) : '';
+    const batchParam = batchFilter ? encodeURIComponent(batchFilter) : '';
+    
+    fetch(`${API_BASE_URL}/dashboard/stats?branch=${branchParam}&batch=${batchParam}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        setDashboardStats(data);
+        setLoadingStats(false);
+      })
+      .catch(err => {
+        console.error('Error fetching dashboard stats:', err);
+        setLoadingStats(false);
+      });
+  }, [branchFilter, batchFilter, loggedInUser]);
+
+  // Dynamic batch loading for Login Page
+  useEffect(() => {
+    const token = getSessionToken();
+    if (token) return; // Only run this when logged out (on login page)
+
+    const selectedBranchObj = customBranches.find(
+      b => b.name.toLowerCase() === selectedBranchLogin.toLowerCase()
+    );
+
+    if (selectedBranchObj) {
+      fetch(`${API_BASE_URL}/public/batches?branchId=${selectedBranchObj._id}`)
+        .then(res => res.ok ? res.json() : [])
+        .then(data => {
+          setCustomBatches(data || []);
+          const uniqueBatches = [
+            ...DEFAULT_BATCH_OPTIONS.map(b => ({ ...b, branch: 'all' })),
+            ...(data || []).map(b => ({ id: b.code, name: b.name, schedule: b.schedule, branch: b.branch, branchId: b.branchId, branchName: b.branchName }))
+          ];
+          setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
+        })
+        .catch(err => console.error('Error fetching public batches:', err));
+    } else {
+      setCustomBatches([]);
+      setBatchOptions(sortBatchesAlphabetically(DEFAULT_BATCH_OPTIONS.map(b => ({ ...b, branch: 'all' }))));
+    }
+  }, [selectedBranchLogin, customBranches]);
+
 
 
   // Verify session validity on mount
@@ -1273,11 +1482,12 @@ function App() {
     }
   }, [currentView, loggedInUser]);
 
-  // Default mapping tab for non-superadmin users
+  // Default mapping tab for non-superadmin / non-branchadmin users
   useEffect(() => {
     if (currentView === 'credentials-list') {
       const isSuper = isAdminUser(loggedInUser);
-      if (!isSuper) {
+      const isBranchAdm = isBranchAdmin(loggedInUser);
+      if (!isSuper && !isBranchAdm) {
         setMappingSubTab('batches');
       } else {
         setMappingSubTab('credentials');
@@ -2658,12 +2868,17 @@ function App() {
   const handleAddBatch = (e) => {
     e.preventDefault();
     const name = newBatchForm.name.trim();
-    const schedule = newBatchForm.schedule.trim();
+    const schedule = formatSelectedDays(newBatchDays);
     const br = newBatchForm.branch.toLowerCase();
+    const trainerUser = newBatchForm.username.trim();
     const pass = newBatchForm.password;
 
-    if (!name || !schedule || !pass) {
-      setSettingsError('Batch name, schedule pattern, and password are required');
+    if (!name || !schedule) {
+      setSettingsError('Batch name and at least one schedule day are required.');
+      return;
+    }
+    if (!trainerUser || !pass) {
+      setSettingsError('Trainer username and password are required.');
       return;
     }
 
@@ -2672,21 +2887,29 @@ function App() {
       return;
     }
 
-    if (batchOptions.some(b => b.name.toLowerCase() === name.toLowerCase() || b.schedule.toLowerCase() === schedule.toLowerCase())) {
-      setSettingsError('A batch with this name or schedule already exists!');
+    const targetBranch = newBatchForm.branch.toLowerCase().trim();
+    if (batchOptions.some(b => b.name.toLowerCase() === name.toLowerCase() && b.branch && b.branch.toLowerCase().trim() === targetBranch)) {
+      setSettingsError(`A batch named "${name}" already exists in the selected branch!`);
       return;
     }
 
     const id = 'batch_' + Date.now();
-    const newBatchObj = { id, name, schedule };
+    const newBatchObj = { 
+      id, 
+      name, 
+      schedule, 
+      branch: newBatchForm.branch, 
+      startTime: newBatchForm.slotType || 'Morning', 
+      endTime: '',
+      slotType: newBatchForm.slotType || 'Morning'
+    };
 
     const key = `${br}_${id}`;
-    const defaultUser = `${id}@${br}`;
 
     const updatedCustomBatches = [...customBatches, newBatchObj];
     const updatedBatchCreds = {
       ...batchCredentials,
-      [key]: { username: defaultUser, password: pass }
+      [key]: { username: trainerUser, password: pass }
     };
 
     fetch(`${API_BASE_URL}/credentials`, {
@@ -2702,14 +2925,8 @@ function App() {
         setCustomBatches(data.customBatches || []);
         reloadAllAppData();
         setBatchCredentials(data.batchCredentials || {});
-        if (rawCredentials) {
-          setRawCredentials(prev => ({
-            ...prev,
-            customBatches: data.customBatches || [],
-            batchCredentials: data.batchCredentials || {}
-          }));
-        }
-        setNewBatchForm({ name: '', schedule: '', branch: 'kuttiady', username: '', password: '', confirmPassword: '' });
+        setNewBatchForm({ name: '', schedule: '', branch: 'kuttiady', username: '', password: '', confirmPassword: '', startTime: '09:00', endTime: '10:30', slotType: 'Morning' });
+        setNewBatchDays({ Mon: true, Tue: true, Wed: true, Thu: true, Fri: false, Sat: false, Sun: false });
         setSettingsSuccess(`Batch "${name}" added and credentials configured successfully!`);
       })
       .catch(err => {
@@ -2784,26 +3001,29 @@ function App() {
       });
   };
 
-  const handleEditCustomBatch = (batchId, newName, newSchedule) => {
+  const handleEditCustomBatch = (batchId, newName, newSchedule, newStartTime, newEndTime, newSlotType) => {
     const nameClean = newName.trim();
     const scheduleClean = newSchedule.trim();
+    const startTimeClean = (newStartTime || '').trim();
+    const endTimeClean = (newEndTime || '').trim();
+    const slotTypeClean = (newSlotType || 'Morning').trim();
 
     if (!nameClean || !scheduleClean) {
-      alert('Batch name and schedule pattern are required.');
+      alert('Batch name and schedule are required.');
       return;
     }
 
-    if (batchOptions.some(b => b.id !== batchId && (b.name.toLowerCase() === nameClean.toLowerCase() && b.schedule.toLowerCase() === scheduleClean.toLowerCase()))) {
-      alert('A batch with this name and schedule already exists!');
+    if (batchOptions.some(b => b.id !== batchId && (b.name.toLowerCase() === nameClean.toLowerCase() && b.schedule.toLowerCase() === scheduleClean.toLowerCase() && (b.slotType || 'Morning') === slotTypeClean))) {
+      alert('A batch with this name, schedule, and slot already exists!');
       return;
     }
 
-    const updatedCustomBatches = customBatches.map(b => b.id === batchId ? { ...b, name: nameClean, schedule: scheduleClean } : b);
+    const updatedCustomBatches = customBatches.map(b => b.id === batchId ? { ...b, name: nameClean, schedule: scheduleClean, startTime: startTimeClean, endTime: endTimeClean, slotType: slotTypeClean } : b);
 
     setCustomBatches(updatedCustomBatches);
     setBatchOptions(sortBatchesAlphabetically([...DEFAULT_BATCH_OPTIONS, ...updatedCustomBatches]));
 
-    // Update name & schedule in DB Batch collection
+    // Update name, schedule, timings & slotType in DB Batch collection
     const matchedBatchObj = Array.isArray(customBatches) && customBatches.find(b => {
       if (b && typeof b === 'object') {
         const bId = String(b.id || b.code || b._id).toLowerCase();
@@ -2816,7 +3036,7 @@ function App() {
       fetch(`${API_BASE_URL}/batches/${matchedBatchObj._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: nameClean, schedule: scheduleClean })
+        body: JSON.stringify({ name: nameClean, schedule: scheduleClean, startTime: startTimeClean, endTime: endTimeClean, slotType: slotTypeClean })
       }).catch(err => console.error("Error updating batch in DB:", err));
     }
 
@@ -2841,7 +3061,7 @@ function App() {
             customBatches: data.customBatches || []
           }));
         }
-        setSettingsSuccess(`Batch renamed to "${nameClean}" successfully!`);
+        setSettingsSuccess(`Batch "${nameClean}" updated successfully!`);
       })
       .catch(err => {
         setSettingsError('Error renaming batch: ' + err.message);
@@ -3144,15 +3364,98 @@ function App() {
   // Fee Filter State
   const [feeBatchFilter, setFeeBatchFilter] = useState('All');
 
-  // Roster Filter State
-  const [branchFilter, setBranchFilter] = useState('Kuttiady');
-  const [batchFilter, setBatchFilter] = useState('All');
-  const [statusFilter, setStatusFilter] = useState('Active');
 
   // Form State
   const [newStudent, setNewStudent] = useState({
     name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: '', photo: null
   });
+
+  // Unified dynamic batch loading by branchId for creation & edit modals/forms
+  useEffect(() => {
+    const token = getSessionToken();
+    if (!token) return; // Only for logged-in users
+
+    let activeFormBranch = '';
+    if (isAddModalOpen && newStudent) {
+      activeFormBranch = newStudent.branch;
+    } else if (isEditingStudent && editingStudentData) {
+      activeFormBranch = editingStudentData.branch;
+    } else if (isAdminModalOpen && newAdminForm) {
+      activeFormBranch = newAdminForm.branch;
+    } else if (editingAdmin) {
+      activeFormBranch = editingAdmin.branch;
+    } else if (currentView === 'credentials-list' && mappingSubTab === 'batches') {
+      activeFormBranch = batchForm.branch;
+    }
+
+    if (!activeFormBranch) {
+      setModalBatches([]);
+      return;
+    }
+
+    const branchObj = customBranches.find(
+      b => b.name.toLowerCase() === activeFormBranch.toLowerCase()
+    );
+
+    if (branchObj) {
+      fetch(`${API_BASE_URL}/batches?branchId=${branchObj._id}`)
+        .then(res => res.ok ? res.json() : [])
+        .then(data => {
+          const list = data || [];
+          setModalBatches(sortBatchesAlphabetically(list));
+          if (list.length > 0) {
+            const firstBatch = list[0];
+            // Auto default the open form's batch and schedule
+            if (isAddModalOpen) {
+              setNewStudent(prev => {
+                if (prev.branch === activeFormBranch && !list.some(b => b.name === prev.batch && b.schedule === prev.schedule)) {
+                  return { ...prev, batch: firstBatch.name, schedule: firstBatch.schedule };
+                }
+                return prev;
+              });
+            } else if (isEditingStudent) {
+              setEditingStudentData(prev => {
+                if (prev && prev.branch === activeFormBranch && !list.some(b => b.name === prev.batch && b.schedule === prev.schedule)) {
+                  return { ...prev, batch: firstBatch.name, schedule: firstBatch.schedule };
+                }
+                return prev;
+              });
+            } else if (isAdminModalOpen) {
+              setNewAdminForm(prev => {
+                if (prev.branch === activeFormBranch && !list.some(b => b.code === prev.batch)) {
+                  return { ...prev, batch: firstBatch.code };
+                }
+                return prev;
+              });
+            } else if (editingAdmin) {
+              setEditingAdmin(prev => {
+                if (prev && prev.branch === activeFormBranch && !list.some(b => b.code === prev.batch)) {
+                  return { ...prev, batch: firstBatch.code };
+                }
+                return prev;
+              });
+            } else if (currentView === 'credentials-list' && mappingSubTab === 'batches') {
+              setBatchForm(prev => {
+                if (prev.branch === activeFormBranch.toLowerCase() && !list.some(b => b.code === prev.batch)) {
+                  return { ...prev, batch: firstBatch.code };
+                }
+                return prev;
+              });
+            }
+          }
+        })
+        .catch(err => console.error('Error fetching batches for form branch:', err));
+    } else {
+      setModalBatches([]);
+    }
+  }, [
+    isAddModalOpen, newStudent?.branch,
+    isEditingStudent, editingStudentData?.branch,
+    isAdminModalOpen, newAdminForm?.branch,
+    editingAdmin?.branch,
+    currentView, mappingSubTab, batchForm?.branch,
+    customBranches, loggedInUser
+  ]);
 
   const compressImage = (base64Str, maxWidth = 150, maxHeight = 150, quality = 0.7) => {
     return new Promise((resolve) => {
@@ -7474,13 +7777,14 @@ function App() {
           <form onSubmit={(e) => {
             e.preventDefault();
             const newName = newBatchNameField.trim();
-            const newSchedule = newBatchScheduleField.trim();
+            const newSchedule = formatSelectedDays(editBatchDays);
+            const newSlot = editBatchSlotType;
             if (newName && newSchedule) {
-              handleEditCustomBatch(editingBatchObj.id, newName, newSchedule);
+              handleEditCustomBatch(editingBatchObj.id, newName, newSchedule, newSlot, '', newSlot);
               setIsEditBatchModalOpen(false);
               setEditingBatchObj(null);
             } else {
-              alert("Both name and schedule pattern are required.");
+              alert("Name and at least one schedule day are required.");
             }
           }}>
             <div className="form-group" style={{ marginBottom: '1.25rem' }}>
@@ -7494,16 +7798,38 @@ function App() {
                 onChange={(e) => setNewBatchNameField(e.target.value)}
               />
             </div>
+            <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Schedule Days (select one or more)</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem', background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
+                  <label key={day} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem', color: editBatchDays[day] ? 'white' : 'var(--color-text-muted)' }}>
+                    <input
+                      type="checkbox"
+                      checked={editBatchDays[day]}
+                      onChange={(e) => setEditBatchDays(prev => ({ ...prev, [day]: e.target.checked }))}
+                      style={{ accentColor: 'var(--color-primary)' }}
+                    />
+                    {day}
+                  </label>
+                ))}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
+                Formatted schedule: <span style={{ color: 'var(--color-primary)', fontWeight: 'bold' }}>{formatSelectedDays(editBatchDays) || 'None selected'}</span>
+              </div>
+            </div>
             <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-              <label style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Schedule Pattern (e.g. Mon-Fri)</label>
-              <input
-                type="text"
+              <label style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Timing Category (Slot)</label>
+              <select
                 className="form-control"
                 style={{ width: '100%' }}
+                value={editBatchSlotType}
+                onChange={(e) => setEditBatchSlotType(e.target.value)}
                 required
-                value={newBatchScheduleField}
-                onChange={(e) => setNewBatchScheduleField(e.target.value)}
-              />
+              >
+                <option value="Morning">Morning</option>
+                <option value="Evening">Evening</option>
+                <option value="Night">Night</option>
+              </select>
             </div>
             <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button type="button" className="btn-secondary" onClick={() => { setIsEditBatchModalOpen(false); setEditingBatchObj(null); }}>Cancel</button>
@@ -7533,13 +7859,13 @@ function App() {
       <div className="credentials-view" style={{ maxWidth: '1100px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
         {/* Consolidated Sub-tab Navigation */}
         <div style={{ display: 'flex', gap: '10px', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', flexWrap: 'wrap' }}>
-          {isSuper && (
+          {(isSuper || isBranchAdm) && (
             <button
               className={`btn-primary ${mappingSubTab === 'credentials' ? '' : 'btn-secondary'}`}
               style={mappingSubTab === 'credentials' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
               onClick={() => setMappingSubTab('credentials')}
             >
-              System Credentials
+              User Accounts
             </button>
           )}
           {isSuper && (
@@ -7572,339 +7898,7 @@ function App() {
         )}
 
         {/* Tab Contents */}
-        {mappingSubTab === 'credentials' && isSuper && (
-          <>
-            {/* Notice alert */}
-            <div className="panel" style={{ borderLeft: '4px solid var(--color-primary)', background: 'rgba(229, 9, 20, 0.05)' }}>
-              <h4 style={{ margin: 0, color: 'var(--color-text-light)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Shield size={18} color="var(--color-primary)" />
-                System Accounts Monitor
-              </h4>
-              <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', marginTop: '0.5rem', lineHeight: '1.4' }}>
-                This page shows all configured system accounts, their associated roles, and whether they are currently logged in.
-                To edit credentials, please click the "Edit" button next to any user account below.
-              </p>
-            </div>
-
-            {rawCredentialsError && (
-              <div style={{ color: '#ff453a', background: 'rgba(255,69,58,0.1)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,69,58,0.2)', fontWeight: 500 }}>
-                Error: {rawCredentialsError}
-              </div>
-            )}
-
-            {loadingRawCreds ? (
-              <div className="panel" style={{ padding: '3rem', textAlign: 'center' }}>
-                <div className="loading-spinner" style={{ margin: '0 auto 1rem' }}></div>
-                <p style={{ color: 'var(--color-text-muted)' }}>Loading system accounts...</p>
-              </div>
-            ) : !rawCredentials ? (
-              <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
-                <p style={{ color: 'var(--color-text-muted)' }}>No accounts data found or failed to load.</p>
-              </div>
-            ) : (
-              <>
-                {/* Superadmin Accounts Panel */}
-                <div className="panel">
-                  <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-                    <h3 className="panel-title">Super Admin Accounts</h3>
-                  </div>
-                  <div className="table-responsive">
-                    <table className="data-table responsive-table-cards">
-                      <thead>
-                        <tr>
-                          <th>Username</th>
-                          <th>Position / Role</th>
-                          <th>Lock Status</th>
-                          <th>Session Status</th>
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Object.keys(rawCredentials.adminCredentials || {}).map((username) => {
-                          const userObj = adminsList.find(a => a.username.toLowerCase().trim() === username.toLowerCase().trim());
-                          const isLocked = userObj ? userObj.isLocked : false;
-                          return (
-                            <tr key={username}>
-                              <td data-label="Username" style={{ fontWeight: 600, color: 'white' }}>{username}</td>
-                              <td data-label="Position / Role"><span className="badge badge-green">Superadmin</span></td>
-                              <td data-label="Lock Status">
-                                {userObj ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleToggleAdminLock(userObj._id, isLocked)}
-                                    className="btn-small"
-                                    style={{
-                                      backgroundColor: isLocked ? 'rgba(255, 69, 58, 0.15)' : 'rgba(48, 209, 88, 0.15)',
-                                      borderColor: isLocked ? '#ff453a' : '#30d158',
-                                      color: isLocked ? '#ff453a' : '#30d158',
-                                      fontWeight: 'bold',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '4px',
-                                      cursor: 'pointer',
-                                      borderRadius: '4px',
-                                      padding: '2px 8px'
-                                    }}
-                                  >
-                                    {isLocked ? '🔒 Locked (Unblock)' : '🔓 Unlocked (Lock)'}
-                                  </button>
-                                ) : (
-                                  <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}>-</span>
-                                )}
-                              </td>
-                              <td data-label="Session Status">
-                                {activeSessions.some(session => session.username.toLowerCase().trim() === username.toLowerCase().trim()) ? (
-                                  <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                    🟢 Logged In
-                                  </span>
-                                ) : (
-                                  <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                    ⚪ Offline
-                                  </span>
-                                )}
-                              </td>
-                              <td data-label="Actions">
-                                <button
-                                  type="button"
-                                  className="btn-small"
-                                  style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
-                                  onClick={() => {
-                                    setEditingCredential({
-                                      type: 'admin',
-                                      key: username,
-                                      oldUsername: username,
-                                      username: username,
-                                      password: '••••••',
-                                      displayName: `Super Admin Account (${username})`
-                                    });
-                                    setIsCredentialModalOpen(true);
-                                  }}
-                                >
-                                  Edit
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Branch Inspector Accounts Panel */}
-                <div className="panel">
-                  <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-                    <h3 className="panel-title">Branch Inspector Accounts</h3>
-                  </div>
-                  <div className="table-responsive">
-                    <table className="data-table responsive-table-cards">
-                      <thead>
-                        <tr>
-                          <th>Branch Name</th>
-                          <th>Username</th>
-                          <th>Position / Role</th>
-                          <th>Lock Status</th>
-                          <th>Session Status</th>
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Object.entries(rawCredentials.branchCredentials || {}).length === 0 ? (
-                          <tr>
-                            <td colSpan="6" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No branch inspectors configured.</td>
-                          </tr>
-                        ) : (
-                          Object.entries(rawCredentials.branchCredentials || {}).map(([branchKey, info]) => {
-                            const userObj = adminsList.find(a => a.username.toLowerCase().trim() === info.username.toLowerCase().trim());
-                            const isLocked = userObj ? userObj.isLocked : false;
-                            return (
-                              <tr key={branchKey}>
-                                <td data-label="Branch Name" style={{ fontWeight: 600, color: 'white', textTransform: 'capitalize' }}>{branchKey}</td>
-                                <td data-label="Username" style={{ color: 'var(--color-text-light)' }}>{info.username}</td>
-                                <td data-label="Position / Role"><span className="badge" style={{ background: 'rgba(52, 152, 219, 0.15)', color: '#3498db', border: '1px solid rgba(52, 152, 219, 0.3)' }}>Branch Admin</span></td>
-                                <td data-label="Lock Status">
-                                  {userObj ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleToggleAdminLock(userObj._id, isLocked)}
-                                      className="btn-small"
-                                      style={{
-                                        backgroundColor: isLocked ? 'rgba(255, 69, 58, 0.15)' : 'rgba(48, 209, 88, 0.15)',
-                                        borderColor: isLocked ? '#ff453a' : '#30d158',
-                                        color: isLocked ? '#ff453a' : '#30d158',
-                                        fontWeight: 'bold',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '4px',
-                                        cursor: 'pointer',
-                                        borderRadius: '4px',
-                                        padding: '2px 8px'
-                                      }}
-                                    >
-                                      {isLocked ? '🔒 Locked (Unblock)' : '🔓 Unlocked (Lock)'}
-                                    </button>
-                                  ) : (
-                                    <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}>-</span>
-                                  )}
-                                </td>
-                                <td data-label="Session Status">
-                                  {activeSessions.some(session => session.username.toLowerCase().trim() === info.username.toLowerCase().trim()) ? (
-                                    <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                      🟢 Logged In
-                                    </span>
-                                  ) : (
-                                    <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                      ⚪ Offline
-                                    </span>
-                                  )}
-                                </td>
-                                <td data-label="Actions">
-                                  <button
-                                    type="button"
-                                    className="btn-small"
-                                    style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
-                                    onClick={() => {
-                                      setEditingCredential({
-                                        type: 'branch',
-                                        key: branchKey,
-                                        oldUsername: info.username,
-                                        username: info.username,
-                                        password: '••••••',
-                                        displayName: `Branch Inspector (${branchKey})`
-                                      });
-                                      setIsCredentialModalOpen(true);
-                                    }}
-                                  >
-                                    Edit
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Trainer Accounts Panel */}
-                <div className="panel">
-                  <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-                    <h3 className="panel-title">Trainer Accounts</h3>
-                  </div>
-                  <div className="table-responsive">
-                    <table className="data-table responsive-table-cards">
-                      <thead>
-                        <tr>
-                          <th>Batch Name</th>
-                          <th>Username</th>
-                          <th>Position / Role</th>
-                          <th>Lock Status</th>
-                          <th>Session Status</th>
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Object.entries(rawCredentials.batchCredentials || {}).length === 0 ? (
-                          <tr>
-                            <td colSpan="6" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No trainers configured.</td>
-                          </tr>
-                        ) : (
-                          Object.entries(rawCredentials.batchCredentials || {}).map(([batchKey, info]) => {
-                            const parts = batchKey.split('_');
-                            const branchName = parts[0];
-                            const batchId = parts[1] || '';
-
-                            let batchNameText = batchId.toUpperCase();
-                            if (batchId.startsWith('batch')) {
-                              const batchNumStr = batchId.replace('batch', '');
-                              if (batchNumStr && !isNaN(batchNumStr)) {
-                                batchNameText = `Batch ${batchNumStr}`;
-                              }
-                            }
-                            const customBatchObj = customBatches.find(cb => cb.id === batchId || cb.id === `batch_${batchId}`);
-                            if (customBatchObj) {
-                              batchNameText = customBatchObj.name;
-                            }
-
-                            const userObj = adminsList.find(a => a.username.toLowerCase().trim() === info.username.toLowerCase().trim());
-                            const isLocked = userObj ? userObj.isLocked : false;
-
-                            return (
-                              <tr key={batchKey}>
-                                <td data-label="Batch" style={{ fontWeight: 600, color: 'white' }}>
-                                  <span style={{ textTransform: 'capitalize' }}>{branchName}</span> - {batchNameText}
-                                </td>
-                                <td data-label="Username" style={{ color: 'var(--color-text-light)' }}>{info.username}</td>
-                                <td data-label="Position / Role"><span className="badge" style={{ background: 'rgba(155, 89, 182, 0.15)', color: '#9b59b6', border: '1px solid rgba(155, 89, 182, 0.3)' }}>Coach / Trainer</span></td>
-                                <td data-label="Lock Status">
-                                  {userObj ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleToggleAdminLock(userObj._id, isLocked)}
-                                      className="btn-small"
-                                      style={{
-                                        backgroundColor: isLocked ? 'rgba(255, 69, 58, 0.15)' : 'rgba(48, 209, 88, 0.15)',
-                                        borderColor: isLocked ? '#ff453a' : '#30d158',
-                                        color: isLocked ? '#ff453a' : '#30d158',
-                                        fontWeight: 'bold',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '4px',
-                                        cursor: 'pointer',
-                                        borderRadius: '4px',
-                                        padding: '2px 8px'
-                                      }}
-                                    >
-                                      {isLocked ? '🔒 Locked (Unblock)' : '🔓 Unlocked (Lock)'}
-                                    </button>
-                                  ) : (
-                                    <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}>-</span>
-                                  )}
-                                </td>
-                                <td data-label="Session Status">
-                                  {activeSessions.some(session => session.username.toLowerCase().trim() === info.username.toLowerCase().trim()) ? (
-                                    <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                      🟢 Logged In
-                                    </span>
-                                  ) : (
-                                    <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                      ⚪ Offline
-                                    </span>
-                                  )}
-                                </td>
-                                <td data-label="Actions">
-                                  <button
-                                    type="button"
-                                    className="btn-small"
-                                    style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
-                                    onClick={() => {
-                                      setEditingCredential({
-                                        type: 'batch',
-                                        key: batchKey,
-                                        oldUsername: info.username,
-                                        username: info.username,
-                                        password: '••••••',
-                                        displayName: `Trainer (${branchName} - ${batchNameText})`
-                                      });
-                                      setIsCredentialModalOpen(true);
-                                    }}
-                                  >
-                                    Edit
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </>
-            )}
-          </>
-        )}
+        {mappingSubTab === 'credentials' && (isSuper || isBranchAdm) && renderAdminsPage()}
 
         {mappingSubTab === 'branches' && isSuper && renderBranchesPage()}
         {mappingSubTab === 'batches' && renderBatchesPage()}
@@ -8244,15 +8238,36 @@ function App() {
                   />
                 </div>
                 <div className="form-group">
-                  <label>Schedule Pattern (e.g. Mon-Fri or Sun-Wed)</label>
-                  <input
-                    type="text"
-                    placeholder="Schedule Pattern"
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Schedule Days (select one or more)</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem', background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
+                      <label key={day} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem', color: newBatchDays[day] ? 'white' : 'var(--color-text-muted)' }}>
+                        <input
+                          type="checkbox"
+                          checked={newBatchDays[day]}
+                          onChange={(e) => setNewBatchDays(prev => ({ ...prev, [day]: e.target.checked }))}
+                          style={{ accentColor: 'var(--color-primary)' }}
+                        />
+                        {day}
+                      </label>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
+                    Formatted schedule: <span style={{ color: 'var(--color-primary)', fontWeight: 'bold' }}>{formatSelectedDays(newBatchDays) || 'None selected'}</span>
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label>Timing Category (Slot)</label>
+                  <select
                     className="form-control"
-                    value={newBatchForm.schedule}
-                    onChange={(e) => setNewBatchForm(prev => ({ ...prev, schedule: e.target.value }))}
+                    value={newBatchForm.slotType || 'Morning'}
+                    onChange={(e) => setNewBatchForm(prev => ({ ...prev, slotType: e.target.value }))}
                     required
-                  />
+                  >
+                    <option value="Morning">Morning</option>
+                    <option value="Evening">Evening</option>
+                    <option value="Night">Night</option>
+                  </select>
                 </div>
                 <div className="form-group">
                   <label>Assigned Branch</label>
@@ -8270,6 +8285,17 @@ function App() {
                       <option value={getLoggedInUserBranch().toLowerCase()}>{getLoggedInUserBranch()}</option>
                     )}
                   </select>
+                </div>
+                <div className="form-group">
+                  <label>Trainer Username</label>
+                  <input
+                    type="text"
+                    placeholder="Enter trainer username"
+                    className="form-control"
+                    value={newBatchForm.username}
+                    onChange={(e) => setNewBatchForm(prev => ({ ...prev, username: e.target.value }))}
+                    required
+                  />
                 </div>
                 <div className="form-group">
                   <label>Trainer Password</label>
@@ -8327,13 +8353,13 @@ function App() {
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Select Batch</label>
-                  <select className="form-control" value={batchForm.batch} onChange={(e) => setBatchForm({ ...batchForm, batch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
-                    {getFilteredBatchOptions(batchForm.branch, false).map(opt => (
-                      <option key={opt.id} value={opt.id}>{opt.name}</option>
-                    ))}
-                  </select>
-                </div>
+                   <label>Select Batch</label>
+                   <select className="form-control" value={batchForm.batch} onChange={(e) => setBatchForm({ ...batchForm, batch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
+                     {modalBatches.map(opt => (
+                       <option key={opt.code} value={opt.code}>{opt.name} ({opt.schedule})</option>
+                     ))}
+                   </select>
+                 </div>
                 <div className="form-group">
                   <label>New Username (Optional)</label>
                   <input type="text" className="form-control" placeholder="Enter new username" value={batchForm.newUsername} onChange={(e) => setBatchForm({ ...batchForm, newUsername: e.target.value })} />
@@ -8381,6 +8407,7 @@ function App() {
               <thead>
                 <tr>
                   <th>Batch Name</th>
+                  <th>Timing</th>
                   <th>Schedule Pattern</th>
                   <th>Mapped Trainer Accounts</th>
                   <th>Students Active</th>
@@ -8409,6 +8436,11 @@ function App() {
                   return (
                     <tr key={b.id}>
                       <td data-label="Batch Name" style={{ fontWeight: 600, color: 'white' }}>{b.name}</td>
+                      <td data-label="Timing">
+                        <span className="badge" style={{ fontSize: '0.85rem', padding: '4px 10px', background: 'rgba(255,255,255,0.05)', color: 'var(--color-primary)', border: '1px solid rgba(255,255,255,0.08)', fontWeight: 500 }}>
+                          {b.slotType || 'Morning'}
+                        </span>
+                      </td>
                       <td data-label="Schedule Pattern" style={{ color: 'var(--color-primary)' }}>{b.schedule}</td>
                       <td data-label="Mapped Trainer Accounts">
                         {matchedCreds.length > 0 ? (
@@ -8446,7 +8478,10 @@ function App() {
                               onClick={() => {
                                 setEditingBatchObj(b);
                                 setNewBatchNameField(b.name);
-                                setNewBatchScheduleField(b.schedule);
+                                setEditBatchDays(parseScheduleToDays(b.schedule));
+                                setNewBatchStartTimeField(b.startTime || '09:00');
+                                setNewBatchEndTimeField(b.endTime || '10:30');
+                                setEditBatchSlotType(b.slotType || 'Morning');
                                 setIsEditBatchModalOpen(true);
                               }}
                             >
@@ -8505,6 +8540,16 @@ function App() {
 
     // Filter logic
     const filteredAdmins = scopedAdmins.filter(admin => {
+      // Branch and Batch filter scoping
+      if (branchFilter && branchFilter !== 'All') {
+        const branchKey = branchFilter.toLowerCase().trim();
+        if (admin.branch && admin.branch.toLowerCase().trim() !== branchKey) return false;
+      }
+      if (batchFilter && batchFilter !== 'All') {
+        const batchKey = batchFilter.toLowerCase().trim();
+        if (admin.batch && admin.batch.toLowerCase().trim() !== batchKey) return false;
+      }
+
       // Search
       const searchMatch =
         admin.username.toLowerCase().includes(adminSearchQuery.toLowerCase()) ||
@@ -8586,7 +8631,7 @@ function App() {
               </div>
               <select
                 className="form-control"
-                style={{ width: '160px', height: '38px', background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                style={{ width: '160px', height: '38px', background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}
                 value={adminRoleFilter}
                 onChange={(e) => setAdminRoleFilter(e.target.value)}
               >
@@ -8597,7 +8642,7 @@ function App() {
               </select>
               <select
                 className="form-control"
-                style={{ width: '160px', height: '38px', background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                style={{ width: '160px', height: '38px', background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}
                 value={adminStatusFilter}
                 onChange={(e) => setAdminStatusFilter(e.target.value)}
               >
@@ -8617,13 +8662,6 @@ function App() {
                 onClick={() => exportAdminsToCSV(filteredAdmins)}
               >
                 <FileDown size={16} /> Export CSV
-              </button>
-              <button
-                className="btn-primary"
-                style={{ height: '38px', padding: '0 1.25rem', display: 'flex', alignItems: 'center', gap: '6px' }}
-                onClick={() => setIsAdminModalOpen(true)}
-              >
-                <UserPlus size={16} /> Create User Account
               </button>
             </div>
           </div>
@@ -8825,41 +8863,73 @@ function App() {
                   </div>
                 </div>
 
-                {newAdminForm.role !== 'superadmin' && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                    <div className="form-group">
-                      <label>Assigned Branch</label>
-                      <select
-                        className="form-control"
-                        value={newAdminForm.branch}
-                        disabled={isBranchAdm}
-                        onChange={(e) => setNewAdminForm(prev => ({ ...prev, branch: e.target.value }))}
-                      >
-                        {isSuper ? (
-                          branches.map(b => (
-                            <option key={b} value={b}>{b}</option>
-                          ))
-                        ) : (
-                          <option value={getLoggedInUserBranch()}>{getLoggedInUserBranch()}</option>
-                        )}
-                      </select>
-                    </div>
-                    {(newAdminForm.role === 'trainer' || newAdminForm.role === 'coordinator') && (
-                      <div className="form-group">
-                        <label>Assigned Batch</label>
-                        <select
-                          className="form-control"
-                          value={newAdminForm.batch}
-                          onChange={(e) => setNewAdminForm(prev => ({ ...prev, batch: e.target.value }))}
-                        >
-                          {getFilteredBatchOptions(newAdminForm.branch).map(opt => (
-                            <option key={opt.id} value={opt.id}>{opt.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div className="form-group">
+                    <label>Assigned Branch</label>
+                    <select
+                      className="form-control"
+                      value={newAdminForm.branch}
+                      disabled={isBranchAdm}
+                      onChange={(e) => setNewAdminForm(prev => ({ ...prev, branch: e.target.value }))}
+                      required
+                    >
+                      {isSuper ? (
+                        branches.map(b => (
+                          <option key={b} value={b}>{b}</option>
+                        ))
+                      ) : (
+                        <option value={getLoggedInUserBranch()}>{getLoggedInUserBranch()}</option>
+                      )}
+                    </select>
                   </div>
-                )}
+                  <div className="form-group">
+                    <label>Assigned Batch</label>
+                    <select
+                      className="form-control"
+                      value={newAdminForm.batch}
+                      onChange={(e) => {
+                        const selectedBatchVal = e.target.value;
+                        const matched = modalBatches.find(b => b.code === selectedBatchVal);
+                        setNewAdminForm(prev => ({ 
+                          ...prev, 
+                          batch: selectedBatchVal,
+                          schedule: matched ? matched.schedule : ''
+                        }));
+                      }}
+                      required
+                    >
+                      {modalBatches.map(opt => (
+                        <option key={opt.code} value={opt.code}>{opt.name} ({opt.schedule})</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div className="form-group">
+                    <label>Batch Schedule</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={newAdminForm.schedule || ''}
+                      readOnly
+                      disabled
+                      placeholder="Auto-derived from batch"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Account Status</label>
+                    <select
+                      className="form-control"
+                      value={newAdminForm.status || 'Active'}
+                      onChange={(e) => setNewAdminForm(prev => ({ ...prev, status: e.target.value }))}
+                      required
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Disabled">Disabled</option>
+                    </select>
+                  </div>
+                </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                   <div className="form-group">
@@ -8970,41 +9040,74 @@ function App() {
                   </div>
                 </div>
 
-                {editingAdmin.role !== 'superadmin' && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                    <div className="form-group">
-                      <label>Assigned Branch</label>
-                      <select
-                        className="form-control"
-                        value={editingAdmin.branch || ''}
-                        disabled={isBranchAdm}
-                        onChange={(e) => setEditingAdmin(prev => ({ ...prev, branch: e.target.value }))}
-                      >
-                        {isSuper ? (
-                          branches.map(b => (
-                            <option key={b} value={b}>{b}</option>
-                          ))
-                        ) : (
-                          <option value={getLoggedInUserBranch()}>{getLoggedInUserBranch()}</option>
-                        )}
-                      </select>
-                    </div>
-                    {(editingAdmin.role === 'trainer' || editingAdmin.role === 'coordinator') && (
-                      <div className="form-group">
-                        <label>Assigned Batch</label>
-                        <select
-                          className="form-control"
-                          value={editingAdmin.batch || ''}
-                          onChange={(e) => setEditingAdmin(prev => ({ ...prev, batch: e.target.value }))}
-                        >
-                          {getFilteredBatchOptions(editingAdmin.branch).map(opt => (
-                            <option key={opt.id} value={opt.id}>{opt.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div className="form-group">
+                    <label>Assigned Branch</label>
+                    <select
+                      className="form-control"
+                      value={editingAdmin.branch || ''}
+                      disabled={isBranchAdm}
+                      onChange={(e) => setEditingAdmin(prev => ({ ...prev, branch: e.target.value }))}
+                      required
+                    >
+                      {isSuper ? (
+                        branches.map(b => (
+                          <option key={b} value={b}>{b}</option>
+                        ))
+                      ) : (
+                        <option value={getLoggedInUserBranch()}>{getLoggedInUserBranch()}</option>
+                      )}
+                    </select>
                   </div>
-                )}
+                  <div className="form-group">
+                    <label>Assigned Batch</label>
+                    <select
+                      className="form-control"
+                      value={editingAdmin.batch || ''}
+                      onChange={(e) => {
+                        const selectedBatchVal = e.target.value;
+                        const matched = modalBatches.find(b => b.code === selectedBatchVal);
+                        setEditingAdmin(prev => ({ 
+                          ...prev, 
+                          batch: selectedBatchVal,
+                          schedule: matched ? matched.schedule : ''
+                        }));
+                      }}
+                      required
+                    >
+                      {modalBatches.map(opt => (
+                        <option key={opt.code} value={opt.code}>{opt.name} ({opt.schedule})</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div className="form-group">
+                    <label>Batch Schedule</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={editingAdmin.schedule || ''}
+                      readOnly
+                      disabled
+                      placeholder="Auto-derived from batch"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Account Status</label>
+                    <select
+                      className="form-control"
+                      value={editingAdmin.status || 'Active'}
+                      onChange={(e) => setEditingAdmin(prev => ({ ...prev, status: e.target.value }))}
+                      required
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Disabled">Disabled</option>
+                      <option value="SoftDeleted">Soft Deleted</option>
+                    </select>
+                  </div>
+                </div>
 
                 <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '1rem', marginTop: '0.5rem' }}>
                   <h4 style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#ff9f0a' }}>Force Reset Password (Optional)</h4>
@@ -9440,49 +9543,7 @@ function App() {
         {isSuper && (
           <>
 
-            {/* Billing Month Configuration */}
-            <div className="panel" style={{ marginBottom: '2rem' }}>
-              <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
-                <h3 className="panel-title">Starting Billing Month Configuration</h3>
-              </div>
-              <form onSubmit={(e) => {
-                e.preventDefault();
-                setSettingsError('');
-                setSettingsSuccess('');
-                fetch(`${API_BASE_URL}/system-settings`, {
-                  method: 'PUT',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ startingBillingMonth })
-                })
-                  .then(res => {
-                    if (!res.ok) return res.json().then(data => { throw new Error(data.error || 'Failed to update system settings') });
-                    return res.json();
-                  })
-                  .then(data => {
-                    setSettingsSuccess('Starting billing month updated successfully!');
-                    setStartingBillingMonth(data.startingBillingMonth || '');
-                    reloadAllAppData();
-                  })
-                  .catch(err => {
-                    setSettingsError('Error updating system settings: ' + err.message);
-                  });
-              }}>
-                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                  <label>Starting Billing Month</label>
-                  <input
-                    type="month"
-                    className="form-control"
-                    value={startingBillingMonth}
-                    onChange={(e) => setStartingBillingMonth(e.target.value)}
-                    required
-                  />
-                  <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', marginTop: '0.5rem' }}>
-                    Student monthly fees and dues will only be calculated from this month onwards (or their joining date, whichever is later).
-                  </p>
-                </div>
-                <button type="submit" className="btn-primary">Save Configuration</button>
-              </form>
-            </div>
+
 
             {/* Admin Accounts Settings */}
             <div className="panel" style={{ marginBottom: '2rem' }}>
@@ -9940,7 +10001,10 @@ function App() {
                     className="form-control form-control-animated"
                     value={selectedBranchLogin}
                     disabled={isLoggingIn}
-                    onChange={(e) => setSelectedBranchLogin(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedBranchLogin(e.target.value);
+                      setSelectedBatchLogin('admin');
+                    }}
                     style={{ background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', height: '38px', padding: '0.5rem' }}
                   >
                     {branches.map(b => (
@@ -10711,22 +10775,20 @@ function App() {
             </div>
 
             {/* Batch Filter Selector */}
-            {(currentView === 'dashboard' || currentView === 'attendance' || currentView === 'fees' || currentView === 'performance') && (
-              <div style={{ position: 'relative' }}>
-                <select
-                  className="form-control"
-                  style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '135px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
-                  value={batchFilter}
-                  onChange={(e) => setBatchFilter(e.target.value)}
-                  disabled={isBatchAdminUser(loggedInUser)}
-                >
-                  <option value="All">All Batches</option>
-                  {getFilteredBatchOptions().map(opt => (
-                    <option key={opt.id} value={opt.schedule}>{opt.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
+            <div style={{ position: 'relative' }}>
+              <select
+                className="form-control"
+                style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '135px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
+                value={batchFilter}
+                onChange={(e) => setBatchFilter(e.target.value)}
+                disabled={isBatchAdminUser(loggedInUser)}
+              >
+                <option value="All">All Batches</option>
+                {getFilteredBatchOptions().map(opt => (
+                  <option key={opt.id} value={opt.schedule}>{opt.name}</option>
+                ))}
+              </select>
+            </div>
             {/* Status Filter Selector */}
             {(currentView === 'dashboard' || currentView === 'performance') && (
               <div style={{ position: 'relative' }}>
@@ -10968,10 +11030,15 @@ function App() {
                   <div className="stat-details">
                     <h3>Live Classes Today</h3>
                     <p className="stat-value" style={{ color: '#9C27B0' }}>
-                      {metrics.filteredClasses.length} {metrics.filteredClasses.length === 1 ? 'Class' : 'Classes'}
+                      {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length} {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length === 1 ? 'Class' : 'Classes'}
                     </p>
                     <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px', display: 'inline-block' }}>
-                      {metrics.filteredClasses.length > 0 ? `Next: ${metrics.filteredClasses[0].className} (${metrics.filteredClasses[0].startTime})` : 'No classes scheduled'}
+                      {metrics.filteredClasses.filter(c => c.status === 'cancelled').length > 0 ? (
+                        <span style={{ color: '#ff453a', marginRight: '6px', fontWeight: 'bold' }}>{metrics.filteredClasses.filter(c => c.status === 'cancelled').length} Cancelled</span>
+                      ) : null}
+                      {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length > 0 
+                        ? `Next: ${metrics.filteredClasses.filter(c => c.status !== 'cancelled')[0].className} (${metrics.filteredClasses.filter(c => c.status !== 'cancelled')[0].startTime})` 
+                        : 'No active classes'}
                     </span>
                   </div>
                 </div>
@@ -11073,43 +11140,70 @@ function App() {
                     + Schedule Class
                   </button>
                 </div>
-                {todayClasses.length > 0 ? (
+                {metrics.filteredClasses.length > 0 ? (
                   <div className="table-responsive">
                     <table className="data-table responsive-table-cards">
                       <thead>
                         <tr>
                           <th>Class Name</th>
-                          <th>Branch / Batch</th>
-                          <th>Time</th>
+                          <th>Branch / Batch / Slot</th>
                           <th>Trainer</th>
+                          <th>Status</th>
                           <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {todayClasses.map(cls => (
+                        {metrics.filteredClasses.map(cls => (
                           <tr key={cls._id}>
                             <td data-label="Class Name" style={{ fontWeight: 600, color: 'white' }}>
                               {cls.className}
                               {cls.subject && <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 400 }}>Subj: {cls.subject}</span>}
                             </td>
-                            <td data-label="Branch / Batch">
-                              <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', marginRight: '6px' }}>{cls.branch}</span>
-                              <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{cls.batch}</span>
-                            </td>
-                            <td data-label="Time" style={{ fontFamily: 'monospace', color: 'var(--color-text-light)' }}>
-                              {cls.startTime} - {cls.endTime}
+                            <td data-label="Branch / Batch / Slot">
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                  <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)' }}>{cls.branch}</span>
+                                  <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{cls.batch}</span>
+                                </div>
+                                {(cls.schedule || cls.slotType) && (
+                                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                    {cls.schedule && <span className="badge" style={{ background: 'rgba(54, 162, 235, 0.15)', color: '#36A2EB', border: '1px solid rgba(54, 162, 235, 0.2)', fontSize: '0.75rem' }}>{cls.schedule}</span>}
+                                    {cls.slotType && <span className="badge" style={{ background: 'rgba(75, 192, 192, 0.15)', color: '#4BC0C0', border: '1px solid rgba(75, 192, 192, 0.2)', fontSize: '0.75rem' }}>{cls.slotType}</span>}
+                                  </div>
+                                )}
+                              </div>
                             </td>
                             <td data-label="Trainer" style={{ color: 'var(--color-text-muted)' }}>
                               {cls.trainer}
                             </td>
+                            <td data-label="Status">
+                              {cls.status === 'cancelled' ? (
+                                <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#ff453a', border: '1px solid rgba(229, 9, 20, 0.3)' }} title={cls.cancellationReason}>
+                                  Cancelled {cls.cancellationReason ? `(${cls.cancellationReason})` : ''}
+                                </span>
+                              ) : (
+                                <span className="badge badge-green">Scheduled</span>
+                              )}
+                            </td>
                             <td data-label="Actions">
                               <div className="actions-flex-container">
-                                <button className="btn-icon" onClick={() => handleOpenEditClass(cls)} style={{ color: '#2196F3' }} title="Edit">
+                                <button className="btn-icon" onClick={() => handleOpenEditClass(cls)} style={{ color: '#2196F3' }} title="Edit Details">
                                   <Settings size={16} />
                                 </button>
-                                <button className="btn-icon" onClick={() => handleDeleteClass(cls._id)} style={{ color: '#F44336' }} title="Delete">
-                                  <Trash2 size={16} />
-                                </button>
+                                {cls.status === 'cancelled' ? (
+                                  <button className="btn-icon" onClick={() => handleRestoreClass(cls)} style={{ color: '#30d158' }} title="Restore Class">
+                                    <CheckCircle size={16} />
+                                  </button>
+                                ) : (
+                                  <button className="btn-icon" onClick={() => handleCancelClass(cls)} style={{ color: '#ff453a' }} title="Cancel Class">
+                                    <XCircle size={16} />
+                                  </button>
+                                )}
+                                {!cls.isVirtual && (
+                                  <button className="btn-icon" onClick={() => handleDeleteClass(cls._id)} style={{ color: '#F44336' }} title="Delete">
+                                    <Trash2 size={16} />
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -11262,38 +11356,39 @@ function App() {
 
                   <div className="grid-2-col">
                     <div className="form-group">
-                      <label>Batch Selection Dropdown</label>
+                      <label>Batch</label>
                       <select
                         className="form-control"
-                        value={batchOptions.find(b => b.name === editingStudentData.batch && b.schedule === editingStudentData.schedule)?.id || ''}
+                        value={editingStudentData.batch}
                         onChange={(e) => {
                           const selectedId = e.target.value;
-                          const correspondingOpt = batchOptions.find(b => b.id === selectedId);
+                          const correspondingOpt = modalBatches.find(b => b.code === selectedId);
                           if (correspondingOpt) {
-                            setEditingStudentData({
-                              ...editingStudentData,
-                              schedule: correspondingOpt.schedule,
-                              batch: correspondingOpt.name
-                            });
+                            setEditingStudentData(prev => ({
+                              ...prev,
+                              batch: correspondingOpt.code,
+                              schedule: correspondingOpt.schedule
+                            }));
                           }
                         }}
+                        required
                       >
-                        {getFilteredBatchOptions(editingStudentData.branch).map(opt => (
-                          <option key={opt.id} value={opt.id}>{opt.name} ({opt.schedule})</option>
+                        <option value="" disabled>Select Batch</option>
+                        {modalBatches.map(opt => (
+                          <option key={opt.code} value={opt.code}>{opt.name} ({opt.schedule})</option>
                         ))}
                       </select>
                     </div>
                     <div className="form-group">
-                      <label>Time Slot</label>
-                      <select
+                      <label>Batch Schedule</label>
+                      <input
+                        type="text"
                         className="form-control"
-                        value={editingStudentData.batch}
-                        onChange={(e) => setEditingStudentData({ ...editingStudentData, batch: e.target.value })}
-                      >
-                        <option value="Morning">Morning</option>
-                        <option value="Evening">Evening</option>
-                        <option value="Night">Night</option>
-                      </select>
+                        value={editingStudentData.schedule || ''}
+                        readOnly
+                        disabled
+                        placeholder="Auto-derived from batch"
+                      />
                     </div>
                   </div>
                   <div className="grid-2-col">
@@ -11304,16 +11399,17 @@ function App() {
                         value={editingStudentData.branch}
                         onChange={(e) => {
                           const selectedBr = e.target.value;
-                          const firstBatch = getFilteredBatchOptions(selectedBr)[0];
-                          setEditingStudentData({
-                            ...editingStudentData,
+                          setEditingStudentData(prev => ({
+                            ...prev,
                             branch: selectedBr,
-                            schedule: firstBatch ? firstBatch.schedule : editingStudentData.schedule,
-                            batch: firstBatch ? firstBatch.name : editingStudentData.batch
-                          });
+                            batch: '',
+                            schedule: ''
+                          }));
                         }}
+                        required
                         disabled={!isAdminUser(loggedInUser)}
                       >
+                        <option value="" disabled>Select Branch</option>
                         {isAdminUser(loggedInUser) ? (
                           branches.map(b => (
                             <option key={b} value={b}>{b}</option>
@@ -12044,27 +12140,39 @@ function App() {
                   </select>
                 </div>
               </div>
-              <div className="grid-2-col" style={{ marginBottom: '1rem' }}>
-                <div className="form-group">
-                  <label>Start Time (HH:MM)</label>
-                  <input
-                    type="time"
-                    className="form-control"
-                    required
-                    value={classForm.startTime}
-                    onChange={(e) => setClassForm({ ...classForm, startTime: e.target.value })}
-                  />
+
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Schedule Days (select one or more)</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem', background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
+                    <label key={day} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem', color: classFormDays[day] ? 'white' : 'var(--color-text-muted)' }}>
+                      <input
+                        type="checkbox"
+                        checked={classFormDays[day]}
+                        onChange={(e) => setClassFormDays(prev => ({ ...prev, [day]: e.target.checked }))}
+                        style={{ accentColor: 'var(--color-primary)' }}
+                      />
+                      {day}
+                    </label>
+                  ))}
                 </div>
-                <div className="form-group">
-                  <label>End Time (HH:MM)</label>
-                  <input
-                    type="time"
-                    className="form-control"
-                    required
-                    value={classForm.endTime}
-                    onChange={(e) => setClassForm({ ...classForm, endTime: e.target.value })}
-                  />
+                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
+                  Formatted schedule: <span style={{ color: 'var(--color-primary)', fontWeight: 'bold' }}>{formatSelectedDays(classFormDays) || 'None selected'}</span>
                 </div>
+              </div>
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Timing Category (Slot)</label>
+                <select
+                  className="form-control"
+                  style={{ width: '100%' }}
+                  value={classFormSlotType}
+                  onChange={(e) => setClassFormSlotType(e.target.value)}
+                  required
+                >
+                  <option value="Morning">Morning</option>
+                  <option value="Evening">Evening</option>
+                  <option value="Night">Night</option>
+                </select>
               </div>
               <div className="form-group" style={{ marginBottom: '1rem' }}>
                 <label>Trainer Username / Name</label>
@@ -12076,16 +12184,6 @@ function App() {
                   disabled={userRole === 'trainer'}
                   onChange={(e) => setClassForm({ ...classForm, trainer: e.target.value })}
                   placeholder="Enter trainer username"
-                />
-              </div>
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label>Subject / Topic (Optional)</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={classForm.subject}
-                  onChange={(e) => setClassForm({ ...classForm, subject: e.target.value })}
-                  placeholder="e.g. Sparring Techniques"
                 />
               </div>
               <div className="modal-actions">
@@ -12181,34 +12279,39 @@ function App() {
 
               <div className="grid-2-col">
                 <div className="form-group">
-                  <label>Batch Selection Dropdown</label>
+                  <label>Batch</label>
                   <select
                     className="form-control"
-                    value={batchOptions.find(b => b.name === newStudent.batch && b.schedule === newStudent.schedule)?.id || ''}
+                    value={newStudent.batch}
                     onChange={(e) => {
                       const selectedId = e.target.value;
-                      const correspondingOpt = batchOptions.find(b => b.id === selectedId);
+                      const correspondingOpt = modalBatches.find(b => b.code === selectedId);
                       if (correspondingOpt) {
-                        setNewStudent({
-                          ...newStudent,
-                          schedule: correspondingOpt.schedule,
-                          batch: correspondingOpt.name
-                        });
+                        setNewStudent(prev => ({
+                          ...prev,
+                          batch: correspondingOpt.code,
+                          schedule: correspondingOpt.schedule
+                        }));
                       }
                     }}
+                    required
                   >
-                    {getFilteredBatchOptions(newStudent.branch).map(opt => (
-                      <option key={opt.id} value={opt.id}>{opt.name} ({opt.schedule})</option>
+                    <option value="" disabled>Select Batch</option>
+                    {modalBatches.map(opt => (
+                      <option key={opt.code} value={opt.code}>{opt.name} ({opt.schedule})</option>
                     ))}
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Time Slot</label>
-                  <select className="form-control" value={newStudent.batch} onChange={(e) => setNewStudent({ ...newStudent, batch: e.target.value })}>
-                    <option value="Morning">Morning</option>
-                    <option value="Evening">Evening</option>
-                    <option value="Night">Night</option>
-                  </select>
+                  <label>Batch Schedule</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={newStudent.schedule || ''}
+                    readOnly
+                    disabled
+                    placeholder="Auto-derived from batch"
+                  />
                 </div>
               </div>
               <div className="grid-2-col">
@@ -12219,19 +12322,20 @@ function App() {
                     value={newStudent.branch}
                     onChange={(e) => {
                       const selectedBr = e.target.value;
-                      const firstBatch = getFilteredBatchOptions(selectedBr)[0];
-                      setNewStudent({
-                        ...newStudent,
+                      setNewStudent(prev => ({
+                        ...prev,
                         branch: selectedBr,
-                        schedule: firstBatch ? firstBatch.schedule : 'Mon-Thu',
-                        batch: firstBatch ? firstBatch.name : 'Morning'
-                      });
+                        batch: '',
+                        schedule: ''
+                      }));
                     }}
+                    required
                     disabled={
                       (!isAdminUser(loggedInUser) && appMode !== 'superadmin-login') ||
                       appMode === 'login'
                     }
                   >
+                    <option value="" disabled>Select Branch</option>
                     {((isAdminUser(loggedInUser) || appMode === 'superadmin-login') && appMode !== 'login') ? (
                       branches.map(b => (
                         <option key={b} value={b}>{b}</option>
