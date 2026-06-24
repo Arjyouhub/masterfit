@@ -1430,12 +1430,18 @@ select option {
     left: 10px;
     width: 45%;
     padding-right: 10px;
-    white-space: nowrap;
+    white-space: normal;
+    line-height: 1.1;
     text-align: left;
     font-weight: 600;
     color: var(--color-text-muted);
     content: attr(data-label);
     font-size: 0.8rem;
+  }
+
+  .progress-container {
+    width: 120px !important;
+    margin-top: 0 !important;
   }
 }
 
