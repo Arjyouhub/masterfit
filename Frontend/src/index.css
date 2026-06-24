@@ -894,6 +894,14 @@ select option {
   background: rgba(255, 255, 255, 0.05);
 }
 
+.actions-flex-container {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+
 /* Badges */
 .badge {
   padding: 0.3rem 0.6rem;
@@ -1442,6 +1450,10 @@ select option {
   .progress-container {
     width: 120px !important;
     margin-top: 0 !important;
+  }
+
+  .actions-flex-container {
+    flex-wrap: wrap;
   }
 }
 

@@ -7064,7 +7064,7 @@ function App() {
                     </div>
                   </td>
                   <td data-label="Contact / Operations">
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <div className="actions-flex-container">
                       <a href={`tel:${student.phone}`} className="btn-icon" style={{ color: '#2196F3' }} title="Call Student">
                         <Phone size={18} />
                       </a>
@@ -7148,7 +7148,7 @@ function App() {
                           </span>
                         </td>
                         <td data-label="Action">
-                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                          <div className="actions-flex-container">
                             <a href={`https://wa.me/${student.phone}?text=${encodedMsg}`} target="_blank" rel="noreferrer" className="btn-small" style={{ background: '#25D366', color: 'white', border: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
                               <MessageCircle size={14} /> WhatsApp
                             </a>
