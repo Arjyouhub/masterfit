@@ -8134,7 +8134,7 @@ function App() {
                       </td>
                       <td data-label="Actions">
                         {!isDefault ? (
-                          <div style={{ display: 'flex', gap: '6px' }}>
+                          <div className="actions-flex-container">
                             <button
                               type="button"
                               className="btn-small"
@@ -8433,7 +8433,7 @@ function App() {
                       </td>
                       <td data-label="Actions">
                         {!isDefault ? (
-                          <div style={{ display: 'flex', gap: '6px' }}>
+                          <div className="actions-flex-container">
                             <button
                               type="button"
                               className="btn-small"
@@ -8715,7 +8715,7 @@ function App() {
                         </div>
                       </td>
                       <td data-label="Actions">
-                        <div style={{ display: 'flex', gap: '8px' }}>
+                        <div className="actions-flex-container">
                           <button
                             className="btn-outline-primary btn-small"
                             onClick={() => setEditingAdmin(admin)}
@@ -11047,7 +11047,7 @@ function App() {
                             <td data-label="Belt Level"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
                             <td data-label="Phone" style={{ color: 'var(--color-text-muted)' }}>{student.phone}</td>
                             <td data-label="Actions">
-                              <div style={{ display: 'flex', gap: '8px' }}>
+                              <div className="actions-flex-container">
                                 <button className="btn-icon" onClick={() => handleDeleteStudent(student.id)} style={{ color: '#F44336' }} title="Delete">
                                   <Trash2 size={18} />
                                 </button>
@@ -11103,7 +11103,7 @@ function App() {
                               {cls.trainer}
                             </td>
                             <td data-label="Actions">
-                              <div style={{ display: 'flex', gap: '8px' }}>
+                              <div className="actions-flex-container">
                                 <button className="btn-icon" onClick={() => handleOpenEditClass(cls)} style={{ color: '#2196F3' }} title="Edit">
                                   <Settings size={16} />
                                 </button>

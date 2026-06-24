@@ -1454,6 +1454,8 @@ select option {
 
   .actions-flex-container {
     flex-wrap: wrap;
+    width: 100% !important;
+    justify-content: flex-end !important;
   }
 }
 
