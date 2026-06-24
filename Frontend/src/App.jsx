@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Users, CalendarDays, Wallet, Bell, Settings, LogOut, UserPlus, AlertTriangle, X,
-  ChevronLeft, ChevronRight, CheckCircle, XCircle, MessageCircle,
+  ChevronLeft, ChevronRight, CheckCircle, XCircle, MessageCircle, MessageSquare,
   Search, Phone, Trash2, ArrowRight, Activity, MapPin, TrendingUp, Award, Menu,
   Shield, Lock, Unlock, FileDown, FileUp, Database, Terminal, Cpu, HardDrive, Key, History
 } from 'lucide-react';
@@ -9,13 +9,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import './index.css';
 
 // Academy Branches static list fallback
-const DEFAULT_BRANCHES = ["Kuttiady", "Perambra", "Orkatteri", "Paarakadav", "Kallachi", "Chambra", "Devargovil"];
+const DEFAULT_BRANCHES = [];
 
-const DEFAULT_BATCH_OPTIONS = [
-  { id: 'batch1', name: 'Batch 1', schedule: 'Mon-Thu' },
-  { id: 'batch2', name: 'Batch 2', schedule: 'Tue-Fri' },
-  { id: 'batch3', name: 'Batch 3', schedule: 'Wed-Sat' }
-];
+const DEFAULT_BATCH_OPTIONS = [];
 
 
 const getCookieValue = (name) => {
@@ -23,14 +19,14 @@ const getCookieValue = (name) => {
   for (let i = 0; i < cookies.length; i++) {
     const cookie = cookies[i].trim();
     if (cookie.startsWith(name + '=')) {
-      return cookie.substring(name.length + 1);
+      return decodeURIComponent(cookie.substring(name.length + 1));
     }
   }
   return '';
 };
 
 const getSessionToken = () => {
-  return localStorage.getItem('umai_session_token') || getCookieValue('umai_session_token');
+  return getCookieValue('umai_session_token');
 };
 
 const sortStudentsAlphabetically = (arr) => {
@@ -42,9 +38,11 @@ const sortStudentsAlphabetically = (arr) => {
   });
 };
 
-const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  ? 'http://localhost:5000/api'
-  : 'https://masterfit-dfz7.onrender.com/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || (
+  window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || /^192\.168\./.test(window.location.hostname) || /^10\./.test(window.location.hostname) || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(window.location.hostname) || window.location.hostname.endsWith('.local')
+    ? `http://${window.location.hostname}:5000/api`
+    : 'https://masterfit-dfz7.onrender.com/api'
+);
 
 // Global Fetch Interceptor to automatically append Authorization token
 const originalFetch = window.fetch;
@@ -78,53 +76,29 @@ function App() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Bulletproof Cookie Parser
-  const getCookieValue = (name) => {
-    const cookies = document.cookie.split(';');
-    for (let i = 0; i < cookies.length; i++) {
-      const cookie = cookies[i].trim();
-      if (cookie.startsWith(name + '=')) {
-        return cookie.substring(name.length + 1);
-      }
-    }
-    return '';
-  };
-
   // Session storage helper functions
   const getSessionUser = () => {
-    return localStorage.getItem('umai_session_user') || getCookieValue('umai_session_user');
+    return getCookieValue('umai_session_user');
   };
 
   const getSessionToken = () => {
-    return localStorage.getItem('umai_session_token') || getCookieValue('umai_session_token');
+    return getCookieValue('umai_session_token');
   };
 
   const setSession = (username, token, role = '', branch = '', batch = '') => {
-    try {
-      localStorage.setItem('umai_session_user', username);
-      localStorage.setItem('umai_session_token', token);
-      localStorage.setItem('umai_session_role', role);
-      localStorage.setItem('umai_session_branch', branch);
-      localStorage.setItem('umai_session_batch', batch);
-    } catch (e) {
-      console.error('Failed to set localStorage session:', e);
-    }
-    document.cookie = `umai_session_user=${username}; path=/;`;
-    document.cookie = `umai_session_token=${token}; path=/;`;
+    document.cookie = `umai_session_user=${encodeURIComponent(username)}; path=/; max-age=604800;`;
+    document.cookie = `umai_session_token=${encodeURIComponent(token)}; path=/; max-age=604800;`;
+    document.cookie = `umai_session_role=${encodeURIComponent(role)}; path=/; max-age=604800;`;
+    document.cookie = `umai_session_branch=${encodeURIComponent(branch)}; path=/; max-age=604800;`;
+    document.cookie = `umai_session_batch=${encodeURIComponent(batch)}; path=/; max-age=604800;`;
   };
 
   const clearSession = () => {
-    try {
-      localStorage.removeItem('umai_session_user');
-      localStorage.removeItem('umai_session_token');
-      localStorage.removeItem('umai_session_role');
-      localStorage.removeItem('umai_session_branch');
-      localStorage.removeItem('umai_session_batch');
-    } catch (e) {
-      console.error('Failed to clear localStorage session:', e);
-    }
-    document.cookie = "umai_session_user=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-    document.cookie = "umai_session_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    document.cookie = "umai_session_user=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT;";
+    document.cookie = "umai_session_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT;";
+    document.cookie = "umai_session_role=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT;";
+    document.cookie = "umai_session_branch=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT;";
+    document.cookie = "umai_session_batch=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT;";
   };
 
   const [appMode, setAppMode] = useState(() => {
@@ -270,6 +244,88 @@ function App() {
   const [activeUpdateNotification, setActiveUpdateNotification] = useState(null);
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
   const [userLoginCount, setUserLoginCount] = useState(null);
+  const [dashboardStats, setDashboardStats] = useState(null);
+  const [loadingStats, setLoadingStats] = useState(false);
+  const [todayClasses, setTodayClasses] = useState([]);
+  const [isClassModalOpen, setIsClassModalOpen] = useState(false);
+  const [editingClass, setEditingClass] = useState(null);
+  const [classForm, setClassForm] = useState({ className: '', branch: '', batch: '', trainer: '', startTime: '', endTime: '', subject: '' });
+
+  const handleOpenAddClass = () => {
+    setClassForm({
+      className: '',
+      branch: userRole === 'superadmin' || userRole === 'developer' ? 'Kuttiady' : userBranch,
+      batch: userRole === 'trainer' ? userBatch : 'batch1',
+      trainer: userRole === 'trainer' ? loggedInUser : '',
+      startTime: '',
+      endTime: '',
+      subject: ''
+    });
+    setEditingClass(null);
+    setIsClassModalOpen(true);
+  };
+
+  const handleOpenEditClass = (cls) => {
+    setEditingClass(cls);
+    setClassForm({
+      className: cls.className,
+      branch: cls.branch,
+      batch: cls.batch,
+      trainer: cls.trainer,
+      startTime: cls.startTime,
+      endTime: cls.endTime,
+      subject: cls.subject || ''
+    });
+    setIsClassModalOpen(true);
+  };
+
+  const handleSaveClass = (e) => {
+    e.preventDefault();
+    if (!classForm.className || !classForm.branch || !classForm.batch || !classForm.trainer || !classForm.startTime || !classForm.endTime) {
+      alert("All fields except subject are required.");
+      return;
+    }
+
+    const method = editingClass ? 'PUT' : 'POST';
+    const url = editingClass ? `${API_BASE_URL}/classes/${editingClass._id}` : `${API_BASE_URL}/classes`;
+
+    fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(classForm)
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to save class') });
+        }
+        return res.json();
+      })
+      .then(() => {
+        alert(editingClass ? "Class updated successfully!" : "Class scheduled successfully!");
+        setIsClassModalOpen(false);
+        reloadAllAppData();
+      })
+      .catch(err => alert("Error saving class: " + err.message));
+  };
+
+  const handleDeleteClass = (id) => {
+    if (!window.confirm("Are you sure you want to delete this scheduled class?")) return;
+
+    fetch(`${API_BASE_URL}/classes/${id}`, {
+      method: 'DELETE'
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to delete class') });
+        }
+        return res.json();
+      })
+      .then(() => {
+        alert("Class deleted successfully!");
+        reloadAllAppData();
+      })
+      .catch(err => alert("Error deleting class: " + err.message));
+  };
 
   // Developer resolving ticket modal states
   const [devResolvingTicketId, setDevResolvingTicketId] = useState(null);
@@ -329,14 +385,22 @@ function App() {
 
   const [adminCredentials, setAdminCredentials] = useState({});
   const [mappingSubTab, setMappingSubTab] = useState('credentials');
+  const [batchesBranchFilter, setBatchesBranchFilter] = useState('All');
   const [rawCredentialsError, setRawCredentialsError] = useState('');
   const [editingCredential, setEditingCredential] = useState(null); // { type, key, oldUsername, username, password, displayName }
   const [isCredentialModalOpen, setIsCredentialModalOpen] = useState(false);
+  const [editingBranchName, setEditingBranchName] = useState('');
+  const [isEditBranchModalOpen, setIsEditBranchModalOpen] = useState(false);
+  const [newBranchNameField, setNewBranchNameField] = useState('');
+  const [editingBatchObj, setEditingBatchObj] = useState(null);
+  const [isEditBatchModalOpen, setIsEditBatchModalOpen] = useState(false);
+  const [newBatchNameField, setNewBatchNameField] = useState('');
+  const [newBatchScheduleField, setNewBatchScheduleField] = useState('');
   const [credentialModalError, setCredentialModalError] = useState('');
   const [credentialModalSuccess, setCredentialModalSuccess] = useState('');
-  const [userRole, setUserRole] = useState(() => localStorage.getItem('umai_session_role') || '');
-  const [userBranch, setUserBranch] = useState(() => localStorage.getItem('umai_session_branch') || '');
-  const [userBatch, setUserBatch] = useState(() => localStorage.getItem('umai_session_batch') || '');
+  const [userRole, setUserRole] = useState(() => getCookieValue('umai_session_role') || '');
+  const [userBranch, setUserBranch] = useState(() => getCookieValue('umai_session_branch') || '');
+  const [userBatch, setUserBatch] = useState(() => getCookieValue('umai_session_batch') || '');
   const [branches, setBranches] = useState(DEFAULT_BRANCHES);
   const [customBranches, setCustomBranches] = useState([]);
   const [customBatches, setCustomBatches] = useState([]);
@@ -550,38 +614,97 @@ function App() {
     return userRole === 'branchadmin';
   };
 
+  const isUserLoggedIn = (username) => {
+    if (!username) return false;
+    const cleanUser = username.toLowerCase().trim();
+    return activeSessions.some(session => session.username.toLowerCase().trim() === cleanUser);
+  };
+
+  const sortBranchesAlphabetically = (branchesList) => {
+    if (!Array.isArray(branchesList)) return [];
+    return [...branchesList].sort((a, b) => {
+      const aStr = String(a).toLowerCase();
+      const bStr = String(b).toLowerCase();
+      return aStr.localeCompare(bStr, undefined, { sensitivity: 'base' });
+    });
+  };
+
+  const sortBatchesAlphabetically = (batchesList) => {
+    if (!Array.isArray(batchesList)) return [];
+    return [...batchesList].sort((a, b) => {
+      const aName = (a.name || '').toLowerCase().replace(/\s+/g, '');
+      const bName = (b.name || '').toLowerCase().replace(/\s+/g, '');
+      return aName.localeCompare(bName, undefined, { numeric: true, sensitivity: 'base' });
+    });
+  };
+
   const getLoggedInUserBranch = () => {
     if (!loggedInUser) return 'All';
     if (isAdminUser(loggedInUser)) return 'All';
     return userBranch || 'All';
   };
 
-  const getFilteredBatchOptions = (branchOverride) => {
-    if (!loggedInUser) return batchOptions;
-
+  const getFilteredBatchOptions = (branchOverride, requireCredentials = true) => {
     let targetBranch = 'All';
     if (branchOverride) {
       targetBranch = branchOverride;
-    } else if (isAdminUser(loggedInUser)) {
-      targetBranch = branchFilter;
+    } else if (loggedInUser) {
+      if (isAdminUser(loggedInUser)) {
+        targetBranch = branchFilter;
+      } else {
+        targetBranch = getLoggedInUserBranch();
+      }
     } else {
-      targetBranch = getLoggedInUserBranch();
+      targetBranch = selectedBranchLogin || 'All';
     }
 
     const branchKey = targetBranch.toLowerCase();
     if (branchKey === 'all') {
-      return batchOptions;
+      const seenIds = new Set();
+      const seenNames = new Set();
+      return batchOptions.filter(opt => {
+        const idKey = opt.id.toLowerCase();
+        const nameKey = `${opt.name.toLowerCase().replace(/\s+/g, '')}_${opt.schedule.toLowerCase()}`;
+        if (seenIds.has(idKey) || seenNames.has(nameKey)) return false;
+        seenIds.add(idKey);
+        seenNames.add(nameKey);
+        return true;
+      });
     }
 
+    // Filter by branch
     const filtered = batchOptions.filter(opt => {
-      return batchCredentials[`${branchKey}_${opt.id}`] !== undefined;
+      // 1. Check branch match
+      let branchMatches = false;
+      if (opt.branch) {
+        if (opt.branch.toLowerCase() === 'all') {
+          branchMatches = true;
+        } else {
+          branchMatches = opt.branch.toLowerCase() === branchKey;
+        }
+      } else {
+        branchMatches = true;
+      }
+      if (!branchMatches) return false;
+
+      // 2. Check credentials if required and logged in
+      if (requireCredentials && loggedInUser) {
+        return batchCredentials[`${branchKey}_${opt.id}`] !== undefined;
+      }
+      return true;
     });
 
-    if (filtered.length === 0) {
-      return batchOptions;
-    }
-
-    return filtered;
+    // Deduplicate by id and by normalized name + schedule
+    const seenIds = new Set();
+    const seenNames = new Set();
+    return filtered.filter(opt => {
+      const idKey = opt.id.toLowerCase();
+      const nameKey = `${opt.name.toLowerCase().replace(/\s+/g, '')}_${opt.schedule.toLowerCase()}`;
+      if (seenIds.has(idKey) || seenNames.has(nameKey)) return false;
+      seenIds.add(idKey);
+      seenNames.add(nameKey);
+      return true;
+    });
   };
 
   const isBatchAdminUser = (user) => {
@@ -659,6 +782,37 @@ function App() {
   const [attendanceRecords, setAttendanceRecords] = useState({});
 
   const reloadAllAppData = () => {
+    const token = getSessionToken();
+    if (!token) {
+      // Not logged in: only fetch public branches and batches for the login page
+      fetch(`${API_BASE_URL}/public/branches`)
+        .then(res => res.ok ? res.json() : [])
+        .then(data => {
+          setCustomBranches(data || []);
+          const branchNames = (data || []).map(b => b.name);
+          const uniqueBranches = Array.from(new Set([
+            ...DEFAULT_BRANCHES,
+            ...branchNames
+          ]));
+          setBranches(sortBranchesAlphabetically(uniqueBranches));
+        })
+        .catch(err => console.error('Error fetching public branches:', err));
+
+      fetch(`${API_BASE_URL}/public/batches`)
+        .then(res => res.ok ? res.json() : [])
+        .then(data => {
+          setCustomBatches(data || []);
+          const uniqueBatches = [
+            ...DEFAULT_BATCH_OPTIONS.map(b => ({ ...b, branch: 'all' })),
+            ...(data || []).map(b => ({ id: b.code, name: b.name, schedule: b.schedule, branch: b.branch }))
+          ];
+          setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
+        })
+        .catch(err => console.error('Error fetching public batches:', err));
+        
+      return;
+    }
+
     // 1. Fetch Students
     fetch(`${API_BASE_URL}/students`)
       .then(res => {
@@ -692,31 +846,60 @@ function App() {
           setAdminCredentials(data.adminCredentials || {});
           setBranchCredentials(data.branchCredentials || {});
           setBatchCredentials(data.batchCredentials || {});
-
-          const customBranchesList = data.customBranches || [];
-          const customBatchesList = data.customBatches || [];
-          setCustomBranches(customBranchesList);
-          setCustomBatches(customBatchesList);
-
-          const dbBranches = Object.keys(data.branchCredentials || {}).map(b => b.charAt(0).toUpperCase() + b.slice(1));
-          const uniqueBranches = Array.from(new Set([
-            ...DEFAULT_BRANCHES,
-            ...dbBranches,
-            ...customBranchesList.map(b => b.charAt(0).toUpperCase() + b.slice(1))
-          ]));
-          setBranches(uniqueBranches);
-
-          const uniqueBatches = [
-            ...DEFAULT_BATCH_OPTIONS,
-            ...customBatchesList
-          ];
-          setBatchOptions(uniqueBatches);
           setMonthlyFeeRate(data.monthlyFeeRate !== undefined ? data.monthlyFeeRate : 600);
           setAdmissionFeeRate(data.admissionFeeRate !== undefined ? data.admissionFeeRate : 1500);
           setCoupons(data.coupons || {});
         }
       })
       .catch(err => console.error('Error fetching credentials:', err));
+
+    // 3.1 Fetch Branches from MongoDB
+    fetch(`${API_BASE_URL}/branches`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        setCustomBranches(data || []);
+        const branchNames = (data || []).map(b => b.name);
+        const uniqueBranches = Array.from(new Set([
+          ...DEFAULT_BRANCHES,
+          ...branchNames
+        ]));
+        setBranches(sortBranchesAlphabetically(uniqueBranches));
+      })
+      .catch(err => console.error('Error fetching branches:', err));
+
+    // 3.2 Fetch Batches from MongoDB
+    fetch(`${API_BASE_URL}/batches`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        setCustomBatches(data || []);
+        const uniqueBatches = [
+          ...DEFAULT_BATCH_OPTIONS.map(b => ({ ...b, branch: 'all' })),
+          ...(data || []).map(b => ({ id: b.code, name: b.name, schedule: b.schedule, branch: b.branch }))
+        ];
+        setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
+      })
+      .catch(err => console.error('Error fetching batches:', err));
+
+    // 3.3 Fetch Scheduled Classes
+    fetch(`${API_BASE_URL}/classes`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        setTodayClasses(data || []);
+      })
+      .catch(err => console.error('Error fetching classes:', err));
+
+    // 3.4 Fetch Dashboard Scoped Statistics
+    setLoadingStats(true);
+    fetch(`${API_BASE_URL}/dashboard/stats`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        setDashboardStats(data);
+        setLoadingStats(false);
+      })
+      .catch(err => {
+        console.error('Error fetching dashboard stats:', err);
+        setLoadingStats(false);
+      });
 
     // 4. Fetch Admins list (MongoDB-backed admin accounts)
     const sessionToken = getSessionToken();
@@ -732,6 +915,16 @@ function App() {
     }
     // 5. Fetch Global Announcements
     checkUnreadAnnouncement();
+
+    // 6. Fetch System Settings (starting billing month)
+    fetch(`${API_BASE_URL}/system-settings`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data) {
+          setStartingBillingMonth(data.startingBillingMonth || '');
+        }
+      })
+      .catch(err => console.error('Error fetching system settings:', err));
   };
 
   const handleCreateAdmin = (e) => {
@@ -897,6 +1090,7 @@ function App() {
     reloadAllAppData();
   }, []);
 
+
   // Verify session validity on mount
   useEffect(() => {
     const sessionToken = getSessionToken();
@@ -1035,7 +1229,7 @@ function App() {
 
   // Fetch active sessions when settings page or credentials list is loaded
   useEffect(() => {
-    if ((currentView === 'settings' || currentView === 'credentials-list') && isAdminUser(loggedInUser)) {
+    if ((currentView === 'settings' || currentView === 'credentials-list') && (isAdminUser(loggedInUser) || isBranchAdmin(loggedInUser))) {
       fetch(`${API_BASE_URL}/sessions`)
         .then(res => res.json())
         .then(data => setActiveSessions(data || []))
@@ -1043,27 +1237,39 @@ function App() {
     }
   }, [currentView, loggedInUser]);
 
-  // Fetch raw credentials when credentials-list page is loaded
+  // Fetch raw credentials and admin accounts list when credentials-list page is loaded
   useEffect(() => {
-    if (currentView === 'credentials-list' && isAdminUser(loggedInUser)) {
-      setLoadingRawCreds(true);
-      setRawCredentialsError('');
-      fetch(`${API_BASE_URL}/credentials/raw`)
-        .then(res => {
-          if (!res.ok) {
-            return res.json().then(data => { throw new Error(data.error || 'Failed to load system accounts.') });
-          }
-          return res.json();
-        })
-        .then(data => {
-          setRawCredentials(data);
-          setLoadingRawCreds(false);
-        })
-        .catch(err => {
-          console.error('Error fetching raw credentials:', err);
-          setRawCredentialsError(err.message);
-          setLoadingRawCreds(false);
-        });
+    if (currentView === 'credentials-list') {
+      const isSuper = isAdminUser(loggedInUser);
+      const isBranchAdm = isBranchAdmin(loggedInUser);
+      if (isSuper || isBranchAdm) {
+        // Fetch all admins to retrieve lock/unlock status mapping
+        fetch(`${API_BASE_URL}/admins`)
+          .then(res => res.ok ? res.json() : [])
+          .then(data => setAdminsList(data || []))
+          .catch(err => console.error('Error fetching admin accounts list:', err));
+
+        if (isSuper) {
+          setLoadingRawCreds(true);
+          setRawCredentialsError('');
+          fetch(`${API_BASE_URL}/credentials/raw`)
+            .then(res => {
+              if (!res.ok) {
+                return res.json().then(data => { throw new Error(data.error || 'Failed to load system accounts.') });
+              }
+              return res.json();
+            })
+            .then(data => {
+              setRawCredentials(data);
+              setLoadingRawCreds(false);
+            })
+            .catch(err => {
+              console.error('Error fetching raw credentials:', err);
+              setRawCredentialsError(err.message);
+              setLoadingRawCreds(false);
+            });
+        }
+      }
     }
   }, [currentView, loggedInUser]);
 
@@ -1117,7 +1323,7 @@ function App() {
 
   const dismissUpdateNotification = () => {
     if (activeUpdateNotification) {
-      localStorage.setItem('dismissed_update_id', activeUpdateNotification.id);
+      document.cookie = `dismissed_update_id=${encodeURIComponent(activeUpdateNotification.id)}; path=/; max-age=31536000;`;
       setActiveUpdateNotification(null);
     }
   };
@@ -2237,10 +2443,6 @@ function App() {
   };
 
   const handleDeleteCustomBranch = (branchToDelete) => {
-    if (DEFAULT_BRANCHES.includes(branchToDelete)) {
-      setSettingsError('Cannot delete default system branches!');
-      return;
-    }
     if (!window.confirm(`Are you sure you want to delete the branch "${branchToDelete}"?`)) {
       return;
     }
@@ -2272,6 +2474,19 @@ function App() {
       ...updatedCustomBranches.map(b => b.charAt(0).toUpperCase() + b.slice(1))
     ]));
     setBranches(uniqueBranches);
+
+    // Delete from DB Branch collection
+    const matchedBranchObj = Array.isArray(customBranches) && customBranches.find(b => {
+      if (typeof b === 'string') return b.toLowerCase().trim() === branchKey;
+      if (b && typeof b === 'object') return b.name?.toLowerCase().trim() === branchKey || b.code?.toLowerCase().trim() === branchKey;
+      return false;
+    });
+    if (matchedBranchObj && typeof matchedBranchObj === 'object' && matchedBranchObj._id) {
+      fetch(`${API_BASE_URL}/branches/${matchedBranchObj._id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' }
+      }).catch(err => console.error("Error deleting branch from DB:", err));
+    }
 
     fetch(`${API_BASE_URL}/credentials`, {
       method: 'PUT',
@@ -2324,13 +2539,34 @@ function App() {
     const oldBrLower = oldBrClean.toLowerCase();
     const newBrLower = newBrClean.toLowerCase();
 
-    if (DEFAULT_BRANCHES.some(b => b.toLowerCase() === newBrLower) ||
-      customBranches.some(b => b.toLowerCase() === newBrLower && b.toLowerCase() !== oldBrLower)) {
+    if (customBranches.some(b => {
+      if (typeof b === 'string') return b.toLowerCase().trim() === newBrLower && b.toLowerCase().trim() !== oldBrLower;
+      if (b && typeof b === 'object') return (b.name?.toLowerCase().trim() === newBrLower || b.code?.toLowerCase().trim() === newBrLower) && b.code?.toLowerCase().trim() !== oldBrLower;
+      return false;
+    })) {
       alert('Branch name already exists!');
       return;
     }
 
-    const updatedCustomBranches = customBranches.map(b => b.toLowerCase() === oldBrLower ? newBrClean : b);
+    const updatedCustomBranches = customBranches.map(b => {
+      if (typeof b === 'string') return b.toLowerCase() === oldBrLower ? newBrClean : b;
+      if (b && typeof b === 'object') return b.name?.toLowerCase() === oldBrLower || b.code?.toLowerCase() === oldBrLower ? newBrClean : b.name;
+      return b;
+    });
+
+    // Update name in DB Branch collection
+    const matchedBranchObj = Array.isArray(customBranches) && customBranches.find(b => {
+      if (typeof b === 'string') return b.toLowerCase().trim() === oldBrLower;
+      if (b && typeof b === 'object') return b.name?.toLowerCase().trim() === oldBrLower || b.code?.toLowerCase().trim() === oldBrLower;
+      return false;
+    });
+    if (matchedBranchObj && typeof matchedBranchObj === 'object' && matchedBranchObj._id) {
+      fetch(`${API_BASE_URL}/branches/${matchedBranchObj._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newBrClean, code: newBrLower })
+      }).catch(err => console.error("Error renaming branch in DB:", err));
+    }
 
     const updatedBranchCreds = { ...branchCredentials };
     if (updatedBranchCreds[oldBrLower]) {
@@ -2464,7 +2700,7 @@ function App() {
       .then(res => res.json())
       .then(data => {
         setCustomBatches(data.customBatches || []);
-        setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...(data.customBatches || [])]);
+        reloadAllAppData();
         setBatchCredentials(data.batchCredentials || {});
         if (rawCredentials) {
           setRawCredentials(prev => ({
@@ -2482,10 +2718,6 @@ function App() {
   };
 
   const handleDeleteCustomBatch = (batchIdToDelete, batchName) => {
-    if (DEFAULT_BATCH_OPTIONS.some(b => b.id === batchIdToDelete)) {
-      setSettingsError('Cannot delete default system batches!');
-      return;
-    }
     if (!window.confirm(`Are you sure you want to delete the batch "${batchName}"?`)) {
       return;
     }
@@ -2502,8 +2734,24 @@ function App() {
 
     // Optimistically update
     setCustomBatches(updatedCustomBatches);
-    setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...updatedCustomBatches]);
+    setBatchOptions(sortBatchesAlphabetically([...DEFAULT_BATCH_OPTIONS, ...updatedCustomBatches]));
     setBatchCredentials(updatedBatchCreds);
+
+    // Delete from DB Batch collection
+    const matchedBatchObj = Array.isArray(customBatches) && customBatches.find(b => {
+      if (b && typeof b === 'object') {
+        const bId = String(b.id || b.code || b._id).toLowerCase();
+        const targetId = String(batchIdToDelete).toLowerCase();
+        return bId === targetId || b._id === batchIdToDelete;
+      }
+      return false;
+    });
+    if (matchedBatchObj && typeof matchedBatchObj === 'object' && matchedBatchObj._id) {
+      fetch(`${API_BASE_URL}/batches/${matchedBatchObj._id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' }
+      }).catch(err => console.error("Error deleting batch from DB:", err));
+    }
 
     fetch(`${API_BASE_URL}/credentials`, {
       method: 'PUT',
@@ -2519,7 +2767,7 @@ function App() {
       })
       .then(data => {
         setCustomBatches(data.customBatches || []);
-        setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...(data.customBatches || [])]);
+        reloadAllAppData();
         setBatchCredentials(data.batchCredentials || {});
         if (rawCredentials) {
           setRawCredentials(prev => ({
@@ -2545,15 +2793,32 @@ function App() {
       return;
     }
 
-    if (batchOptions.some(b => b.id !== batchId && (b.name.toLowerCase() === nameClean.toLowerCase() || b.schedule.toLowerCase() === scheduleClean.toLowerCase()))) {
-      alert('A batch with this name or schedule already exists!');
+    if (batchOptions.some(b => b.id !== batchId && (b.name.toLowerCase() === nameClean.toLowerCase() && b.schedule.toLowerCase() === scheduleClean.toLowerCase()))) {
+      alert('A batch with this name and schedule already exists!');
       return;
     }
 
     const updatedCustomBatches = customBatches.map(b => b.id === batchId ? { ...b, name: nameClean, schedule: scheduleClean } : b);
 
     setCustomBatches(updatedCustomBatches);
-    setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...updatedCustomBatches]);
+    setBatchOptions(sortBatchesAlphabetically([...DEFAULT_BATCH_OPTIONS, ...updatedCustomBatches]));
+
+    // Update name & schedule in DB Batch collection
+    const matchedBatchObj = Array.isArray(customBatches) && customBatches.find(b => {
+      if (b && typeof b === 'object') {
+        const bId = String(b.id || b.code || b._id).toLowerCase();
+        const targetId = String(batchId).toLowerCase();
+        return bId === targetId || b._id === batchId;
+      }
+      return false;
+    });
+    if (matchedBatchObj && typeof matchedBatchObj === 'object' && matchedBatchObj._id) {
+      fetch(`${API_BASE_URL}/batches/${matchedBatchObj._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nameClean, schedule: scheduleClean })
+      }).catch(err => console.error("Error updating batch in DB:", err));
+    }
 
     fetch(`${API_BASE_URL}/credentials`, {
       method: 'PUT',
@@ -2568,7 +2833,7 @@ function App() {
       })
       .then(data => {
         setCustomBatches(data.customBatches || []);
-        setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...(data.customBatches || [])]);
+        reloadAllAppData();
 
         if (rawCredentials) {
           setRawCredentials(prev => ({
@@ -2709,6 +2974,151 @@ function App() {
     return `${year}-${month}`;
   };
 
+  const getDynamicMetrics = () => {
+    const activeBranch = branchFilter;
+    const activeBatch = batchFilter;
+
+    // Filter active students
+    const filteredStudents = students.filter(s => {
+      if (s.status === 'Inactive' || s.status === 'SoftDeleted') return false;
+
+      const matchesBranch = activeBranch === 'All' ||
+        (s.branch && s.branch.toLowerCase().trim() === activeBranch.toLowerCase().trim());
+
+      const matchesBatch = activeBatch === 'All' ||
+        (s.schedule && s.schedule.toLowerCase().trim() === activeBatch.toLowerCase().trim());
+
+      return matchesBranch && matchesBatch;
+    });
+
+    const totalStudentsCount = filteredStudents.length;
+
+    // Filter attendance records
+    const todayStr = getLocalDateString();
+    const todayRecs = attendanceRecords[todayStr] || {};
+    let presentToday = 0;
+    let absentToday = 0;
+
+    filteredStudents.forEach(student => {
+      const statusData = todayRecs[student.id];
+      if (statusData) {
+        let statusStr = '';
+        if (typeof statusData === 'object' && statusData !== null) {
+          statusStr = statusData.status || '';
+        } else {
+          statusStr = String(statusData);
+        }
+        const statusLower = statusStr.toLowerCase();
+        if (statusLower === 'present') {
+          presentToday++;
+        } else if (statusLower === 'absent') {
+          absentToday++;
+        }
+      }
+    });
+
+    const attendancePercentage = (presentToday + absentToday) > 0
+      ? Math.round((presentToday / (presentToday + absentToday)) * 100)
+      : 0;
+
+    // Filter classes today
+    const filteredClasses = todayClasses.filter(c => {
+      const matchesBranch = activeBranch === 'All' ||
+        (c.branch && c.branch.toLowerCase().trim() === activeBranch.toLowerCase().trim());
+
+      let matchesBatch = false;
+      if (activeBatch === 'All') {
+        matchesBatch = true;
+      } else {
+        const batchOpt = batchOptions.find(opt => opt.id.toLowerCase() === c.batch.toLowerCase());
+        if (batchOpt && batchOpt.schedule.toLowerCase().trim() === activeBatch.toLowerCase().trim()) {
+          matchesBatch = true;
+        }
+      }
+
+      return matchesBranch && matchesBatch;
+    });
+
+    // Sort classes chronologically by startTime
+    const sortedClasses = [...filteredClasses].sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+    // Fee calculations
+    let feeCollection = 0;
+    let pendingFees = 0;
+
+    filteredStudents.forEach(student => {
+      // Admission fee
+      const rateAdmission = student.customAdmissionRate !== undefined && student.customAdmissionRate !== null
+        ? student.customAdmissionRate
+        : admissionFeeRate;
+      const admissionCoupon = resolveCouponCode(student.appliedAdmissionCoupon);
+      let admissionDiscountAmount = 0;
+      if (admissionCoupon) {
+        if (admissionCoupon.type === 'percentage') {
+          admissionDiscountAmount = Math.round(rateAdmission * admissionCoupon.value / 100);
+        } else {
+          admissionDiscountAmount = admissionCoupon.value;
+        }
+      }
+      const finalAdmissionRate = Math.max(0, rateAdmission - admissionDiscountAmount);
+
+      if (student.admissionPaid) {
+        feeCollection += finalAdmissionRate;
+      } else {
+        pendingFees += finalAdmissionRate;
+      }
+
+      // Monthly fees
+      const currentMonthStr = new Date().toISOString().slice(0, 7); // YYYY-MM
+      let joinMonthStr = student.joinDate ? student.joinDate.slice(0, 7) : currentMonthStr;
+
+      if (startingBillingMonth && startingBillingMonth > joinMonthStr) {
+        joinMonthStr = startingBillingMonth;
+      }
+
+      const rateToUse = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
+        ? student.customMonthlyRate
+        : monthlyFeeRate;
+      const discountAmount = getStudentDiscount(student, rateToUse);
+      const finalRate = Math.max(0, rateToUse - discountAmount);
+
+      let [joinYear, joinMonth] = joinMonthStr.split('-').map(Number);
+      let [currYear, currMonth] = currentMonthStr.split('-').map(Number);
+
+      if (joinYear && joinMonth && currYear && currMonth) {
+        let tempYear = joinYear;
+        let tempMonth = joinMonth;
+
+        while (tempYear < currYear || (tempYear === currYear && tempMonth <= currMonth)) {
+          const monthStr = `${tempYear}-${String(tempMonth).padStart(2, '0')}`;
+          const isPaid = student.paidMonths && student.paidMonths[monthStr];
+
+          if (isPaid) {
+            feeCollection += finalRate;
+          } else {
+            pendingFees += finalRate;
+          }
+
+          tempMonth++;
+          if (tempMonth > 12) {
+            tempMonth = 1;
+            tempYear++;
+          }
+        }
+      }
+    });
+
+    return {
+      totalStudents: totalStudentsCount,
+      presentToday,
+      absentToday,
+      attendancePercentage,
+      feeCollection: Math.round(feeCollection),
+      pendingFees: Math.round(pendingFees),
+      filteredClasses: sortedClasses
+    };
+  };
+
   // Calendar State
   const [currentDate, setCurrentDate] = useState(new Date()); // Default to current month/year
   const [feeMonth, setFeeMonth] = useState(getLocalMonthString()); // "YYYY-MM"
@@ -2716,6 +3126,9 @@ function App() {
   // Profile modal dues calculation month limit
   const [profileFeeMonth, setProfileFeeMonth] = useState(getLocalMonthString());
   const [profileAttendanceMonth, setProfileAttendanceMonth] = useState(getLocalMonthString());
+  const [startingBillingMonth, setStartingBillingMonth] = useState('');
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(null);
+  const [selectedCalendarDetail, setSelectedCalendarDetail] = useState(null);
 
   useEffect(() => {
     if (selectedStudent) {
@@ -2999,7 +3412,12 @@ function App() {
     }
 
     const currentMonthStr = targetMonth || new Date().toISOString().slice(0, 7); // YYYY-MM
-    const joinMonthStr = student.joinDate ? student.joinDate.slice(0, 7) : currentMonthStr; // YYYY-MM
+    let joinMonthStr = student.joinDate ? student.joinDate.slice(0, 7) : currentMonthStr; // YYYY-MM
+
+    // Respect starting billing month (use later of joinMonthStr or startingBillingMonth)
+    if (startingBillingMonth && startingBillingMonth > joinMonthStr) {
+      joinMonthStr = startingBillingMonth;
+    }
 
     const unpaidMonths = [];
     const paidMonthsList = [];
@@ -5688,12 +6106,15 @@ function App() {
       const dayRecord = attendanceRecords[dateStr];
 
       let presentCount = 0;
+      let absentCount = 0;
       let totalMarked = 0;
 
       if (dayRecord) {
         Object.values(dayRecord).forEach(status => {
           totalMarked++;
-          if (status === 'present') presentCount++;
+          const statusLower = String(status).toLowerCase();
+          if (statusLower === 'present') presentCount++;
+          else if (statusLower === 'absent') absentCount++;
         });
       }
 
@@ -5702,12 +6123,13 @@ function App() {
           <div className="day-number">{i}</div>
           <div className="day-content">
             {totalMarked > 0 && (
-              <div className="attendance-indicator">
-                {presentCount >= (searchedStudents.length * 0.7) ? (
-                  <span className="text-success"><CheckCircle size={14} /> {presentCount}</span>
-                ) : (
-                  <span className="text-warning"><XCircle size={14} /> {presentCount}</span>
-                )}
+              <div className="attendance-indicator" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span className="text-success" style={{ fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
+                  <CheckCircle size={12} /> {presentCount}
+                </span>
+                <span className="text-danger" style={{ fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
+                  <XCircle size={12} /> {absentCount}
+                </span>
               </div>
             )}
           </div>
@@ -5840,23 +6262,16 @@ function App() {
                               <button
                                 className={`btn-small ${status === 'present' ? 'btn-primary' : ''}`}
                                 style={status === 'present' ? { backgroundColor: '#4CAF50', borderColor: '#4CAF50' } : {}}
-                                onClick={() => markAttendance(student.id, 'present')}
+                                onClick={() => markAttendance(student.id, status === 'present' ? 'none' : 'present')}
                               >
                                 <CheckCircle size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Present
                               </button>
                               <button
                                 className={`btn-small ${status === 'absent' ? 'btn-primary' : ''}`}
                                 style={status === 'absent' ? { backgroundColor: '#F44336', borderColor: '#F44336' } : {}}
-                                onClick={() => markAttendance(student.id, 'absent')}
+                                onClick={() => markAttendance(student.id, status === 'absent' ? 'none' : 'absent')}
                               >
                                 <XCircle size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Absent
-                              </button>
-                              <button
-                                className="btn-small"
-                                style={!status ? { backgroundColor: 'rgba(255,255,255,0.15)', borderColor: 'rgba(255,255,255,0.25)', color: 'white' } : { background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--color-text-muted)' }}
-                                onClick={() => markAttendance(student.id, 'none')}
-                              >
-                                <X size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> None
                               </button>
                             </div>
                           </td>
@@ -6041,7 +6456,7 @@ function App() {
         {/* Unified Fee Student List Panel */}
         <div className="panel">
           <div className="panel-header">
-            <h3 className="panel-title">Student Fee Roster ({formatMonthName(feeMonth)})</h3>
+            <h3 className="panel-title">Fee Details ({formatMonthName(feeMonth)})</h3>
             <div style={{ display: 'flex', gap: '1rem' }}>
               <span className="badge badge-green">{totalPaid} Paid Monthly</span>
               <span className="badge badge-orange">{totalUnpaid} Pending Monthly</span>
@@ -6091,7 +6506,7 @@ function App() {
                     <th style={{ textAlign: 'center' }}>Admission Coupon</th>
                     <th style={{ textAlign: 'center' }}>Monthly ({formatMonthName(feeMonth)})</th>
                     <th style={{ textAlign: 'center' }}>Monthly Coupon</th>
-                    <th style={{ textAlign: 'center' }}>Other Months</th>
+                    <th style={{ textAlign: 'center' }}>Fee Details</th>
                     <th style={{ textAlign: 'center' }}>Outstanding Dues</th>
                   </tr>
                 </thead>
@@ -6158,7 +6573,7 @@ function App() {
                           </td>
                         )}
                         <td data-label="Batch Time"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule)} • {student.batch}</span></td>
-                        <td data-label={`Admission (₹${admissionFeeRate})`} style={{ textAlign: 'center' }}>
+                        <td data-label="Admission" style={{ textAlign: 'center' }}>
                           <select
                             value={student.admissionPaid ? "paid" : "pending"}
                             onChange={(e) => {
@@ -6217,7 +6632,7 @@ function App() {
                             }}
                           />
                         </td>
-                        <td data-label={`Monthly (${formatMonthName(feeMonth)})`} style={{ textAlign: 'center' }}>
+                        <td data-label="Monthly Fee" style={{ textAlign: 'center' }}>
                           <select
                             value={isPaid(student) ? "paid" : "pending"}
                             onChange={(e) => {
@@ -6276,7 +6691,7 @@ function App() {
                             }}
                           />
                         </td>
-                        <td data-label="Other Months" style={{ textAlign: 'center' }}>
+                        <td data-label="Fee Details" style={{ textAlign: 'center' }}>
                           <div style={{ display: 'inline-block' }}>
                             {feeDetails.unpaidMonths.length === 0 && feeDetails.paidMonthsList.length === 0 ? (
                               <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>No record</span>
@@ -6633,18 +7048,35 @@ function App() {
                 <th>Batch</th>
                 <th>Skill Score</th>
                 <th>Progress to Next Belt</th>
+                <th>Contact / Operations</th>
               </tr>
             </thead>
             <tbody>
               {searchedStudents.map(student => (
                 <tr key={student.id}>
-                  <td data-label="Name" style={{ fontWeight: 500, color: 'var(--color-text-light)' }}>{student.name}</td>
+                  <td data-label="Name" onClick={() => handleSelectStudent(student)} style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}>{student.name}</td>
                   <td data-label="Belt Level"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
                   <td data-label="Batch"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>{getBatchNameFromSchedule(student.schedule)} • {student.batch}</span></td>
                   <td data-label="Skill Score"><span style={{ fontWeight: 'bold', color: student.performanceScore > 80 ? '#4CAF50' : '#FF9800' }}>{student.performanceScore}/100</span></td>
                   <td data-label="Progress to Next Belt" style={{ width: '30%' }}>
                     <div className="progress-container">
                       <div className="progress-bar" style={{ width: `${student.performanceScore}%` }}></div>
+                    </div>
+                  </td>
+                  <td data-label="Contact / Operations">
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <a href={`tel:${student.phone}`} className="btn-icon" style={{ color: '#2196F3' }} title="Call Student">
+                        <Phone size={18} />
+                      </a>
+                      <a href={`https://wa.me/${student.phone}`} target="_blank" rel="noreferrer" className="btn-icon" style={{ color: '#25D366' }} title="WhatsApp Student">
+                        <MessageCircle size={18} />
+                      </a>
+                      <a href={`sms:${student.phone}`} className="btn-icon" style={{ color: '#FF9800' }} title="SMS Message Student">
+                        <MessageSquare size={18} />
+                      </a>
+                      <button className="btn-icon" onClick={() => handleDeleteStudent(student.id)} style={{ color: '#F44336' }} title="Delete">
+                        <Trash2 size={18} />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -6716,9 +7148,20 @@ function App() {
                           </span>
                         </td>
                         <td data-label="Action">
-                          <a href={`https://wa.me/${student.phone}?text=${encodedMsg}`} target="_blank" rel="noreferrer" className="btn-small" style={{ background: '#25D366', color: 'white', border: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
-                            <MessageCircle size={14} /> WhatsApp
-                          </a>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <a href={`https://wa.me/${student.phone}?text=${encodedMsg}`} target="_blank" rel="noreferrer" className="btn-small" style={{ background: '#25D366', color: 'white', border: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
+                              <MessageCircle size={14} /> WhatsApp
+                            </a>
+                            <a href={`tel:${student.phone}`} className="btn-icon" style={{ color: '#2196F3' }} title="Call Student">
+                              <Phone size={18} />
+                            </a>
+                            <a href={`sms:${student.phone}`} className="btn-icon" style={{ color: '#FF9800' }} title="SMS Message Student">
+                              <MessageSquare size={18} />
+                            </a>
+                            <button className="btn-icon" onClick={() => handleDeleteStudent(student.id)} style={{ color: '#F44336' }} title="Delete">
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -6774,6 +7217,22 @@ function App() {
         password: formPassword
       };
       payload.batchCredentials = updatedBatches;
+
+      // Update custom batch name if changed
+      const parts = key.split('_');
+      const batchId = parts[1] || '';
+      const customBatchObj = customBatches.find(cb => cb.id === batchId || cb.id === `batch_${batchId}`);
+      if (customBatchObj && editingCredential.batchName !== undefined) {
+        const newBatchName = editingCredential.batchName.trim();
+        if (!newBatchName) {
+          setCredentialModalError('Batch name cannot be empty');
+          return;
+        }
+        const updatedCustomBatches = customBatches.map(b =>
+          (b.id === batchId || b.id === `batch_${batchId}`) ? { ...b, name: newBatchName } : b
+        );
+        payload.customBatches = updatedCustomBatches;
+      }
     }
 
     try {
@@ -6791,6 +7250,8 @@ function App() {
       if (data.adminCredentials) setAdminCredentials(data.adminCredentials);
       if (data.branchCredentials) setBranchCredentials(data.branchCredentials);
       if (data.batchCredentials) setBatchCredentials(data.batchCredentials);
+
+      reloadAllAppData();
 
       if (oldUsername.toLowerCase() === loggedInUser.toLowerCase()) {
         setLoggedInUser(cleanUsername);
@@ -6816,7 +7277,7 @@ function App() {
           <div className="panel-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 className="panel-title" style={{ color: '#fff', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
               <Lock size={20} color="var(--color-primary)" />
-              Edit Credentials
+              Edit Credentials / Reset Password
             </h3>
             <button className="btn-icon" onClick={() => { setIsCredentialModalOpen(false); setEditingCredential(null); }} style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer' }}><X size={24} /></button>
           </div>
@@ -6839,6 +7300,77 @@ function App() {
                 {editingCredential.displayName}
               </div>
             </div>
+
+            {/* Account Status / Unblock Option */}
+            {(() => {
+              const matchedAdmin = adminsList.find(a => a.username.toLowerCase().trim() === editingCredential.oldUsername.toLowerCase().trim())
+                || adminsList.find(a => a.username.toLowerCase().trim() === editingCredential.username.toLowerCase().trim());
+              if (!matchedAdmin) return null;
+              const isLocked = matchedAdmin.isLocked;
+              return (
+                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                  <label style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Account Status</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    <span className="badge" style={{
+                      backgroundColor: isLocked ? 'rgba(255, 69, 58, 0.15)' : 'rgba(48, 209, 88, 0.15)',
+                      color: isLocked ? '#ff453a' : '#30d158',
+                      border: isLocked ? '1px solid rgba(255, 69, 58, 0.3)' : '1px solid rgba(48, 209, 88, 0.3)',
+                      padding: '6px 12px',
+                      fontSize: '0.9rem',
+                      fontWeight: 'bold',
+                      borderRadius: '6px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      {isLocked ? '🔒 Account Locked' : '🔓 Active / Unlocked'}
+                    </span>
+                    {isLocked && (
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: '0.85rem',
+                          backgroundColor: '#30d158',
+                          borderColor: '#30d158',
+                          color: '#000',
+                          fontWeight: 'bold',
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => {
+                          handleToggleAdminLock(matchedAdmin._id, true);
+                          alert("Account unblocked successfully!");
+                        }}
+                      >
+                        Unblock Account
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Batch Name Edit Option (only for Trainer accounts linked to a custom batch) */}
+            {editingCredential.type === 'batch' && (() => {
+              const parts = editingCredential.key.split('_');
+              const batchId = parts[1] || '';
+              const customBatchObj = customBatches.find(cb => cb.id === batchId || cb.id === `batch_${batchId}`);
+              if (!customBatchObj) return null;
+              return (
+                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                  <label style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Batch Name</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    style={{ width: '100%' }}
+                    required
+                    value={editingCredential.batchName !== undefined ? editingCredential.batchName : customBatchObj.name}
+                    onChange={(e) => setEditingCredential({ ...editingCredential, batchName: e.target.value })}
+                  />
+                </div>
+              );
+            })()}
 
             <div className="form-group" style={{ marginBottom: '1.25rem' }}>
               <label style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Username</label>
@@ -6882,6 +7414,100 @@ function App() {
               >
                 Save Changes
               </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  };
+
+  const renderEditBranchModal = () => {
+    if (!isEditBranchModalOpen) return null;
+    return (
+      <div className="modal-overlay" style={{ zIndex: 1200 }}>
+        <div className="modal-content" style={{ maxWidth: '450px', width: '90%', background: '#0b0b14', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '2rem' }}>
+          <div className="panel-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 className="panel-title" style={{ color: '#fff', fontSize: '1.25rem', margin: 0 }}>Rename Branch</h3>
+            <button className="btn-icon" onClick={() => { setIsEditBranchModalOpen(false); setEditingBranchName(''); }} style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer' }}><X size={24} /></button>
+          </div>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            const newName = newBranchNameField.trim();
+            if (newName && newName !== editingBranchName) {
+              handleEditCustomBranch(editingBranchName, newName);
+              setIsEditBranchModalOpen(false);
+              setEditingBranchName('');
+            } else {
+              setIsEditBranchModalOpen(false);
+            }
+          }}>
+            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Branch Name</label>
+              <input
+                type="text"
+                className="form-control"
+                style={{ width: '100%' }}
+                required
+                value={newBranchNameField}
+                onChange={(e) => setNewBranchNameField(e.target.value)}
+              />
+            </div>
+            <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button type="button" className="btn-secondary" onClick={() => { setIsEditBranchModalOpen(false); setEditingBranchName(''); }}>Cancel</button>
+              <button type="submit" className="btn-primary">Save Name</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  };
+
+  const renderEditBatchModal = () => {
+    if (!isEditBatchModalOpen || !editingBatchObj) return null;
+    return (
+      <div className="modal-overlay" style={{ zIndex: 1200 }}>
+        <div className="modal-content" style={{ maxWidth: '450px', width: '90%', background: '#0b0b14', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '2rem' }}>
+          <div className="panel-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 className="panel-title" style={{ color: '#fff', fontSize: '1.25rem', margin: 0 }}>Edit Batch Details</h3>
+            <button className="btn-icon" onClick={() => { setIsEditBatchModalOpen(false); setEditingBatchObj(null); }} style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer' }}><X size={24} /></button>
+          </div>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            const newName = newBatchNameField.trim();
+            const newSchedule = newBatchScheduleField.trim();
+            if (newName && newSchedule) {
+              handleEditCustomBatch(editingBatchObj.id, newName, newSchedule);
+              setIsEditBatchModalOpen(false);
+              setEditingBatchObj(null);
+            } else {
+              alert("Both name and schedule pattern are required.");
+            }
+          }}>
+            <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Batch Name</label>
+              <input
+                type="text"
+                className="form-control"
+                style={{ width: '100%' }}
+                required
+                value={newBatchNameField}
+                onChange={(e) => setNewBatchNameField(e.target.value)}
+              />
+            </div>
+            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Schedule Pattern (e.g. Mon-Fri)</label>
+              <input
+                type="text"
+                className="form-control"
+                style={{ width: '100%' }}
+                required
+                value={newBatchScheduleField}
+                onChange={(e) => setNewBatchScheduleField(e.target.value)}
+              />
+            </div>
+            <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button type="button" className="btn-secondary" onClick={() => { setIsEditBatchModalOpen(false); setEditingBatchObj(null); }}>Cancel</button>
+              <button type="submit" className="btn-primary">Save Changes</button>
             </div>
           </form>
         </div>
@@ -6988,48 +7614,78 @@ function App() {
                         <tr>
                           <th>Username</th>
                           <th>Position / Role</th>
+                          <th>Lock Status</th>
                           <th>Session Status</th>
                           <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {Object.keys(rawCredentials.adminCredentials || {}).map((username) => (
-                          <tr key={username}>
-                            <td data-label="Username" style={{ fontWeight: 600, color: 'white' }}>{username}</td>
-                            <td data-label="Position / Role"><span className="badge badge-green">Superadmin</span></td>
-                            <td data-label="Session Status">
-                              {activeSessions.some(session => session.username.toLowerCase().trim() === username.toLowerCase().trim()) ? (
-                                <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                  🟢 Logged In
-                                </span>
-                              ) : (
-                                <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                  ⚪ Offline
-                                </span>
-                              )}
-                            </td>
-                            <td data-label="Actions">
-                              <button
-                                type="button"
-                                className="btn-small"
-                                style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
-                                onClick={() => {
-                                  setEditingCredential({
-                                    type: 'admin',
-                                    key: username,
-                                    oldUsername: username,
-                                    username: username,
-                                    password: '••••••',
-                                    displayName: `Super Admin Account (${username})`
-                                  });
-                                  setIsCredentialModalOpen(true);
-                                }}
-                              >
-                                Edit
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
+                        {Object.keys(rawCredentials.adminCredentials || {}).map((username) => {
+                          const userObj = adminsList.find(a => a.username.toLowerCase().trim() === username.toLowerCase().trim());
+                          const isLocked = userObj ? userObj.isLocked : false;
+                          return (
+                            <tr key={username}>
+                              <td data-label="Username" style={{ fontWeight: 600, color: 'white' }}>{username}</td>
+                              <td data-label="Position / Role"><span className="badge badge-green">Superadmin</span></td>
+                              <td data-label="Lock Status">
+                                {userObj ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleAdminLock(userObj._id, isLocked)}
+                                    className="btn-small"
+                                    style={{
+                                      backgroundColor: isLocked ? 'rgba(255, 69, 58, 0.15)' : 'rgba(48, 209, 88, 0.15)',
+                                      borderColor: isLocked ? '#ff453a' : '#30d158',
+                                      color: isLocked ? '#ff453a' : '#30d158',
+                                      fontWeight: 'bold',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      cursor: 'pointer',
+                                      borderRadius: '4px',
+                                      padding: '2px 8px'
+                                    }}
+                                  >
+                                    {isLocked ? '🔒 Locked (Unblock)' : '🔓 Unlocked (Lock)'}
+                                  </button>
+                                ) : (
+                                  <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}>-</span>
+                                )}
+                              </td>
+                              <td data-label="Session Status">
+                                {activeSessions.some(session => session.username.toLowerCase().trim() === username.toLowerCase().trim()) ? (
+                                  <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                    🟢 Logged In
+                                  </span>
+                                ) : (
+                                  <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                    ⚪ Offline
+                                  </span>
+                                )}
+                              </td>
+                              <td data-label="Actions">
+                                <button
+                                  type="button"
+                                  className="btn-small"
+                                  style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
+                                  onClick={() => {
+                                    setEditingCredential({
+                                      type: 'admin',
+                                      key: username,
+                                      oldUsername: username,
+                                      username: username,
+                                      password: '••••••',
+                                      displayName: `Super Admin Account (${username})`
+                                    });
+                                    setIsCredentialModalOpen(true);
+                                  }}
+                                >
+                                  Edit
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -7047,6 +7703,7 @@ function App() {
                           <th>Branch Name</th>
                           <th>Username</th>
                           <th>Position / Role</th>
+                          <th>Lock Status</th>
                           <th>Session Status</th>
                           <th>Actions</th>
                         </tr>
@@ -7054,47 +7711,76 @@ function App() {
                       <tbody>
                         {Object.entries(rawCredentials.branchCredentials || {}).length === 0 ? (
                           <tr>
-                            <td colSpan="5" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No branch inspectors configured.</td>
+                            <td colSpan="6" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No branch inspectors configured.</td>
                           </tr>
                         ) : (
-                          Object.entries(rawCredentials.branchCredentials || {}).map(([branchKey, info]) => (
-                            <tr key={branchKey}>
-                              <td data-label="Branch Name" style={{ fontWeight: 600, color: 'white', textTransform: 'capitalize' }}>{branchKey}</td>
-                              <td data-label="Username" style={{ color: 'var(--color-text-light)' }}>{info.username}</td>
-                              <td data-label="Position / Role"><span className="badge" style={{ background: 'rgba(52, 152, 219, 0.15)', color: '#3498db', border: '1px solid rgba(52, 152, 219, 0.3)' }}>Branch Admin</span></td>
-                              <td data-label="Session Status">
-                                {activeSessions.some(session => session.username.toLowerCase().trim() === info.username.toLowerCase().trim()) ? (
-                                  <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                    🟢 Logged In
-                                  </span>
-                                ) : (
-                                  <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                    ⚪ Offline
-                                  </span>
-                                )}
-                              </td>
-                              <td data-label="Actions">
-                                <button
-                                  type="button"
-                                  className="btn-small"
-                                  style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
-                                  onClick={() => {
-                                    setEditingCredential({
-                                      type: 'branch',
-                                      key: branchKey,
-                                      oldUsername: info.username,
-                                      username: info.username,
-                                      password: '••••••',
-                                      displayName: `Branch Inspector (${branchKey})`
-                                    });
-                                    setIsCredentialModalOpen(true);
-                                  }}
-                                >
-                                  Edit
-                                </button>
-                              </td>
-                            </tr>
-                          ))
+                          Object.entries(rawCredentials.branchCredentials || {}).map(([branchKey, info]) => {
+                            const userObj = adminsList.find(a => a.username.toLowerCase().trim() === info.username.toLowerCase().trim());
+                            const isLocked = userObj ? userObj.isLocked : false;
+                            return (
+                              <tr key={branchKey}>
+                                <td data-label="Branch Name" style={{ fontWeight: 600, color: 'white', textTransform: 'capitalize' }}>{branchKey}</td>
+                                <td data-label="Username" style={{ color: 'var(--color-text-light)' }}>{info.username}</td>
+                                <td data-label="Position / Role"><span className="badge" style={{ background: 'rgba(52, 152, 219, 0.15)', color: '#3498db', border: '1px solid rgba(52, 152, 219, 0.3)' }}>Branch Admin</span></td>
+                                <td data-label="Lock Status">
+                                  {userObj ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleAdminLock(userObj._id, isLocked)}
+                                      className="btn-small"
+                                      style={{
+                                        backgroundColor: isLocked ? 'rgba(255, 69, 58, 0.15)' : 'rgba(48, 209, 88, 0.15)',
+                                        borderColor: isLocked ? '#ff453a' : '#30d158',
+                                        color: isLocked ? '#ff453a' : '#30d158',
+                                        fontWeight: 'bold',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        cursor: 'pointer',
+                                        borderRadius: '4px',
+                                        padding: '2px 8px'
+                                      }}
+                                    >
+                                      {isLocked ? '🔒 Locked (Unblock)' : '🔓 Unlocked (Lock)'}
+                                    </button>
+                                  ) : (
+                                    <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}>-</span>
+                                  )}
+                                </td>
+                                <td data-label="Session Status">
+                                  {activeSessions.some(session => session.username.toLowerCase().trim() === info.username.toLowerCase().trim()) ? (
+                                    <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                      🟢 Logged In
+                                    </span>
+                                  ) : (
+                                    <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                      ⚪ Offline
+                                    </span>
+                                  )}
+                                </td>
+                                <td data-label="Actions">
+                                  <button
+                                    type="button"
+                                    className="btn-small"
+                                    style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
+                                    onClick={() => {
+                                      setEditingCredential({
+                                        type: 'branch',
+                                        key: branchKey,
+                                        oldUsername: info.username,
+                                        username: info.username,
+                                        password: '••••••',
+                                        displayName: `Branch Inspector (${branchKey})`
+                                      });
+                                      setIsCredentialModalOpen(true);
+                                    }}
+                                  >
+                                    Edit
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })
                         )}
                       </tbody>
                     </table>
@@ -7113,6 +7799,7 @@ function App() {
                           <th>Batch Name</th>
                           <th>Username</th>
                           <th>Position / Role</th>
+                          <th>Lock Status</th>
                           <th>Session Status</th>
                           <th>Actions</th>
                         </tr>
@@ -7120,7 +7807,7 @@ function App() {
                       <tbody>
                         {Object.entries(rawCredentials.batchCredentials || {}).length === 0 ? (
                           <tr>
-                            <td colSpan="5" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No trainers configured.</td>
+                            <td colSpan="6" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '1.5rem' }}>No trainers configured.</td>
                           </tr>
                         ) : (
                           Object.entries(rawCredentials.batchCredentials || {}).map(([batchKey, info]) => {
@@ -7140,6 +7827,9 @@ function App() {
                               batchNameText = customBatchObj.name;
                             }
 
+                            const userObj = adminsList.find(a => a.username.toLowerCase().trim() === info.username.toLowerCase().trim());
+                            const isLocked = userObj ? userObj.isLocked : false;
+
                             return (
                               <tr key={batchKey}>
                                 <td data-label="Batch" style={{ fontWeight: 600, color: 'white' }}>
@@ -7147,6 +7837,31 @@ function App() {
                                 </td>
                                 <td data-label="Username" style={{ color: 'var(--color-text-light)' }}>{info.username}</td>
                                 <td data-label="Position / Role"><span className="badge" style={{ background: 'rgba(155, 89, 182, 0.15)', color: '#9b59b6', border: '1px solid rgba(155, 89, 182, 0.3)' }}>Coach / Trainer</span></td>
+                                <td data-label="Lock Status">
+                                  {userObj ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleAdminLock(userObj._id, isLocked)}
+                                      className="btn-small"
+                                      style={{
+                                        backgroundColor: isLocked ? 'rgba(255, 69, 58, 0.15)' : 'rgba(48, 209, 88, 0.15)',
+                                        borderColor: isLocked ? '#ff453a' : '#30d158',
+                                        color: isLocked ? '#ff453a' : '#30d158',
+                                        fontWeight: 'bold',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        cursor: 'pointer',
+                                        borderRadius: '4px',
+                                        padding: '2px 8px'
+                                      }}
+                                    >
+                                      {isLocked ? '🔒 Locked (Unblock)' : '🔓 Unlocked (Lock)'}
+                                    </button>
+                                  ) : (
+                                    <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}>-</span>
+                                  )}
+                                </td>
                                 <td data-label="Session Status">
                                   {activeSessions.some(session => session.username.toLowerCase().trim() === info.username.toLowerCase().trim()) ? (
                                     <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
@@ -7383,6 +8098,7 @@ function App() {
                   <th>Students Roster</th>
                   <th>Staff / Inspectors</th>
                   <th>Type</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -7414,6 +8130,44 @@ function App() {
                           <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}>System Default</span>
                         ) : (
                           <span className="badge" style={{ background: 'rgba(48, 209, 88, 0.15)', color: '#30d158' }}>Custom Config</span>
+                        )}
+                      </td>
+                      <td data-label="Actions">
+                        {!isDefault ? (
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button
+                              type="button"
+                              className="btn-small"
+                              style={{
+                                backgroundColor: '#3498db',
+                                borderColor: '#3498db',
+                                color: '#fff',
+                                cursor: 'pointer'
+                              }}
+                              onClick={() => {
+                                setEditingBranchName(b);
+                                setNewBranchNameField(b);
+                                setIsEditBranchModalOpen(true);
+                              }}
+                            >
+                              Rename
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-small"
+                              style={{
+                                backgroundColor: 'var(--color-primary)',
+                                borderColor: 'var(--color-primary)',
+                                color: '#fff',
+                                cursor: 'pointer'
+                              }}
+                              onClick={() => handleDeleteCustomBranch(b)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>N/A</span>
                         )}
                       </td>
                     </tr>
@@ -7575,10 +8329,7 @@ function App() {
                 <div className="form-group">
                   <label>Select Batch</label>
                   <select className="form-control" value={batchForm.batch} onChange={(e) => setBatchForm({ ...batchForm, batch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
-                    {batchOptions.filter(opt => {
-                      if (DEFAULT_BATCH_OPTIONS.some(d => d.id === opt.id)) return true;
-                      return batchCredentials[`${batchForm.branch.toLowerCase()}_${opt.id}`] !== undefined;
-                    }).map(opt => (
+                    {getFilteredBatchOptions(batchForm.branch, false).map(opt => (
                       <option key={opt.id} value={opt.id}>{opt.name}</option>
                     ))}
                   </select>
@@ -7606,8 +8357,24 @@ function App() {
 
         {/* Batches List Table */}
         <div className="panel">
-          <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+          <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '10px' }}>
             <h3 className="panel-title">Active Academy Batches</h3>
+            {isSuper && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>Filter Branch:</span>
+                <select
+                  className="form-control"
+                  style={{ width: '160px', height: '36px', background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', borderRadius: '6px', padding: '0 0.5rem' }}
+                  value={batchesBranchFilter}
+                  onChange={(e) => setBatchesBranchFilter(e.target.value)}
+                >
+                  <option value="All">All Branches</option>
+                  {branches.map(br => (
+                    <option key={br} value={br}>{br}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
           <div className="table-responsive">
             <table className="data-table responsive-table-cards">
@@ -7618,31 +8385,23 @@ function App() {
                   <th>Mapped Trainer Accounts</th>
                   <th>Students Active</th>
                   <th>Type</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {batchOptions.filter(b => {
-                  const isDefault = DEFAULT_BATCH_OPTIONS.some(opt => opt.id === b.id);
-                  if (isSuper) return true;
-
-                  const branchKey = getLoggedInUserBranch().toLowerCase();
-                  if (isDefault) {
-                    return batchCredentials[`${branchKey}_${b.id}`] !== undefined;
-                  }
-
-                  return Object.keys(batchCredentials).some(key => {
-                    const parts = key.split('_');
-                    return parts[0].toLowerCase() === branchKey && parts.slice(1).join('_') === b.id;
-                  });
-                }).map((b) => {
+                {getFilteredBatchOptions(isSuper ? batchesBranchFilter : undefined, false).map((b) => {
                   const isDefault = DEFAULT_BATCH_OPTIONS.some(opt => opt.id === b.id);
                   const studentCount = students.filter(s => s.batch === b.id || s.schedule === b.schedule).length;
+                  const selectedBranchKey = isSuper ? batchesBranchFilter.toLowerCase() : getLoggedInUserBranch().toLowerCase();
 
                   // Collect mapped credentials across branches
                   const matchedCreds = [];
                   for (const [key, val] of Object.entries(batchCredentials)) {
                     if (key.endsWith(`_${b.id}`) || key === b.id) {
                       const branchPart = key.includes('_') ? key.split('_')[0] : 'Kuttiady';
+                      if (selectedBranchKey !== 'all' && branchPart.toLowerCase() !== selectedBranchKey) {
+                        continue;
+                      }
                       matchedCreds.push({ branch: branchPart.toUpperCase(), user: val.username, pass: val.password });
                     }
                   }
@@ -7670,6 +8429,45 @@ function App() {
                           <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}>System Default</span>
                         ) : (
                           <span className="badge" style={{ background: 'rgba(48, 209, 88, 0.15)', color: '#30d158' }}>Custom Config</span>
+                        )}
+                      </td>
+                      <td data-label="Actions">
+                        {!isDefault ? (
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button
+                              type="button"
+                              className="btn-small"
+                              style={{
+                                backgroundColor: '#3498db',
+                                borderColor: '#3498db',
+                                color: '#fff',
+                                cursor: 'pointer'
+                              }}
+                              onClick={() => {
+                                setEditingBatchObj(b);
+                                setNewBatchNameField(b.name);
+                                setNewBatchScheduleField(b.schedule);
+                                setIsEditBatchModalOpen(true);
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-small"
+                              style={{
+                                backgroundColor: 'var(--color-primary)',
+                                borderColor: 'var(--color-primary)',
+                                color: '#fff',
+                                cursor: 'pointer'
+                              }}
+                              onClick={() => handleDeleteCustomBatch(b.id, b.name)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>N/A</span>
                         )}
                       </td>
                     </tr>
@@ -8054,16 +8852,7 @@ function App() {
                           value={newAdminForm.batch}
                           onChange={(e) => setNewAdminForm(prev => ({ ...prev, batch: e.target.value }))}
                         >
-                          {batchOptions.filter(opt => {
-                            if (isSuper) return true;
-                            const branchKey = getLoggedInUserBranch().toLowerCase();
-                            const isDefault = DEFAULT_BATCH_OPTIONS.some(d => d.id === opt.id);
-                            if (isDefault) return batchCredentials[`${branchKey}_${opt.id}`] !== undefined;
-                            return Object.keys(batchCredentials).some(key => {
-                              const parts = key.split('_');
-                              return parts[0].toLowerCase() === branchKey && parts.slice(1).join('_') === opt.id;
-                            });
-                          }).map(opt => (
+                          {getFilteredBatchOptions(newAdminForm.branch).map(opt => (
                             <option key={opt.id} value={opt.id}>{opt.name}</option>
                           ))}
                         </select>
@@ -8208,16 +8997,7 @@ function App() {
                           value={editingAdmin.batch || ''}
                           onChange={(e) => setEditingAdmin(prev => ({ ...prev, batch: e.target.value }))}
                         >
-                          {batchOptions.filter(opt => {
-                            if (isSuper) return true;
-                            const branchKey = getLoggedInUserBranch().toLowerCase();
-                            const isDefault = DEFAULT_BATCH_OPTIONS.some(d => d.id === opt.id);
-                            if (isDefault) return batchCredentials[`${branchKey}_${opt.id}`] !== undefined;
-                            return Object.keys(batchCredentials).some(key => {
-                              const parts = key.split('_');
-                              return parts[0].toLowerCase() === branchKey && parts.slice(1).join('_') === opt.id;
-                            });
-                          }).map(opt => (
+                          {getFilteredBatchOptions(editingAdmin.branch).map(opt => (
                             <option key={opt.id} value={opt.id}>{opt.name}</option>
                           ))}
                         </select>
@@ -8453,7 +9233,7 @@ function App() {
     };
 
 
-    const handleUpdateAdmin = (e) => {
+    const handleSettingsUpdateAdmin = (e) => {
       e.preventDefault();
       setSettingsError('');
       setSettingsSuccess('');
@@ -8468,32 +9248,37 @@ function App() {
         return;
       }
 
-      const updatedAdminCreds = { ...adminCredentials };
-      if (user !== acc) {
-        delete updatedAdminCreds[acc];
+      const matchedUser = adminsList.find(u => u.username.toLowerCase().trim() === acc.toLowerCase().trim());
+      if (!matchedUser) {
+        setSettingsError(`Admin account "${acc}" not found in system database.`);
+        return;
       }
-      updatedAdminCreds[user] = pass;
 
-      fetch(`${API_BASE_URL}/credentials`, {
+      const updatePayload = {
+        username: user,
+        password: pass || undefined
+      };
+
+      fetch(`${API_BASE_URL}/admins/${matchedUser._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ adminCredentials: updatedAdminCreds })
+        body: JSON.stringify(updatePayload)
       })
         .then(res => {
-          if (!res.ok) throw new Error('Failed to update credentials on server');
+          if (!res.ok) return res.json().then(data => { throw new Error(data.error || 'Failed to update credentials on server') });
           return res.json();
         })
         .then(data => {
-          setAdminCredentials(data.adminCredentials || {});
           setSettingsSuccess(`Admin account "${user}" credentials updated successfully!`);
           setAdminForm({ account: 'admin', newUsername: '', newPassword: '', confirmPassword: '' });
+          reloadAllAppData();
         })
         .catch(err => {
           setSettingsError('Error updating credentials: ' + err.message);
         });
     };
 
-    const handleCreateAdmin = (e) => {
+    const handleSettingsCreateAdmin = (e) => {
       e.preventDefault();
       setSettingsError('');
       setSettingsSuccess('');
@@ -8507,7 +9292,7 @@ function App() {
         return;
       }
 
-      if (adminCredentials[user]) {
+      if (adminsList.some(a => a.username.toLowerCase().trim() === user)) {
         setSettingsError('Username already exists');
         return;
       }
@@ -8517,21 +9302,23 @@ function App() {
         return;
       }
 
-      const updatedAdminCreds = { ...adminCredentials, [user]: pass };
-
-      fetch(`${API_BASE_URL}/credentials`, {
-        method: 'PUT',
+      fetch(`${API_BASE_URL}/admins`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ adminCredentials: updatedAdminCreds })
+        body: JSON.stringify({
+          username: user,
+          password: pass,
+          role: 'superadmin'
+        })
       })
         .then(res => {
-          if (!res.ok) throw new Error('Failed to create account on server');
+          if (!res.ok) return res.json().then(data => { throw new Error(data.error || 'Failed to create account on server') });
           return res.json();
         })
         .then(data => {
-          setAdminCredentials(data.adminCredentials || {});
           setSettingsSuccess(`New Admin account "${user}" created successfully!`);
           setCreateAdminForm({ username: '', password: '', confirmPassword: '' });
+          reloadAllAppData();
         })
         .catch(err => {
           setSettingsError('Error creating admin account: ' + err.message);
@@ -8539,10 +9326,6 @@ function App() {
     };
 
     const handleDeleteAdminAccount = (accountToDelete) => {
-      if (Object.keys(adminCredentials).length <= 1) {
-        setSettingsError('You cannot delete the last remaining admin account.');
-        return;
-      }
       if (accountToDelete.toLowerCase().trim() === loggedInUser.toLowerCase().trim()) {
         setSettingsError('You cannot delete the account you are currently logged in with.');
         return;
@@ -8551,22 +9334,23 @@ function App() {
         return;
       }
 
-      const updatedAdminCreds = { ...adminCredentials };
-      delete updatedAdminCreds[accountToDelete];
+      const matchedUser = adminsList.find(u => u.username.toLowerCase().trim() === accountToDelete.toLowerCase().trim());
+      if (!matchedUser) {
+        setSettingsError(`Admin account "${accountToDelete}" not found in system database.`);
+        return;
+      }
 
-      fetch(`${API_BASE_URL}/credentials`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ adminCredentials: updatedAdminCreds })
+      fetch(`${API_BASE_URL}/admins/${matchedUser._id}?permanent=true`, {
+        method: 'DELETE'
       })
         .then(res => {
-          if (!res.ok) throw new Error('Failed to delete account on server');
+          if (!res.ok) return res.json().then(data => { throw new Error(data.error || 'Failed to delete account on server') });
           return res.json();
         })
         .then(data => {
-          setAdminCredentials(data.adminCredentials || {});
           setSettingsSuccess(`Admin account "${accountToDelete}" deleted successfully!`);
           setAdminForm({ account: 'admin', newUsername: '', newPassword: '', confirmPassword: '' });
+          reloadAllAppData();
         })
         .catch(err => {
           setSettingsError('Error deleting admin account: ' + err.message);
@@ -8656,12 +9440,56 @@ function App() {
         {isSuper && (
           <>
 
+            {/* Billing Month Configuration */}
+            <div className="panel" style={{ marginBottom: '2rem' }}>
+              <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
+                <h3 className="panel-title">Starting Billing Month Configuration</h3>
+              </div>
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                setSettingsError('');
+                setSettingsSuccess('');
+                fetch(`${API_BASE_URL}/system-settings`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ startingBillingMonth })
+                })
+                  .then(res => {
+                    if (!res.ok) return res.json().then(data => { throw new Error(data.error || 'Failed to update system settings') });
+                    return res.json();
+                  })
+                  .then(data => {
+                    setSettingsSuccess('Starting billing month updated successfully!');
+                    setStartingBillingMonth(data.startingBillingMonth || '');
+                    reloadAllAppData();
+                  })
+                  .catch(err => {
+                    setSettingsError('Error updating system settings: ' + err.message);
+                  });
+              }}>
+                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                  <label>Starting Billing Month</label>
+                  <input
+                    type="month"
+                    className="form-control"
+                    value={startingBillingMonth}
+                    onChange={(e) => setStartingBillingMonth(e.target.value)}
+                    required
+                  />
+                  <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', marginTop: '0.5rem' }}>
+                    Student monthly fees and dues will only be calculated from this month onwards (or their joining date, whichever is later).
+                  </p>
+                </div>
+                <button type="submit" className="btn-primary">Save Configuration</button>
+              </form>
+            </div>
+
             {/* Admin Accounts Settings */}
             <div className="panel" style={{ marginBottom: '2rem' }}>
               <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
                 <h3 className="panel-title">Update Admin Accounts</h3>
               </div>
-              <form onSubmit={handleUpdateAdmin}>
+              <form onSubmit={handleSettingsUpdateAdmin}>
                 <div className="grid-2-col" style={{ marginBottom: '1.5rem' }}>
                   <div className="form-group">
                     <label>Select Admin Account</label>
@@ -8710,7 +9538,7 @@ function App() {
               <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
                 <h3 className="panel-title">Create New Admin Account</h3>
               </div>
-              <form onSubmit={handleCreateAdmin}>
+              <form onSubmit={handleSettingsCreateAdmin}>
                 <div className="grid-2-col" style={{ marginBottom: '1.5rem' }}>
                   <div className="form-group">
                     <label>Admin Username</label>
@@ -9130,10 +9958,7 @@ function App() {
                     style={{ background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', height: '38px', padding: '0.5rem' }}
                   >
                     <option value="admin" style={{ background: '#1a1a1a', color: '#ffffff' }}>Branch Admin (All Batches)</option>
-                    {batchOptions.filter(opt => {
-                      if (DEFAULT_BATCH_OPTIONS.some(d => d.id === opt.id)) return true;
-                      return batchCredentials[`${selectedBranchLogin.toLowerCase()}_${opt.id}`] !== undefined;
-                    }).map(opt => (
+                    {getFilteredBatchOptions(selectedBranchLogin).map(opt => (
                       <option key={opt.id} value={opt.id} style={{ background: '#1a1a1a', color: '#ffffff' }}>{opt.name}</option>
                     ))}
                   </select>
@@ -9714,7 +10539,7 @@ function App() {
             <button
               onClick={() => {
                 sessionStorage.clear();
-                localStorage.clear();
+                clearSession();
                 setLoggedInUser(null);
                 setUserRole('');
                 setAppMode('login');
@@ -9761,6 +10586,7 @@ function App() {
 
 
   // --- Main Admin Dashboard Template ---
+  const metrics = getDynamicMetrics();
   return (
     <div className="dashboard-container">
       {/* Sidebar drawer backdrop for mobile */}
@@ -9824,7 +10650,7 @@ function App() {
           </a>
         </nav>
       </aside>
-
+ 
       <main className="main-content">
         {isSystemUnderMaintenance && (
           <div className="maintenance-alert-banner-static">
@@ -9838,7 +10664,7 @@ function App() {
             <span><strong>Upcoming Maintenance Notice:</strong> Portal login will be restricted from {formatMaintenanceTime(maintenanceStart)} to {formatMaintenanceTime(maintenanceEnd)}. Please save your work beforehand.</span>
           </div>
         )}
-
+ 
         <header className="header">
           <div className="header-main-row">
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -9846,7 +10672,7 @@ function App() {
                 <Menu size={24} />
               </button>
               <h1 className="page-title">
-                {currentView === 'dashboard' && 'Admin Dashboard'}
+                {currentView === 'dashboard' && 'Dashboard'}
                 {currentView === 'attendance' && 'Attendance Tracking'}
                 {currentView === 'fees' && 'Fee Management'}
                 {currentView === 'reminders' && 'Alerts & Reminders'}
@@ -9866,7 +10692,7 @@ function App() {
             <div style={{ position: 'relative' }}>
               <select
                 className="form-control"
-                style={{ padding: '0.5rem 1rem', paddingRight: '2rem', width: '180px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '135px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
                 value={branchFilter}
                 onChange={(e) => setBranchFilter(e.target.value)}
                 disabled={!isAdminUser(loggedInUser)}
@@ -9889,7 +10715,7 @@ function App() {
               <div style={{ position: 'relative' }}>
                 <select
                   className="form-control"
-                  style={{ padding: '0.5rem 1rem', paddingRight: '2rem', width: '180px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                  style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '135px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
                   value={batchFilter}
                   onChange={(e) => setBatchFilter(e.target.value)}
                   disabled={isBatchAdminUser(loggedInUser)}
@@ -9906,7 +10732,7 @@ function App() {
               <div style={{ position: 'relative' }}>
                 <select
                   className="form-control"
-                  style={{ padding: '0.5rem 1rem', paddingRight: '2rem', width: '150px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                  style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '120px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
                 >
@@ -9917,17 +10743,19 @@ function App() {
               </div>
             )}
             <div style={{ position: 'relative' }}>
-              <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+              <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
               <input
                 type="text"
                 placeholder="Search students..."
                 className="form-control"
-                style={{ paddingLeft: '36px', width: '250px', height: '38px', paddingTop: 0, paddingBottom: 0 }}
+                style={{ paddingLeft: '32px', width: '180px', height: '38px', paddingTop: 0, paddingBottom: 0, fontSize: '0.85rem' }}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
+          </div>
 
+          <div className="header-profile-section" style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexShrink: 0 }}>
             {/* Notification Bell Dropdown */}
             <div style={{ position: 'relative' }}>
               <button
@@ -10085,7 +10913,7 @@ function App() {
             </div>
 
             <div className="user-profile">
-              <span style={{ fontSize: '0.9rem', color: 'var(--color-text-light)', fontWeight: 500, textTransform: 'capitalize' }}>
+              <span style={{ fontSize: '0.9rem', color: 'var(--color-text-light)', fontWeight: 500, textTransform: 'capitalize', whiteSpace: 'nowrap' }}>
                 {loggedInUser} Panel
               </span>
               <div className="avatar">{loggedInUser.charAt(0).toUpperCase()}</div>
@@ -10096,40 +10924,79 @@ function App() {
         <div className="content-area">
           {currentView === 'dashboard' && (
             <>
-              <div className="stats-grid">
+              <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', marginBottom: '2rem' }}>
                 <div className="stat-card">
                   <div className="stat-icon-wrapper"><Users className="stat-icon" /></div>
                   <div className="stat-details">
                     <h3>Active Students</h3>
-                    <p className="stat-value">{searchedStudents.length}</p>
+                    <p className="stat-value">{metrics.totalStudents}</p>
                   </div>
                 </div>
                 <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setCurrentView('attendance')}>
-                  <div className="stat-icon-wrapper" style={{ background: 'rgba(33, 150, 243, 0.1)' }}>
-                    <CalendarDays className="stat-icon" style={{ color: '#2196F3' }} />
-                  </div>
+                  <div className="stat-icon-wrapper" style={{ background: 'rgba(76, 175, 80, 0.1)' }}><Activity className="stat-icon" style={{ color: '#4CAF50' }} /></div>
                   <div className="stat-details">
-                    <h3>Classes Today</h3>
-                    <p className="stat-value" style={{ color: '#2196F3' }}>3 <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Batches</span></p>
+                    <h3>Today's Attendance</h3>
+                    <p className="stat-value" style={{ color: '#4CAF50' }}>
+                      {metrics.presentToday} P / {metrics.absentToday} A
+                    </p>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                      Attendance Rate: {metrics.attendancePercentage}%
+                    </span>
                   </div>
                 </div>
                 <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setCurrentView('reminders')}>
                   <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 215, 0, 0.1)' }}>
-                    <AlertTriangle className="stat-icon" style={{ color: '#FFD700' }} />
+                    <Wallet className="stat-icon" style={{ color: '#FFD700' }} />
                   </div>
                   <div className="stat-details">
-                    <h3>Pending Dues</h3>
-                    <p className="stat-value" style={{ color: '#FFD700' }}>{searchedStudents.filter(s => !s.paidMonths || !s.paidMonths[new Date().toISOString().slice(0, 7)]).length}</p>
+                    <h3>Fee Collection</h3>
+                    <p className="stat-value" style={{ color: '#FFD700' }}>
+                      ₹{metrics.feeCollection} / ₹{metrics.pendingFees}
+                    </p>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                      Pending: ₹{metrics.pendingFees}
+                    </span>
+                  </div>
+                </div>
+                <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => {
+                  const classesEl = document.getElementById('today-classes-panel');
+                  if (classesEl) classesEl.scrollIntoView({ behavior: 'smooth' });
+                }}>
+                  <div className="stat-icon-wrapper" style={{ background: 'rgba(156, 39, 176, 0.1)' }}>
+                    <CalendarDays className="stat-icon" style={{ color: '#9C27B0' }} />
+                  </div>
+                  <div className="stat-details">
+                    <h3>Live Classes Today</h3>
+                    <p className="stat-value" style={{ color: '#9C27B0' }}>
+                      {metrics.filteredClasses.length} {metrics.filteredClasses.length === 1 ? 'Class' : 'Classes'}
+                    </p>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px', display: 'inline-block' }}>
+                      {metrics.filteredClasses.length > 0 ? `Next: ${metrics.filteredClasses[0].className} (${metrics.filteredClasses[0].startTime})` : 'No classes scheduled'}
+                    </span>
                   </div>
                 </div>
               </div>
 
               <div className="panel">
                 <div className="panel-header">
-                  <h3 className="panel-title">Academy Roster</h3>
+                  <h3 className="panel-title">Student Details</h3>
                   <button className="btn-primary" onClick={() => {
                     const defaultBranch = getLoggedInUserBranch();
-                    setNewStudent(prev => ({ ...prev, branch: defaultBranch }));
+                    const initialBranch = (defaultBranch === 'All' || !defaultBranch) ? (branches[0] || 'Kuttiady') : defaultBranch;
+                    const firstBatch = getFilteredBatchOptions(initialBranch)[0];
+                    setNewStudent({
+                      name: '',
+                      age: '',
+                      dob: '',
+                      phone: '',
+                      parentPhone: '',
+                      belt: 'White',
+                      joinDate: new Date().toISOString().split('T')[0],
+                      branch: initialBranch,
+                      schedule: firstBatch ? firstBatch.schedule : 'Mon-Thu',
+                      batch: firstBatch ? firstBatch.name : 'Morning',
+                      photo: null
+                    });
                     setIsAddModalOpen(true);
                   }}>
                     <UserPlus size={16} /> Add Student
@@ -10181,12 +11048,6 @@ function App() {
                             <td data-label="Phone" style={{ color: 'var(--color-text-muted)' }}>{student.phone}</td>
                             <td data-label="Actions">
                               <div style={{ display: 'flex', gap: '8px' }}>
-                                <a href={`tel:${student.phone}`} className="btn-icon" style={{ color: '#2196F3' }} title="Call Student">
-                                  <Phone size={18} />
-                                </a>
-                                <a href={`https://wa.me/${student.phone}`} target="_blank" rel="noreferrer" className="btn-icon" style={{ color: '#25D366' }} title="WhatsApp Student">
-                                  <MessageCircle size={18} />
-                                </a>
                                 <button className="btn-icon" onClick={() => handleDeleteStudent(student.id)} style={{ color: '#F44336' }} title="Delete">
                                   <Trash2 size={18} />
                                 </button>
@@ -10199,6 +11060,65 @@ function App() {
                   </div>
                 ) : (
                   <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>No students found.</div>
+                )}
+              </div>
+
+              {/* Scheduled Classes Panel */}
+              <div id="today-classes-panel" className="panel" style={{ marginTop: '2rem' }}>
+                <div className="panel-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <CalendarDays size={20} color="var(--color-primary)" /> Today's Scheduled Classes
+                  </h3>
+                  <button className="btn-primary btn-small" onClick={handleOpenAddClass}>
+                    + Schedule Class
+                  </button>
+                </div>
+                {todayClasses.length > 0 ? (
+                  <div className="table-responsive">
+                    <table className="data-table responsive-table-cards">
+                      <thead>
+                        <tr>
+                          <th>Class Name</th>
+                          <th>Branch / Batch</th>
+                          <th>Time</th>
+                          <th>Trainer</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {todayClasses.map(cls => (
+                          <tr key={cls._id}>
+                            <td data-label="Class Name" style={{ fontWeight: 600, color: 'white' }}>
+                              {cls.className}
+                              {cls.subject && <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 400 }}>Subj: {cls.subject}</span>}
+                            </td>
+                            <td data-label="Branch / Batch">
+                              <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', marginRight: '6px' }}>{cls.branch}</span>
+                              <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{cls.batch}</span>
+                            </td>
+                            <td data-label="Time" style={{ fontFamily: 'monospace', color: 'var(--color-text-light)' }}>
+                              {cls.startTime} - {cls.endTime}
+                            </td>
+                            <td data-label="Trainer" style={{ color: 'var(--color-text-muted)' }}>
+                              {cls.trainer}
+                            </td>
+                            <td data-label="Actions">
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button className="btn-icon" onClick={() => handleOpenEditClass(cls)} style={{ color: '#2196F3' }} title="Edit">
+                                  <Settings size={16} />
+                                </button>
+                                <button className="btn-icon" onClick={() => handleDeleteClass(cls._id)} style={{ color: '#F44336' }} title="Delete">
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No classes scheduled for today.</div>
                 )}
               </div>
             </>
@@ -10345,19 +11265,21 @@ function App() {
                       <label>Batch Selection Dropdown</label>
                       <select
                         className="form-control"
-                        value={editingStudentData.schedule}
+                        value={batchOptions.find(b => b.name === editingStudentData.batch && b.schedule === editingStudentData.schedule)?.id || ''}
                         onChange={(e) => {
-                          const selectedSched = e.target.value;
-                          const correspondingOpt = batchOptions.find(b => b.schedule === selectedSched);
-                          setEditingStudentData({
-                            ...editingStudentData,
-                            schedule: selectedSched,
-                            batch: correspondingOpt ? correspondingOpt.name : editingStudentData.batch
-                          });
+                          const selectedId = e.target.value;
+                          const correspondingOpt = batchOptions.find(b => b.id === selectedId);
+                          if (correspondingOpt) {
+                            setEditingStudentData({
+                              ...editingStudentData,
+                              schedule: correspondingOpt.schedule,
+                              batch: correspondingOpt.name
+                            });
+                          }
                         }}
                       >
                         {getFilteredBatchOptions(editingStudentData.branch).map(opt => (
-                          <option key={opt.id} value={opt.schedule}>{opt.name} ({opt.schedule})</option>
+                          <option key={opt.id} value={opt.id}>{opt.name} ({opt.schedule})</option>
                         ))}
                       </select>
                     </div>
@@ -10380,7 +11302,16 @@ function App() {
                       <select
                         className="form-control"
                         value={editingStudentData.branch}
-                        onChange={(e) => setEditingStudentData({ ...editingStudentData, branch: e.target.value })}
+                        onChange={(e) => {
+                          const selectedBr = e.target.value;
+                          const firstBatch = getFilteredBatchOptions(selectedBr)[0];
+                          setEditingStudentData({
+                            ...editingStudentData,
+                            branch: selectedBr,
+                            schedule: firstBatch ? firstBatch.schedule : editingStudentData.schedule,
+                            batch: firstBatch ? firstBatch.name : editingStudentData.batch
+                          });
+                        }}
                         disabled={!isAdminUser(loggedInUser)}
                       >
                         {isAdminUser(loggedInUser) ? (
@@ -10498,6 +11429,7 @@ function App() {
                         {selectedStudent.phone}
                         <a href={`tel:${selectedStudent.phone}`} style={{ color: '#2196F3', display: 'flex' }} title="Call"><Phone size={14} /></a>
                         <a href={`https://wa.me/${selectedStudent.phone}`} target="_blank" rel="noreferrer" style={{ color: '#25D366', display: 'flex' }} title="WhatsApp"><MessageCircle size={14} /></a>
+                        <a href={`sms:${selectedStudent.phone}`} style={{ color: '#FF9800', display: 'flex' }} title="SMS Message"><MessageSquare size={14} /></a>
                       </div>
                     </div>
                     <div>
@@ -10508,6 +11440,7 @@ function App() {
                           <>
                             <a href={`tel:${selectedStudent.parentPhone}`} style={{ color: '#2196F3', display: 'flex' }} title="Call"><Phone size={14} /></a>
                             <a href={`https://wa.me/${selectedStudent.parentPhone}`} target="_blank" rel="noreferrer" style={{ color: '#25D366', display: 'flex' }} title="WhatsApp"><MessageCircle size={14} /></a>
+                            <a href={`sms:${selectedStudent.parentPhone}`} style={{ color: '#FF9800', display: 'flex' }} title="SMS Message"><MessageSquare size={14} /></a>
                           </>
                         )}
                       </div>
@@ -10546,26 +11479,177 @@ function App() {
                       Object.keys(attendanceRecords).forEach(dateStr => {
                         if (dateStr.startsWith(profileAttendanceMonth)) {
                           const status = attendanceRecords[dateStr]?.[selectedStudent.id];
-                          if (status === 'present') present++;
-                          else if (status === 'absent') absent++;
+                          let statusStr = '';
+                          if (typeof status === 'object' && status !== null) {
+                            statusStr = status.status || '';
+                          } else {
+                            statusStr = String(status || '');
+                          }
+                          const statusLower = statusStr.toLowerCase();
+                          if (statusLower === 'present') present++;
+                          else if (statusLower === 'absent') absent++;
                         }
                       });
                       const totalMarked = present + absent;
                       const attendanceRate = totalMarked > 0 ? Math.round((present / totalMarked) * 100) : 0;
                       return (
-                        <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                          <div style={{ flex: 1, minWidth: '120px', background: 'rgba(76, 175, 80, 0.08)', border: '1px solid rgba(76, 175, 80, 0.25)', padding: '0.75rem 1rem', borderRadius: '10px', textAlign: 'center' }}>
-                            <span style={{ color: '#4CAF50', display: 'block', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Total Present</span>
-                            <strong style={{ fontSize: '1.5rem', color: '#4CAF50' }}>{present} Days</strong>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}>
+                          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <div style={{ flex: 1, minWidth: '100px', background: 'rgba(76, 175, 80, 0.08)', border: '1px solid rgba(76, 175, 80, 0.25)', padding: '0.5rem 0.75rem', borderRadius: '10px', textAlign: 'center' }}>
+                              <span style={{ color: '#4CAF50', display: 'block', fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>Total Present</span>
+                              <strong style={{ fontSize: '1.2rem', color: '#4CAF50' }}>{present} Days</strong>
+                            </div>
+                            <div style={{ flex: 1, minWidth: '100px', background: 'rgba(244, 67, 54, 0.08)', border: '1px solid rgba(244, 67, 54, 0.25)', padding: '0.5rem 0.75rem', borderRadius: '10px', textAlign: 'center' }}>
+                              <span style={{ color: '#F44336', display: 'block', fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>Total Absent</span>
+                              <strong style={{ fontSize: '1.2rem', color: '#F44336' }}>{absent} Days</strong>
+                            </div>
+                            <div style={{ flex: 1, minWidth: '100px', background: 'rgba(94, 92, 230, 0.08)', border: '1px solid rgba(94, 92, 230, 0.25)', padding: '0.5rem 0.75rem', borderRadius: '10px', textAlign: 'center' }}>
+                              <span style={{ color: '#5e5ce6', display: 'block', fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>Attendance Rate</span>
+                              <strong style={{ fontSize: '1.2rem', color: '#5e5ce6' }}>{attendanceRate}%</strong>
+                            </div>
                           </div>
-                          <div style={{ flex: 1, minWidth: '120px', background: 'rgba(244, 67, 54, 0.08)', border: '1px solid rgba(244, 67, 54, 0.25)', padding: '0.75rem 1rem', borderRadius: '10px', textAlign: 'center' }}>
-                            <span style={{ color: '#F44336', display: 'block', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Total Absent</span>
-                            <strong style={{ fontSize: '1.5rem', color: '#F44336' }}>{absent} Days</strong>
-                          </div>
-                          <div style={{ flex: 1, minWidth: '120px', background: 'rgba(94, 92, 230, 0.08)', border: '1px solid rgba(94, 92, 230, 0.25)', padding: '0.75rem 1rem', borderRadius: '10px', textAlign: 'center' }}>
-                            <span style={{ color: '#5e5ce6', display: 'block', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Attendance Rate</span>
-                            <strong style={{ fontSize: '1.5rem', color: '#5e5ce6' }}>{attendanceRate}%</strong>
-                          </div>
+
+                          {/* Calendar view */}
+                          {(() => {
+                            const [year, month] = profileAttendanceMonth.split('-').map(Number);
+                            if (!year || !month) return null;
+                            const daysInMonth = new Date(year, month, 0).getDate();
+                            const firstDayIndex = new Date(year, month - 1, 1).getDay();
+                            
+                            return (
+                              <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '1rem' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', textAlign: 'center', fontWeight: 600, fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem' }}>
+                                  {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => (
+                                    <div key={d}>{d}</div>
+                                  ))}
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
+                                  {Array.from({ length: firstDayIndex }).map((_, idx) => (
+                                    <div key={`empty-${idx}`} style={{ aspectRatio: '1', borderRadius: '6px', background: 'transparent' }}></div>
+                                  ))}
+                                  {Array.from({ length: daysInMonth }).map((_, idx) => {
+                                    const dayNum = idx + 1;
+                                    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                                    const record = attendanceRecords[dateStr]?.[selectedStudent.id];
+                                    let status = '';
+                                    if (record) {
+                                      status = (typeof record === 'object') ? (record.status || '') : String(record);
+                                    }
+                                    
+                                    const statusLower = status.toLowerCase();
+                                    let cellBg = 'rgba(255, 255, 255, 0.03)';
+                                    let cellBorder = '1px solid rgba(255, 255, 255, 0.05)';
+                                    let cellColor = 'var(--color-text-light)';
+                                    
+                                    if (statusLower === 'present') {
+                                      cellBg = 'rgba(76, 175, 80, 0.15)';
+                                      cellBorder = '1px solid rgba(76, 175, 80, 0.4)';
+                                      cellColor = '#4CAF50';
+                                    } else if (statusLower === 'absent') {
+                                      cellBg = 'rgba(244, 67, 54, 0.15)';
+                                      cellBorder = '1px solid rgba(244, 67, 54, 0.4)';
+                                      cellColor = '#F44336';
+                                    } else if (statusLower === 'holiday') {
+                                      cellBg = 'rgba(33, 150, 243, 0.15)';
+                                      cellBorder = '1px solid rgba(33, 150, 243, 0.4)';
+                                      cellColor = '#2196F3';
+                                    } else if (statusLower === 'leave') {
+                                      cellBg = 'rgba(255, 152, 0, 0.15)';
+                                      cellBorder = '1px solid rgba(255, 152, 0, 0.4)';
+                                      cellColor = '#FF9800';
+                                    }
+                                    
+                                    return (
+                                      <button
+                                        key={`day-${dayNum}`}
+                                        type="button"
+                                        onClick={() => {
+                                          let detail = { date: dateStr, status: 'No Record', checkIn: 'N/A', checkOut: 'N/A', remarks: 'N/A' };
+                                          if (record) {
+                                            if (typeof record === 'object') {
+                                              detail = {
+                                                date: dateStr,
+                                                status: record.status || 'No Record',
+                                                checkIn: record.checkIn || 'N/A',
+                                                checkOut: record.checkOut || 'N/A',
+                                                remarks: record.remarks || 'N/A'
+                                              };
+                                            } else {
+                                              detail = {
+                                                date: dateStr,
+                                                status: String(record),
+                                                checkIn: 'N/A',
+                                                checkOut: 'N/A',
+                                                remarks: 'N/A'
+                                              };
+                                            }
+                                          }
+                                          setSelectedCalendarDate(dateStr);
+                                          setSelectedCalendarDetail(detail);
+                                        }}
+                                        style={{
+                                          aspectRatio: '1',
+                                          borderRadius: '6px',
+                                          background: cellBg,
+                                          border: cellBorder,
+                                          color: cellColor,
+                                          fontWeight: 600,
+                                          fontSize: '0.8rem',
+                                          cursor: 'pointer',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          position: 'relative'
+                                        }}
+                                        className="calendar-day-btn"
+                                        title={`${dateStr} - ${status || 'No Record'}`}
+                                      >
+                                        {dayNum}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                
+                                {selectedCalendarDate && selectedCalendarDetail && (
+                                  <div style={{ marginTop: '1rem', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--glass-border)', padding: '0.85rem', borderRadius: '10px', position: 'relative' }}>
+                                    <button 
+                                      type="button"
+                                      style={{ position: 'absolute', top: '8px', right: '8px', background: 'transparent', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer' }}
+                                      onClick={() => { setSelectedCalendarDate(null); setSelectedCalendarDetail(null); }}
+                                    >
+                                      <X size={16} />
+                                    </button>
+                                    <h5 style={{ margin: '0 0 0.5rem 0', fontSize: '0.85rem', color: 'var(--color-secondary)' }}>Attendance: {selectedCalendarDetail.date}</h5>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.8rem' }}>
+                                      <div>
+                                        <span style={{ color: 'var(--color-text-muted)' }}>Status: </span>
+                                        <strong style={{ color: 
+                                          selectedCalendarDetail.status.toLowerCase() === 'present' ? '#4CAF50' :
+                                          selectedCalendarDetail.status.toLowerCase() === 'absent' ? '#F44336' :
+                                          selectedCalendarDetail.status.toLowerCase() === 'holiday' ? '#2196F3' :
+                                          selectedCalendarDetail.status.toLowerCase() === 'leave' ? '#FF9800' : 'white'
+                                        }}>
+                                          {selectedCalendarDetail.status.charAt(0).toUpperCase() + selectedCalendarDetail.status.slice(1)}
+                                        </strong>
+                                      </div>
+                                      <div>
+                                        <span style={{ color: 'var(--color-text-muted)' }}>Check-in: </span>
+                                        <span style={{ fontWeight: 600 }}>{selectedCalendarDetail.checkIn}</span>
+                                      </div>
+                                      <div>
+                                        <span style={{ color: 'var(--color-text-muted)' }}>Check-out: </span>
+                                        <span style={{ fontWeight: 600 }}>{selectedCalendarDetail.checkOut}</span>
+                                      </div>
+                                      <div style={{ gridColumn: 'span 2' }}>
+                                        <span style={{ color: 'var(--color-text-muted)' }}>Remarks: </span>
+                                        <span style={{ fontStyle: 'italic' }}>{selectedCalendarDetail.remarks}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })()}
@@ -10912,6 +11996,111 @@ function App() {
         </div>
       )}
 
+      {/* Class Modal */}
+      {isClassModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="panel-header">
+              <h2 className="panel-title">{editingClass ? "Edit Scheduled Class" : "Schedule New Class"}</h2>
+              <button className="btn-icon" onClick={() => setIsClassModalOpen(false)}><X size={24} /></button>
+            </div>
+            <form onSubmit={handleSaveClass}>
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label>Class Name</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  required
+                  value={classForm.className}
+                  onChange={(e) => setClassForm({ ...classForm, className: e.target.value })}
+                  placeholder="e.g. Morning Advanced Class"
+                />
+              </div>
+              <div className="grid-2-col" style={{ marginBottom: '1rem' }}>
+                <div className="form-group">
+                  <label>Branch</label>
+                  <select
+                    className="form-control"
+                    value={classForm.branch}
+                    disabled={userRole !== 'superadmin' && userRole !== 'developer'}
+                    onChange={(e) => setClassForm({ ...classForm, branch: e.target.value })}
+                  >
+                    {branches.map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Batch</label>
+                  <select
+                    className="form-control"
+                    value={classForm.batch}
+                    disabled={userRole === 'trainer'}
+                    onChange={(e) => setClassForm({ ...classForm, batch: e.target.value })}
+                  >
+                    {getFilteredBatchOptions(classForm.branch).map(b => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="grid-2-col" style={{ marginBottom: '1rem' }}>
+                <div className="form-group">
+                  <label>Start Time (HH:MM)</label>
+                  <input
+                    type="time"
+                    className="form-control"
+                    required
+                    value={classForm.startTime}
+                    onChange={(e) => setClassForm({ ...classForm, startTime: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>End Time (HH:MM)</label>
+                  <input
+                    type="time"
+                    className="form-control"
+                    required
+                    value={classForm.endTime}
+                    onChange={(e) => setClassForm({ ...classForm, endTime: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label>Trainer Username / Name</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  required
+                  value={classForm.trainer}
+                  disabled={userRole === 'trainer'}
+                  onChange={(e) => setClassForm({ ...classForm, trainer: e.target.value })}
+                  placeholder="Enter trainer username"
+                />
+              </div>
+              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                <label>Subject / Topic (Optional)</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={classForm.subject}
+                  onChange={(e) => setClassForm({ ...classForm, subject: e.target.value })}
+                  placeholder="e.g. Sparring Techniques"
+                />
+              </div>
+              <div className="modal-actions">
+                <button className="btn-primary" type="submit">
+                  {editingClass ? "Update Class" : "Schedule Class"}
+                </button>
+                <button className="btn-secondary" type="button" onClick={() => setIsClassModalOpen(false)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Add Student Modal */}
       {isAddModalOpen && (
         <div className="modal-overlay">
@@ -10995,19 +12184,21 @@ function App() {
                   <label>Batch Selection Dropdown</label>
                   <select
                     className="form-control"
-                    value={newStudent.schedule}
+                    value={batchOptions.find(b => b.name === newStudent.batch && b.schedule === newStudent.schedule)?.id || ''}
                     onChange={(e) => {
-                      const selectedSched = e.target.value;
-                      const correspondingOpt = batchOptions.find(b => b.schedule === selectedSched);
-                      setNewStudent({
-                        ...newStudent,
-                        schedule: selectedSched,
-                        batch: correspondingOpt ? correspondingOpt.name : newStudent.batch
-                      });
+                      const selectedId = e.target.value;
+                      const correspondingOpt = batchOptions.find(b => b.id === selectedId);
+                      if (correspondingOpt) {
+                        setNewStudent({
+                          ...newStudent,
+                          schedule: correspondingOpt.schedule,
+                          batch: correspondingOpt.name
+                        });
+                      }
                     }}
                   >
                     {getFilteredBatchOptions(newStudent.branch).map(opt => (
-                      <option key={opt.id} value={opt.schedule}>{opt.name} ({opt.schedule})</option>
+                      <option key={opt.id} value={opt.id}>{opt.name} ({opt.schedule})</option>
                     ))}
                   </select>
                 </div>
@@ -11026,7 +12217,16 @@ function App() {
                   <select
                     className="form-control"
                     value={newStudent.branch}
-                    onChange={(e) => setNewStudent({ ...newStudent, branch: e.target.value })}
+                    onChange={(e) => {
+                      const selectedBr = e.target.value;
+                      const firstBatch = getFilteredBatchOptions(selectedBr)[0];
+                      setNewStudent({
+                        ...newStudent,
+                        branch: selectedBr,
+                        schedule: firstBatch ? firstBatch.schedule : 'Mon-Thu',
+                        batch: firstBatch ? firstBatch.name : 'Morning'
+                      });
+                    }}
                     disabled={
                       (!isAdminUser(loggedInUser) && appMode !== 'superadmin-login') ||
                       appMode === 'login'
@@ -11142,6 +12342,8 @@ function App() {
       )}
 
       {renderEditCredentialModal()}
+      {renderEditBranchModal()}
+      {renderEditBatchModal()}
       {renderUserDetailModal()}
 
       {/* Floating Help Button */}

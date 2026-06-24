@@ -20,6 +20,9 @@ import SecurityLog from './models/SecurityLog.js';
 import SystemSetting from './models/SystemSetting.js';
 import HelpReport from './models/HelpReport.js';
 import Notification from './models/Notification.js';
+import Branch from './models/Branch.js';
+import Batch from './models/Batch.js';
+import Class from './models/Class.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -251,7 +254,8 @@ function encryptAttendanceRecords(records) {
   const encrypted = {};
   const entries = records instanceof Map ? Array.from(records.entries()) : Object.entries(records);
   for (const [studentId, status] of entries) {
-    encrypted[studentId] = encrypt(status);
+    const val = typeof status === 'object' && status !== null ? JSON.stringify(status) : String(status);
+    encrypted[studentId] = encrypt(val);
   }
   return encrypted;
 }
@@ -261,7 +265,16 @@ function decryptAttendanceRecords(records) {
   const decrypted = {};
   const entries = records instanceof Map ? Array.from(records.entries()) : Object.entries(records);
   for (const [studentId, status] of entries) {
-    decrypted[studentId] = decrypt(status);
+    const decryptedVal = decrypt(status);
+    try {
+      if (decryptedVal && (decryptedVal.startsWith('{') || decryptedVal.startsWith('['))) {
+        decrypted[studentId] = JSON.parse(decryptedVal);
+      } else {
+        decrypted[studentId] = decryptedVal;
+      }
+    } catch (e) {
+      decrypted[studentId] = decryptedVal;
+    }
   }
   return decrypted;
 }
@@ -358,7 +371,7 @@ const authenticateSession = async (req, res, next) => {
       if (active) {
         const mode = cachedSettings.maintenanceMode;
         const userRole = req.user.role;
-        if (userRole !== 'developer') {
+        if (userRole !== 'developer' && userRole !== 'superadmin') {
           if (mode === 'all') {
             return res.status(503).json({ error: 'System is undergoing scheduled maintenance. Access is restricted.' });
           } else if (mode === 'admin' && userRole === 'superadmin') {
@@ -571,6 +584,121 @@ async function syncUsersAndSeed() {
   }
 }
 
+async function seedBranchesAndBatches() {
+  try {
+    const creds = await Credential.findOne({ configType: 'main' });
+    if (!creds) {
+      console.log('[Seed] No credentials document found to seed branches/batches.');
+      return;
+    }
+
+    let credsUpdated = false;
+    const defaultBranches = ["Kuttiady", "Perambra", "Orkatteri", "Paarakadav", "Kallachi", "Chambra", "Devargovil"];
+    const defaultBatches = [
+      { id: 'batch1', name: 'Batch 1', schedule: 'Mon-Thu' },
+      { id: 'batch2', name: 'Batch 2', schedule: 'Tue-Fri' },
+      { id: 'batch3', name: 'Batch 3', schedule: 'Wed-Sat' }
+    ];
+
+    if (!creds.customBranches || creds.customBranches.length === 0) {
+      creds.customBranches = defaultBranches;
+      creds.markModified('customBranches');
+      credsUpdated = true;
+    }
+    if (!creds.customBatches || creds.customBatches.length === 0) {
+      creds.customBatches = defaultBatches;
+      creds.markModified('customBatches');
+      credsUpdated = true;
+    }
+    if (credsUpdated) {
+      await creds.save();
+    }
+
+    const customBranches = creds.customBranches || [];
+    const allBranchNames = Array.from(new Set([...defaultBranches, ...customBranches]));
+
+    // Seed Branches
+    for (const name of allBranchNames) {
+      const cleanName = name.trim();
+      const code = cleanName.toLowerCase().replace(/\s+/g, '-');
+      const existing = await Branch.findOne({ code });
+      if (!existing) {
+        await new Branch({
+          name: cleanName,
+          code,
+          status: 'Active'
+        }).save();
+        console.log(`[Seed] Created Branch: ${cleanName} (${code})`);
+      }
+    }
+
+    // Seed Batches from customBatches and batchCredentials keys
+    const customBatches = creds.customBatches || [];
+    const batchEntries = creds.batchCredentials instanceof Map ? Array.from(creds.batchCredentials.entries()) : Object.entries(creds.batchCredentials || {});
+
+    // First, process any custom batches (we'll seed them for all branches as standard)
+    for (const cb of customBatches) {
+      const cbId = cb.id.trim();
+      const cbName = cb.name.trim();
+      const cbSchedule = cb.schedule.trim();
+
+      // Seed this custom batch for each branch
+      for (const brName of allBranchNames) {
+        const brClean = brName.trim();
+        const existing = await Batch.findOne({ branch: brClean, code: cbId.toLowerCase() });
+        if (!existing) {
+          await new Batch({
+            name: cbName,
+            code: cbId.toLowerCase(),
+            branch: brClean,
+            schedule: cbSchedule,
+            status: 'Active'
+          }).save();
+          console.log(`[Seed] Created Batch: ${cbName} for Branch: ${brClean}`);
+        }
+      }
+    }
+
+    // Second, process any specific batch credentials to assign the right trainer and schedule
+    for (const [key, info] of batchEntries) {
+      if (info) {
+        const parts = key.split('_');
+        const brClean = parts[0].trim();
+        const btCode = parts.slice(1).join('_').trim().toLowerCase();
+        
+        // Find existing or create
+        const existing = await Batch.findOne({ branch: brClean, code: btCode });
+        const trainerUser = info.username || `${btCode}@${brClean}`;
+        
+        if (existing) {
+          if (existing.trainer !== trainerUser) {
+            existing.trainer = trainerUser;
+            await existing.save();
+            console.log(`[Seed] Updated Trainer for Batch: ${btCode} of Branch: ${brClean} to ${trainerUser}`);
+          }
+        } else {
+          // Find matching customBatch name and schedule
+          const cb = customBatches.find(b => b.id.trim().toLowerCase() === btCode);
+          const name = cb ? cb.name.trim() : (parts.slice(1).join('_').trim());
+          const schedule = cb ? cb.schedule.trim() : 'Mon-Thu';
+          
+          await new Batch({
+            name,
+            code: btCode,
+            branch: brClean,
+            trainer: trainerUser,
+            schedule,
+            status: 'Active'
+          }).save();
+          console.log(`[Seed] Created Batch: ${name} for Branch: ${brClean} with Trainer: ${trainerUser}`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Seed] Error seeding branches and batches:', err);
+  }
+}
+
 // Startup Password Migration Function
 async function migratePlaintextPasswords() {
   try {
@@ -737,17 +865,20 @@ const connectDb = async () => {
       await migratePlaintextPasswords();
       await migrateDefaultRates();
       
-      // Automatic role migration coordinator -> trainer
+      // Automatic role migration (coordinator/inspector -> trainer)
       try {
-        const updateRes = await User.updateMany({ role: 'coordinator' }, { role: 'trainer' });
-        if (updateRes.modifiedCount > 0) {
-          console.log(`[Migration] Successfully migrated ${updateRes.modifiedCount} coordinator accounts to trainer accounts.`);
+        const updateRes1 = await User.updateMany({ role: 'coordinator' }, { role: 'trainer' });
+        const updateRes2 = await User.updateMany({ role: 'inspector' }, { role: 'trainer' });
+        const totalMigrated = (updateRes1.modifiedCount || 0) + (updateRes2.modifiedCount || 0);
+        if (totalMigrated > 0) {
+          console.log(`[Migration] Successfully migrated ${totalMigrated} coordinator/inspector accounts to trainer accounts.`);
         }
       } catch (migrationErr) {
-        console.error('[Migration] Error migrating coordinator accounts to trainer accounts:', migrationErr);
+        console.error('[Migration] Error migrating coordinator/inspector accounts to trainer accounts:', migrationErr);
       }
 
       await syncUsersAndSeed();
+      await seedBranchesAndBatches();
     }
   } catch (err) {
     console.error('MongoDB connection error:', err);
@@ -774,6 +905,516 @@ mongoose.connection.on('error', (err) => {
 connectDb();
 
 // Routes
+
+// --- Branches CRUD ---
+app.get('/api/public/branches', async (req, res) => {
+  try {
+    const list = await Branch.find({ status: 'Active' }).sort({ name: 1 }).lean();
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/branches', authenticateSession, async (req, res) => {
+  try {
+    const { role, branch } = req.user;
+    let query = {};
+    if (role !== 'superadmin' && role !== 'developer') {
+      query.name = new RegExp(`^${branch}$`, 'i');
+    }
+    const list = await Branch.find(query).sort({ name: 1 }).lean();
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/branches', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
+  try {
+    const { name, code, status } = req.body;
+    if (!name || !code) {
+      return res.status(400).json({ error: 'Name and Code are required' });
+    }
+    const cleanCode = code.toLowerCase().trim();
+    const existing = await Branch.findOne({ code: cleanCode });
+    if (existing) {
+      return res.status(400).json({ error: 'Branch code already exists' });
+    }
+    const newBranch = new Branch({
+      name: name.trim(),
+      code: cleanCode,
+      status: status || 'Active'
+    });
+    await newBranch.save();
+    res.status(201).json(newBranch);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/branches/:id', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
+  try {
+    const { name, code, status } = req.body;
+    const branch = await Branch.findById(req.params.id);
+    if (!branch) return res.status(404).json({ error: 'Branch not found' });
+
+    if (code) {
+      const cleanCode = code.toLowerCase().trim();
+      if (cleanCode !== branch.code) {
+        const existing = await Branch.findOne({ code: cleanCode });
+        if (existing) return res.status(400).json({ error: 'Branch code already exists' });
+        branch.code = cleanCode;
+      }
+    }
+    if (name) branch.name = name.trim();
+    if (status) branch.status = status;
+
+    await branch.save();
+    res.json(branch);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/branches/:id', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
+  try {
+    const deleted = await Branch.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Branch not found' });
+    res.json({ success: true, message: 'Branch deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Batches CRUD ---
+app.get('/api/public/batches', async (req, res) => {
+  try {
+    const creds = await Credential.findOne({ configType: 'main' }).lean();
+    const batchCreds = creds?.batchCredentials || {};
+    const list = await Batch.find({ status: 'Active' }).sort({ name: 1 }).lean();
+    
+    // Filter the list to only include batches that have credentials for their branch
+    const filteredList = list.filter(b => {
+      const key = `${b.branch.toLowerCase().trim()}_${b.code.toLowerCase().trim()}`;
+      return batchCreds[key] !== undefined;
+    });
+    
+    res.json(filteredList);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/batches', authenticateSession, async (req, res) => {
+  try {
+    const { role, branch, batch } = req.user;
+    let query = {};
+    if (role !== 'superadmin' && role !== 'developer') {
+      query.branch = new RegExp(`^${branch}$`, 'i');
+      if (role === 'trainer') {
+        query.code = new RegExp(`^${batch}$`, 'i');
+      }
+    }
+    const list = await Batch.find(query).sort({ name: 1 }).lean();
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/batches', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+  try {
+    const { name, code, branch, trainer, schedule, status } = req.body;
+    if (!name || !code || !branch) {
+      return res.status(400).json({ error: 'Name, Code, and Branch are required' });
+    }
+    
+    // Scoping for branchadmin
+    if (req.user.role === 'branchadmin') {
+      if (branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot create batch for another branch.' });
+      }
+    }
+
+    const cleanCode = code.toLowerCase().trim();
+    const cleanBranch = branch.trim();
+    
+    const existing = await Batch.findOne({ branch: cleanBranch, code: cleanCode });
+    if (existing) {
+      return res.status(400).json({ error: 'Batch code already exists for this branch' });
+    }
+
+    const newBatch = new Batch({
+      name: name.trim(),
+      code: cleanCode,
+      branch: cleanBranch,
+      trainer: trainer || '',
+      schedule: schedule || 'Mon-Thu',
+      status: status || 'Active'
+    });
+    await newBatch.save();
+    res.status(201).json(newBatch);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/batches/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+  try {
+    const { name, code, branch, trainer, schedule, status } = req.body;
+    const batch = await Batch.findById(req.params.id);
+    if (!batch) return res.status(404).json({ error: 'Batch not found' });
+
+    // Scoping for branchadmin
+    if (req.user.role === 'branchadmin') {
+      if (batch.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot edit batch of another branch.' });
+      }
+      if (branch && branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot reassign batch to another branch.' });
+      }
+    }
+
+    if (code || branch) {
+      const cleanCode = code ? code.toLowerCase().trim() : batch.code;
+      const cleanBranch = branch ? branch.trim() : batch.branch;
+      if (cleanCode !== batch.code || cleanBranch !== batch.branch) {
+        const existing = await Batch.findOne({ branch: cleanBranch, code: cleanCode });
+        if (existing) return res.status(400).json({ error: 'Batch code already exists for this branch' });
+      }
+      batch.code = cleanCode;
+      batch.branch = cleanBranch;
+    }
+
+    if (name) batch.name = name.trim();
+    if (trainer !== undefined) batch.trainer = trainer;
+    if (schedule) batch.schedule = schedule;
+    if (status) batch.status = status;
+
+    await batch.save();
+    res.json(batch);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/batches/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+  try {
+    const batch = await Batch.findById(req.params.id);
+    if (!batch) return res.status(404).json({ error: 'Batch not found' });
+
+    // Scoping for branchadmin
+    if (req.user.role === 'branchadmin') {
+      if (batch.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot delete batch of another branch.' });
+      }
+    }
+
+    await Batch.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Batch deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Today's Classes CRUD ---
+app.get('/api/classes', authenticateSession, async (req, res) => {
+  try {
+    const { role, branch, batch } = req.user;
+    let query = {};
+    if (role !== 'superadmin' && role !== 'developer') {
+      query.branch = new RegExp(`^${branch}$`, 'i');
+      if (role === 'trainer') {
+        query.batch = new RegExp(`^${batch}$`, 'i');
+      }
+    }
+    const list = await Class.find(query).sort({ startTime: 1 }).lean();
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/classes', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
+  try {
+    const { className, branch, batch, trainer, startTime, endTime, subject } = req.body;
+    if (!className || !branch || !batch || !trainer || !startTime || !endTime) {
+      return res.status(400).json({ error: 'className, branch, batch, trainer, startTime, and endTime are required' });
+    }
+
+    // Scoping for branchadmin / trainer
+    if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
+      if (branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot schedule class for another branch.' });
+      }
+      if (req.user.role === 'trainer' && batch.toLowerCase().trim() !== req.user.batch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot schedule class for another batch.' });
+      }
+    }
+
+    const newClass = new Class({
+      className: className.trim(),
+      branch: branch.trim(),
+      batch: batch.trim(),
+      trainer: trainer.trim(),
+      startTime: startTime.trim(),
+      endTime: endTime.trim(),
+      subject: subject || ''
+    });
+    await newClass.save();
+    res.status(201).json(newClass);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/classes/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
+  try {
+    const { className, branch, batch, trainer, startTime, endTime, subject } = req.body;
+    const cls = await Class.findById(req.params.id);
+    if (!cls) return res.status(404).json({ error: 'Class not found' });
+
+    // Scoping
+    if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
+      if (cls.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot edit class of another branch.' });
+      }
+      if (branch && branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot reassign class to another branch.' });
+      }
+      if (req.user.role === 'trainer') {
+        if (cls.batch.toLowerCase().trim() !== req.user.batch.toLowerCase().trim()) {
+          return res.status(403).json({ error: 'Access denied: Cannot edit class of another batch.' });
+        }
+        if (batch && batch.toLowerCase().trim() !== req.user.batch.toLowerCase().trim()) {
+          return res.status(403).json({ error: 'Access denied: Cannot reassign class to another batch.' });
+        }
+      }
+    }
+
+    if (className) cls.className = className.trim();
+    if (branch) cls.branch = branch.trim();
+    if (batch) cls.batch = batch.trim();
+    if (trainer) cls.trainer = trainer.trim();
+    if (startTime) cls.startTime = startTime.trim();
+    if (endTime) cls.endTime = endTime.trim();
+    if (subject !== undefined) cls.subject = subject;
+
+    await cls.save();
+    res.json(cls);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/classes/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
+  try {
+    const cls = await Class.findById(req.params.id);
+    if (!cls) return res.status(404).json({ error: 'Class not found' });
+
+    // Scoping
+    if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
+      if (cls.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot delete class of another branch.' });
+      }
+      if (req.user.role === 'trainer' && cls.batch.toLowerCase().trim() !== req.user.batch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot delete class of another batch.' });
+      }
+    }
+
+    await Class.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Class deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Dashboard Stats API ---
+app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
+  try {
+    const { role, branch, batch } = req.user;
+    
+    // Scopes for queries
+    let studentQuery = { status: 'Active' };
+    let trainerQuery = { role: 'trainer', status: 'Active' };
+    let adminQuery = { role: { $in: ['superadmin', 'branchadmin'] }, status: 'Active' };
+    let branchQuery = { status: 'Active' };
+    let batchQuery = { status: 'Active' };
+
+    if (role !== 'superadmin' && role !== 'developer') {
+      const brRegex = new RegExp(`^${branch}$`, 'i');
+      studentQuery.branch = brRegex;
+      trainerQuery.branch = brRegex;
+      adminQuery.branch = brRegex;
+      batchQuery.branch = brRegex;
+
+      if (role === 'trainer') {
+        const btRegex = new RegExp(`^${batch}$`, 'i');
+        studentQuery.batch = btRegex;
+        batchQuery.code = btRegex;
+      }
+    }
+
+    const totalStudents = await Student.countDocuments(studentQuery);
+    const totalTrainers = await User.countDocuments(trainerQuery);
+    const totalAdmins = await User.countDocuments(adminQuery);
+    const totalBranches = await Branch.countDocuments(branchQuery);
+    const totalBatches = await Batch.countDocuments(batchQuery);
+
+    // Attendance Calculations
+    // To get Today's present and absent:
+    const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD local
+    const todayAttendance = await Attendance.findOne({ date: todayStr }).lean();
+    
+    let presentToday = 0;
+    let absentToday = 0;
+    
+    // Total attendance records count
+    const allAttendance = await Attendance.find({}).lean();
+    let totalAttendanceRecords = 0;
+    let totalPresentCount = 0;
+    let totalAbsentCount = 0;
+
+    // Filter student IDs in our scope to only count attendance of students we care about
+    const scopedStudents = await Student.find(studentQuery).select('id').lean();
+    const scopedStudentIds = new Set(scopedStudents.map(s => String(s.id)));
+
+    // Process all attendance records for stats
+    for (const record of allAttendance) {
+      const decryptedRecs = decryptAttendanceRecords(record.records);
+      const isToday = record.date === todayStr;
+
+      for (const [studentId, statusData] of Object.entries(decryptedRecs)) {
+        if (scopedStudentIds.has(studentId)) {
+          totalAttendanceRecords++;
+          let statusStr = '';
+          if (typeof statusData === 'object' && statusData !== null) {
+            statusStr = statusData.status;
+          } else {
+            statusStr = String(statusData);
+          }
+
+          const statusLower = statusStr.toLowerCase();
+          if (statusLower === 'present') {
+            totalPresentCount++;
+            if (isToday) presentToday++;
+          } else if (statusLower === 'absent') {
+            totalAbsentCount++;
+            if (isToday) absentToday++;
+          }
+        }
+      }
+    }
+
+    const attendancePercentage = (totalPresentCount + totalAbsentCount) > 0 
+      ? Math.round((totalPresentCount / (totalPresentCount + totalAbsentCount)) * 100) 
+      : 0;
+
+    // Fees Calculations
+    // We fetch students to calculate fees. We calculate fee collection (paid) & pending fees (outstanding).
+    // Let's retrieve SystemSettings to get startingBillingMonth
+    const systemSettings = await SystemSetting.findOne({ configKey: 'main' }).lean();
+    const startingBillingMonth = systemSettings?.startingBillingMonth || ''; // YYYY-MM
+
+    // Let's get the main configuration rates
+    const config = await Credential.findOne({ configType: 'main' }).lean();
+    const defaultMonthlyRate = config?.monthlyFeeRate || 600;
+    const defaultAdmissionRate = config?.admissionFeeRate || 1500;
+
+    let feeCollection = 0;
+    let pendingFees = 0;
+    let totalFeeRecords = 0;
+
+    // Let's calculate months helper
+    const getMonthDiff = (startStr, endStr) => {
+      const [sYr, sMth] = startStr.split('-').map(Number);
+      const [eYr, eMth] = endStr.split('-').map(Number);
+      return (eYr - sYr) * 12 + (eMth - sMth);
+    };
+
+    const currentYear = new Date().getFullYear();
+    const currentMonthNum = new Date().getMonth() + 1; // 1-12
+    const currentYearMonth = `${currentYear}-${String(currentMonthNum).padStart(2, '0')}`;
+
+    // Loop through scoped students
+    const fullScopedStudents = await Student.find(studentQuery).select('-photo').lean();
+    for (const student of fullScopedStudents) {
+      const joinDate = student.joinDate || '2026-01-01';
+      const joinYearMonth = joinDate.substring(0, 7); // YYYY-MM
+
+      // Determine starting month for fee calculation:
+      let startFeeMonth = joinYearMonth;
+      if (startingBillingMonth && startingBillingMonth > startFeeMonth) {
+        startFeeMonth = startingBillingMonth;
+      }
+
+      // Calculate monthly fee rate for this student
+      let monthlyRate = student.customMonthlyRate !== null && student.customMonthlyRate !== undefined 
+        ? student.customMonthlyRate 
+        : defaultMonthlyRate;
+
+      // Apply coupon discount if applicable
+      if (student.discountPercentage > 0 && student.couponType === 'percentage') {
+        monthlyRate = monthlyRate * (1 - student.discountPercentage / 100);
+      } else if (student.couponValue > 0 && student.couponType === 'amount') {
+        monthlyRate = Math.max(0, monthlyRate - student.couponValue);
+      }
+
+      // Calculate how many months have elapsed from startFeeMonth to currentYearMonth
+      if (startFeeMonth <= currentYearMonth) {
+        const diff = getMonthDiff(startFeeMonth, currentYearMonth);
+        for (let i = 0; i <= diff; i++) {
+          const checkYear = parseInt(startFeeMonth.split('-')[0]) + Math.floor((parseInt(startFeeMonth.split('-')[1]) - 1 + i) / 12);
+          const checkMonth = ((parseInt(startFeeMonth.split('-')[1]) - 1 + i) % 12) + 1;
+          const ymStr = `${checkYear}-${String(checkMonth).padStart(2, '0')}`;
+
+          totalFeeRecords++;
+          const paidMonths = student.paidMonths || {};
+          // In Mongoose Map, lookups can be a Map or standard object
+          const isPaid = paidMonths instanceof Map ? paidMonths.get(ymStr) : paidMonths[ymStr];
+
+          if (isPaid) {
+            feeCollection += monthlyRate;
+          } else {
+            pendingFees += monthlyRate;
+          }
+        }
+      }
+
+      // Handle admission fee
+      let admissionRate = student.customAdmissionRate !== null && student.customAdmissionRate !== undefined 
+        ? student.customAdmissionRate 
+        : defaultAdmissionRate;
+
+      // Check if admission paid
+      const isAdmissionPaid = student.admissionPaid;
+      if (isAdmissionPaid) {
+        feeCollection += admissionRate;
+      } else {
+        pendingFees += admissionRate;
+      }
+      totalFeeRecords++;
+    }
+
+    res.json({
+      totalStudents,
+      totalTrainers,
+      totalAdmins,
+      totalBranches,
+      totalBatches,
+      totalAttendanceRecords,
+      totalFeeRecords,
+      presentToday,
+      absentToday,
+      attendancePercentage,
+      feeCollection: Math.round(feeCollection),
+      pendingFees: Math.round(pendingFees)
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // 1. Get all students (excl. photo for memory optimization, scoped by user permissions)
 app.get('/api/students', authenticateSession, async (req, res) => {
@@ -1145,22 +1786,21 @@ app.post('/api/attendance', authenticateSession, async (req, res) => {
     
     const finalDecryptedRecords = { ...decryptedExisting };
 
+    let allowedStudents;
     if (role === 'superadmin' || role === 'developer') {
-      Object.keys(records).forEach(studentId => {
-        finalDecryptedRecords[studentId] = records[studentId];
-      });
+      allowedStudents = await Student.find({}).select('id').lean();
     } else {
-      const allowedStudents = await Student.find(studentFilter).select('id').lean();
-      const allowedIds = new Set(allowedStudents.map(s => String(s.id)));
-
-      allowedIds.forEach(idStr => {
-        if (records[idStr] !== undefined && records[idStr] !== null && records[idStr] !== 'none') {
-          finalDecryptedRecords[idStr] = records[idStr];
-        } else {
-          delete finalDecryptedRecords[idStr];
-        }
-      });
+      allowedStudents = await Student.find(studentFilter).select('id').lean();
     }
+    const allowedIds = new Set(allowedStudents.map(s => String(s.id)));
+
+    allowedIds.forEach(idStr => {
+      if (records[idStr] !== undefined && records[idStr] !== null && records[idStr] !== 'none') {
+        finalDecryptedRecords[idStr] = records[idStr];
+      } else {
+        delete finalDecryptedRecords[idStr];
+      }
+    });
 
     const encryptedRecords = encryptAttendanceRecords(finalDecryptedRecords);
     
@@ -1487,7 +2127,7 @@ app.post('/api/login', async (req, res) => {
     const userRole = user ? user.role : '';
 
     // --- ENFORCE MAINTENANCE MODE ON LOGIN ---
-    if (cachedSettings.maintenanceMode && cachedSettings.maintenanceMode !== 'none' && enteredUser !== 'developer') {
+    if (cachedSettings.maintenanceMode && cachedSettings.maintenanceMode !== 'none' && enteredUser !== 'developer' && userRole !== 'superadmin') {
       let active = true;
       if (cachedSettings.maintenanceStart && cachedSettings.maintenanceEnd) {
         const now = new Date();
@@ -1496,7 +2136,7 @@ app.post('/api/login', async (req, res) => {
         active = now >= start && now <= end;
       }
       
-      if (active && userRole !== 'developer') {
+      if (active && userRole !== 'developer' && userRole !== 'superadmin') {
         const mode = cachedSettings.maintenanceMode;
         if (mode === 'all') {
           return res.status(503).json({ success: false, error: 'System is under maintenance. Login is currently locked.' });
@@ -2261,6 +2901,35 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
   }
 });
 
+// Get system settings (All authenticated roles)
+app.get('/api/system-settings', authenticateSession, async (req, res) => {
+  try {
+    const settings = await SystemSetting.findOne({ configKey: 'main' }).lean();
+    res.json(settings || { startingBillingMonth: '' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update system settings (Super Admin and Developer only)
+app.put('/api/system-settings', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
+  try {
+    const { startingBillingMonth } = req.body;
+    let settings = await SystemSetting.findOne({ configKey: 'main' });
+    if (!settings) {
+      settings = new SystemSetting({ configKey: 'main' });
+    }
+    if (startingBillingMonth !== undefined) {
+      settings.startingBillingMonth = String(startingBillingMonth).trim();
+    }
+    await settings.save();
+    cachedSettings = settings.toObject();
+    res.json(settings);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // ==========================================
 // --- PROTECTED DEVELOPER API ROUTER ---
@@ -2921,11 +3590,13 @@ developerRouter.get('/system-status', async (req, res) => {
     const activeUsersCount = await Session.distinct('username');
     const totalSessionsCount = await Session.countDocuments();
     
+    let dbDataSizeVal = 0;
     let dbDataSize = '0.00 MB';
     let dbStorageSize = '0.00 MB';
     if (mongoose.connection.readyState === 1) {
       try {
         const stats = await mongoose.connection.db.command({ dbStats: 1 });
+        dbDataSizeVal = stats.dataSize;
         dbDataSize = (stats.dataSize / (1024 * 1024)).toFixed(2) + ' MB';
         dbStorageSize = (stats.storageSize / (1024 * 1024)).toFixed(2) + ' MB';
       } catch (e) {
@@ -2937,12 +3608,19 @@ developerRouter.get('/system-status', async (req, res) => {
     const totalMemBytes = os.totalmem();
     const processMem = process.memoryUsage();
     
+    const rssMb = Math.round(processMem.rss / (1024 * 1024));
+    const dbMb = parseFloat((dbDataSizeVal / (1024 * 1024)).toFixed(2));
+    
     res.json({
       databaseStatus: dbStatus,
       dbDataSize,
       dbStorageSize,
       activeUsers: activeUsersCount.length,
       totalSessions: totalSessionsCount,
+      ramLimit: '512 MB',
+      dbLimit: '512 MB',
+      ramWarning: rssMb > 410,
+      dbWarning: dbMb > 410,
       os: {
         platform: os.platform(),
         release: os.release(),
@@ -2954,13 +3632,70 @@ developerRouter.get('/system-status', async (req, res) => {
       process: {
         uptime: process.uptime(),
         memoryUsage: {
-          rss: Math.round(processMem.rss / (1024 * 1024)) + ' MB',
+          rss: rssMb + ' MB',
           heapTotal: Math.round(processMem.heapTotal / (1024 * 1024)) + ' MB',
           heapUsed: Math.round(processMem.heapUsed / (1024 * 1024)) + ' MB'
         }
       },
       apiStatus: 'Healthy'
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3.1 Device logs aggregation
+developerRouter.get('/device-logs', async (req, res) => {
+  try {
+    const list = await LoginHistory.aggregate([
+      {
+        $group: {
+          _id: {
+            deviceName: "$deviceName",
+            deviceType: "$deviceType",
+            os: "$os",
+            browser: "$browser"
+          },
+          count: { $sum: 1 },
+          lastUsed: { $max: "$createdAt" }
+        }
+      },
+      { $sort: { lastUsed: -1 } }
+    ]);
+    res.json(list.map(item => ({
+      deviceName: item._id.deviceName || 'Unknown Device',
+      deviceType: item._id.deviceType || 'Desktop',
+      os: item._id.os || 'Unknown OS',
+      browser: item._id.browser || 'Unknown Browser',
+      count: item.count,
+      lastUsed: item.lastUsed
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3.2 IP logs aggregation
+developerRouter.get('/ip-logs', async (req, res) => {
+  try {
+    const list = await LoginHistory.aggregate([
+      {
+        $group: {
+          _id: "$ipAddress",
+          count: { $sum: 1 },
+          lastUsed: { $max: "$createdAt" },
+          details: { $first: "$$ROOT" }
+        }
+      },
+      { $sort: { lastUsed: -1 } }
+    ]);
+    res.json(list.map(item => ({
+      ip: item._id || 'Unknown IP',
+      count: item.count,
+      lastUsed: item.lastUsed,
+      browser: item.details?.browser || 'Unknown Browser',
+      os: item.details?.os || 'Unknown OS'
+    })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3205,7 +3940,7 @@ developerRouter.get('/settings', (req, res) => {
 // Developer settings POST
 developerRouter.post('/settings', async (req, res) => {
   try {
-    const { maintenanceMode, maintenanceStart, maintenanceEnd, systemAlertMessage, systemUpdateNotification, sessionTimeoutMinutes, minPasswordLength, failedLoginThreshold, failedLoginBlockTimeMinutes, logRetentionLimit } = req.body;
+    const { maintenanceMode, maintenanceStart, maintenanceEnd, systemAlertMessage, systemUpdateNotification, sessionTimeoutMinutes, minPasswordLength, failedLoginThreshold, failedLoginBlockTimeMinutes, logRetentionLimit, startingBillingMonth } = req.body;
     
     // Validate inputs
     if (sessionTimeoutMinutes !== undefined && (isNaN(sessionTimeoutMinutes) || sessionTimeoutMinutes <= 0)) {
@@ -3230,6 +3965,7 @@ developerRouter.post('/settings', async (req, res) => {
     }
     
     if (maintenanceMode !== undefined) settings.maintenanceMode = String(maintenanceMode);
+    if (startingBillingMonth !== undefined) settings.startingBillingMonth = String(startingBillingMonth).trim();
     if (maintenanceStart !== undefined) settings.maintenanceStart = maintenanceStart ? new Date(maintenanceStart) : null;
     if (maintenanceEnd !== undefined) settings.maintenanceEnd = maintenanceEnd ? new Date(maintenanceEnd) : null;
     if (systemAlertMessage !== undefined) settings.systemAlertMessage = String(systemAlertMessage).trim();
@@ -3794,3 +4530,5 @@ app.use('/api/developer', developerRouter);
 app.listen(PORT, () => {
   console.log(`Express server is running on port ${PORT}`);
 });
+// Nodemon reload trigger
+

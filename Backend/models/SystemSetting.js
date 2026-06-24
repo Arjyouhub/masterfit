@@ -12,7 +12,8 @@ const systemSettingSchema = new mongoose.Schema({
   minPasswordLength: { type: Number, default: 6 },
   failedLoginThreshold: { type: Number, default: 5 },
   failedLoginBlockTimeMinutes: { type: Number, default: 15 },
-  logRetentionLimit: { type: Number, default: 1000 }
+  logRetentionLimit: { type: Number, default: 1000 },
+  startingBillingMonth: { type: String, default: '' } // e.g. "2026-01"
 }, { timestamps: true });
 
 export default mongoose.model('SystemSetting', systemSettingSchema);
