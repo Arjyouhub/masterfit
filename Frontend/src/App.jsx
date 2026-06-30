@@ -3,7 +3,8 @@ import {
   Users, CalendarDays, Wallet, Bell, Settings, LogOut, UserPlus, AlertTriangle, X,
   ChevronLeft, ChevronRight, CheckCircle, XCircle, MessageCircle, MessageSquare,
   Search, Phone, Trash2, ArrowRight, Activity, MapPin, TrendingUp, Award, Menu,
-  Shield, Lock, Unlock, FileDown, FileUp, Database, Terminal, Cpu, HardDrive, Key, History
+  Shield, Lock, Unlock, FileDown, FileUp, Database, Terminal, Cpu, HardDrive, Key, History,
+  Eye, EyeOff
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import './index.css';
@@ -67,7 +68,7 @@ const formatSelectedDays = (days) => {
     if (len === checked.length && len > 1) {
       const rangeStart = doubleDays[start];
       const rangeEnd = doubleDays[start + len - 1];
-      bestRange = `${rangeStart}-${rangeEnd}`;
+      bestRange = `${rangeStart} - ${rangeEnd}`;
       break;
     }
   }
@@ -127,6 +128,14 @@ const parseScheduleToDays = (schedule) => {
   
   if (foundAny) return res;
   return defaults;
+};
+
+const schedulesMatch = (s1, s2) => {
+  if (!s1 || !s2) return false;
+  const d1 = parseScheduleToDays(s1);
+  const d2 = parseScheduleToDays(s2);
+  const keys = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  return keys.every(k => d1[k] === d2[k]);
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || (
@@ -560,8 +569,12 @@ function App() {
   const [newBatchStartTimeField, setNewBatchStartTimeField] = useState('09:00');
   const [newBatchEndTimeField, setNewBatchEndTimeField] = useState('10:30');
   const [editBatchSlotType, setEditBatchSlotType] = useState('Morning');
+  const [editBatchStatusField, setEditBatchStatusField] = useState('Active');
   const [credentialModalError, setCredentialModalError] = useState('');
   const [credentialModalSuccess, setCredentialModalSuccess] = useState('');
+  const [editBatchModalError, setEditBatchModalError] = useState('');
+  const [editBatchModalSuccess, setEditBatchModalSuccess] = useState('');
+  const [editBatchSaving, setEditBatchSaving] = useState(false);
   const [userRole, setUserRole] = useState(() => getCookieValue('umai_session_role') || '');
   const [userBranch, setUserBranch] = useState(() => getCookieValue('umai_session_branch') || '');
   const [userBatch, setUserBatch] = useState(() => getCookieValue('umai_session_batch') || '');
@@ -571,7 +584,17 @@ function App() {
   const [modalBatches, setModalBatches] = useState([]);
   const [batchOptions, setBatchOptions] = useState(DEFAULT_BATCH_OPTIONS);
   const [newBranchForm, setNewBranchForm] = useState({ name: '', username: '', password: '', confirmPassword: '' });
-  const [newBatchForm, setNewBatchForm] = useState({ name: '', schedule: '', branch: 'kuttiady', username: '', password: '', confirmPassword: '', startTime: '09:00', endTime: '10:30', slotType: 'Morning' });
+  const [showNewBranchPassword, setShowNewBranchPassword] = useState(false);
+  const [showNewBranchConfirmPassword, setShowNewBranchConfirmPassword] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showSuperadminLoginPassword, setShowSuperadminLoginPassword] = useState(false);
+  const [showNewBatchPassword, setShowNewBatchPassword] = useState(false);
+  const [showNewBatchConfirmPassword, setShowNewBatchConfirmPassword] = useState(false);
+  const [showManageBatchPassword, setShowManageBatchPassword] = useState(false);
+  const [showManageBatchConfirmPassword, setShowManageBatchConfirmPassword] = useState(false);
+  const [showManageBranchPassword, setShowManageBranchPassword] = useState(false);
+  const [showManageBranchConfirmPassword, setShowManageBranchConfirmPassword] = useState(false);
+  const [newBatchForm, setNewBatchForm] = useState({ name: '', schedule: '', branch: 'kuttiady', username: '', password: '', confirmPassword: '', startTime: '09:00', endTime: '10:30', slotType: 'Morning', status: 'Active' });
   const [newBatchDays, setNewBatchDays] = useState({ Mon: true, Tue: true, Wed: true, Thu: true, Fri: false, Sat: false, Sun: false });
   const [editBatchDays, setEditBatchDays] = useState({ Mon: false, Tue: false, Wed: false, Thu: false, Fri: false, Sat: false, Sun: false });
   const [activeSessions, setActiveSessions] = useState([]);
@@ -830,8 +853,8 @@ function App() {
       const seenIds = new Set();
       const seenNames = new Set();
       const res = batchOptions.filter(opt => {
-        const idKey = opt.id.toLowerCase();
-        const nameKey = `${opt.name.toLowerCase().replace(/\s+/g, '')}_${opt.schedule.toLowerCase()}`;
+        const idKey = (opt.id || opt.code || '').toLowerCase();
+        const nameKey = `${(opt.name || '').toLowerCase().replace(/\s+/g, '')}_${(opt.schedule || '').toLowerCase()}`;
         if (seenIds.has(idKey) || seenNames.has(nameKey)) return false;
         seenIds.add(idKey);
         seenNames.add(nameKey);
@@ -866,8 +889,8 @@ function App() {
     const seenIds = new Set();
     const seenNames = new Set();
     const res = filtered.filter(opt => {
-      const idKey = opt.id.toLowerCase();
-      const nameKey = `${opt.name.toLowerCase().replace(/\s+/g, '')}_${opt.schedule.toLowerCase()}`;
+      const idKey = (opt.id || opt.code || '').toLowerCase();
+      const nameKey = `${(opt.name || '').toLowerCase().replace(/\s+/g, '')}_${(opt.schedule || '').toLowerCase()}`;
       if (seenIds.has(idKey) || seenNames.has(nameKey)) return false;
       seenIds.add(idKey);
       seenNames.add(nameKey);
@@ -1003,6 +1026,7 @@ function App() {
           setAdminCredentials(data.adminCredentials || {});
           setBranchCredentials(data.branchCredentials || {});
           setBatchCredentials(data.batchCredentials || {});
+          setCustomBatches(data.customBatches || []);
           setMonthlyFeeRate(data.monthlyFeeRate !== undefined ? data.monthlyFeeRate : 600);
           setAdmissionFeeRate(data.admissionFeeRate !== undefined ? data.admissionFeeRate : 1500);
           setCoupons(data.coupons || {});
@@ -1028,10 +1052,18 @@ function App() {
     fetch(`${API_BASE_URL}/batches`)
       .then(res => res.ok ? res.json() : [])
       .then(data => {
-        setCustomBatches(data || []);
         const uniqueBatches = [
           ...DEFAULT_BATCH_OPTIONS.map(b => ({ ...b, branch: 'all' })),
-          ...(data || []).map(b => ({ id: b.code, name: b.name, schedule: b.schedule, branch: b.branch }))
+          ...(data || []).map(b => ({
+            id: b.code || b.id || b._id,
+            name: b.name,
+            schedule: b.schedule,
+            branch: b.branch,
+            startTime: b.startTime || '09:00',
+            endTime: b.endTime || '10:30',
+            slotType: b.slotType || 'Morning',
+            status: b.status || 'Active'
+          }))
         ];
         setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
       })
@@ -1271,6 +1303,22 @@ function App() {
       });
   }, [branchFilter, batchFilter, loggedInUser]);
 
+  // Fetch students list dynamically whenever branch or batch filters change
+  useEffect(() => {
+    const token = getSessionToken();
+    if (!token) return;
+
+    const branchParam = branchFilter ? encodeURIComponent(branchFilter) : '';
+    const batchParam = batchFilter ? encodeURIComponent(batchFilter) : '';
+
+    fetch(`${API_BASE_URL}/students?branchId=${branchParam}&batchId=${batchParam}`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        setStudents(sortStudentsAlphabetically(data));
+      })
+      .catch(err => console.error('Error fetching students:', err));
+  }, [branchFilter, batchFilter, loggedInUser]);
+
   // Dynamic batch loading for Login Page
   useEffect(() => {
     const token = getSessionToken();
@@ -1287,7 +1335,7 @@ function App() {
           setCustomBatches(data || []);
           const uniqueBatches = [
             ...DEFAULT_BATCH_OPTIONS.map(b => ({ ...b, branch: 'all' })),
-            ...(data || []).map(b => ({ id: b.code, name: b.name, schedule: b.schedule, branch: b.branch, branchId: b.branchId, branchName: b.branchName }))
+            ...(data || []).map(b => ({ id: b.code, name: b.name, schedule: b.schedule, branch: b.branch, branchId: b.branchId, branchName: b.branchName, status: b.status || 'Active' }))
           ];
           setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
         })
@@ -1360,7 +1408,7 @@ function App() {
       if (isBatchAdminUser(loggedInUser)) {
         const activeBatch = batchOptions.find(b => b.id.toLowerCase() === userBatch.toLowerCase());
         if (activeBatch) {
-          setBatchFilter(activeBatch.schedule);
+          setBatchFilter(activeBatch.id);
         } else {
           setBatchFilter('All');
         }
@@ -2540,7 +2588,7 @@ function App() {
       .then(res => res.json())
       .then(data => {
         setBranchCredentials(data.branchCredentials || {});
-        setSettingsSuccess(`Branch Inspector credentials for "${br.toUpperCase()}" updated successfully!`);
+        setSettingsSuccess(`Branch Trainer credentials for "${br.toUpperCase()}" updated successfully!`);
         setBranchForm({ branch: br, newUsername: '', newPassword: '', confirmPassword: '' });
       })
       .catch(err => {
@@ -2608,12 +2656,13 @@ function App() {
       return;
     }
 
-    const defaultUser = `admin@${newBrLower}`;
+    const username = newBranchForm.username.trim() || `admin@${newBrLower}`;
 
-    const updatedCustomBranches = [...customBranches, newBrClean];
+    const existingBranchNames = customBranches.map(b => typeof b === 'string' ? b : b.name);
+    const updatedCustomBranches = [...existingBranchNames, newBrClean];
     const updatedBranchCreds = {
       ...branchCredentials,
-      [newBrLower]: { username: defaultUser, password: pass }
+      [newBrLower]: { username, password: pass }
     };
 
     fetch(`${API_BASE_URL}/credentials`, {
@@ -2624,9 +2673,13 @@ function App() {
         branchCredentials: updatedBranchCreds
       })
     })
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to add branch on server') });
+        }
+        return res.json();
+      })
       .then(data => {
-        setCustomBranches(data.customBranches || []);
         setBranchCredentials(data.branchCredentials || {});
         if (rawCredentials) {
           setRawCredentials(prev => ({
@@ -2635,14 +2688,7 @@ function App() {
             branchCredentials: data.branchCredentials || {}
           }));
         }
-
-        const dbBranches = Object.keys(data.branchCredentials || {}).map(b => b.charAt(0).toUpperCase() + b.slice(1));
-        const uniqueBranches = Array.from(new Set([
-          ...DEFAULT_BRANCHES,
-          ...dbBranches,
-          ...(data.customBranches || []).map(b => b.charAt(0).toUpperCase() + b.slice(1))
-        ]));
-        setBranches(uniqueBranches);
+        reloadAllAppData();
         setNewBranchForm({ name: '', username: '', password: '', confirmPassword: '' });
         setSettingsSuccess(`Branch "${newBrClean}" created and credentials configured successfully!`);
       })
@@ -2657,7 +2703,8 @@ function App() {
     }
 
     const branchKey = branchToDelete.toLowerCase().trim();
-    const updatedCustomBranches = customBranches.filter(b => b.toLowerCase().trim() !== branchKey);
+    const existingBranchNames = customBranches.map(b => typeof b === 'string' ? b : b.name);
+    const updatedCustomBranches = existingBranchNames.filter(b => b.toLowerCase().trim() !== branchKey);
 
     // Also delete from branchCredentials map
     const updatedBranchCreds = { ...branchCredentials };
@@ -2672,7 +2719,7 @@ function App() {
     }
 
     // Optimistically update
-    setCustomBranches(updatedCustomBranches);
+    setCustomBranches(customBranches.filter(b => (typeof b === 'string' ? b.toLowerCase().trim() : b.name?.toLowerCase().trim()) !== branchKey));
     setBranchCredentials(updatedBranchCreds);
     setBatchCredentials(updatedBatchCreds);
 
@@ -2711,7 +2758,6 @@ function App() {
         return res.json();
       })
       .then(data => {
-        setCustomBranches(data.customBranches || []);
         setBranchCredentials(data.branchCredentials || {});
         setBatchCredentials(data.batchCredentials || {});
         if (rawCredentials) {
@@ -2722,14 +2768,7 @@ function App() {
             batchCredentials: data.batchCredentials || {}
           }));
         }
-
-        const dbBranches = Object.keys(data.branchCredentials || {}).map(b => b.charAt(0).toUpperCase() + b.slice(1));
-        const uniqueBranches = Array.from(new Set([
-          ...DEFAULT_BRANCHES,
-          ...dbBranches,
-          ...(data.customBranches || []).map(b => b.charAt(0).toUpperCase() + b.slice(1))
-        ]));
-        setBranches(uniqueBranches);
+        reloadAllAppData();
         setSettingsSuccess(`Branch "${branchToDelete}" deleted successfully!`);
       })
       .catch(err => {
@@ -2758,9 +2797,8 @@ function App() {
     }
 
     const updatedCustomBranches = customBranches.map(b => {
-      if (typeof b === 'string') return b.toLowerCase() === oldBrLower ? newBrClean : b;
-      if (b && typeof b === 'object') return b.name?.toLowerCase() === oldBrLower || b.code?.toLowerCase() === oldBrLower ? newBrClean : b.name;
-      return b;
+      const name = typeof b === 'string' ? b : b.name;
+      return name.toLowerCase().trim() === oldBrLower ? newBrClean : name;
     });
 
     // Update name in DB Branch collection
@@ -2810,7 +2848,11 @@ function App() {
       }
     }
 
-    setCustomBranches(updatedCustomBranches);
+    setCustomBranches(customBranches.map(b => {
+      if (typeof b === 'string') return b.toLowerCase() === oldBrLower ? newBrClean : b;
+      if (b && typeof b === 'object') return (b.name?.toLowerCase() === oldBrLower || b.code?.toLowerCase() === oldBrLower) ? { ...b, name: newBrClean, code: newBrLower } : b;
+      return b;
+    }));
     setBranchCredentials(updatedBranchCreds);
     setBatchCredentials(updatedBatchCreds);
 
@@ -2836,17 +2878,8 @@ function App() {
         return res.json();
       })
       .then(data => {
-        setCustomBranches(data.customBranches || []);
         setBranchCredentials(data.branchCredentials || {});
         setBatchCredentials(data.batchCredentials || {});
-
-        const dbBranches = Object.keys(data.branchCredentials || {}).map(b => b.charAt(0).toUpperCase() + b.slice(1));
-        const uniqueBranches = Array.from(new Set([
-          ...DEFAULT_BRANCHES,
-          ...dbBranches,
-          ...(data.customBranches || []).map(b => b.charAt(0).toUpperCase() + b.slice(1))
-        ]));
-        setBranches(uniqueBranches);
 
         if (rawCredentials) {
           setRawCredentials(prev => ({
@@ -2856,6 +2889,7 @@ function App() {
             batchCredentials: data.batchCredentials || {}
           }));
         }
+        reloadAllAppData();
         setSettingsSuccess(`Branch "${oldBrClean}" renamed to "${newBrClean}" successfully!`);
       })
       .catch(err => {
@@ -2893,19 +2927,32 @@ function App() {
     }
 
     const id = 'batch_' + Date.now();
+    const status = newBatchForm.status || 'Active';
     const newBatchObj = { 
       id, 
       name, 
       schedule, 
       branch: newBatchForm.branch, 
-      startTime: newBatchForm.slotType || 'Morning', 
-      endTime: '',
-      slotType: newBatchForm.slotType || 'Morning'
+      startTime: newBatchForm.startTime || '09:00', 
+      endTime: newBatchForm.endTime || '10:30',
+      slotType: newBatchForm.slotType || 'Morning',
+      status
     };
 
     const key = `${br}_${id}`;
 
-    const updatedCustomBatches = [...customBatches, newBatchObj];
+    const existingBatchesMapped = customBatches.map(b => ({
+      id: b.id || b.code || b._id,
+      name: b.name || b.batchName || '',
+      schedule: b.schedule || 'Mon-Thu',
+      branch: b.branch || '',
+      startTime: b.startTime || '09:00',
+      endTime: b.endTime || '10:30',
+      slotType: b.slotType || 'Morning',
+      status: b.status || 'Active'
+    }));
+
+    const updatedCustomBatches = [...existingBatchesMapped, newBatchObj];
     const updatedBatchCreds = {
       ...batchCredentials,
       [key]: { username: trainerUser, password: pass }
@@ -2919,12 +2966,24 @@ function App() {
         batchCredentials: updatedBatchCreds
       })
     })
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to add batch on server') });
+        }
+        return res.json();
+      })
       .then(data => {
         setCustomBatches(data.customBatches || []);
-        reloadAllAppData();
         setBatchCredentials(data.batchCredentials || {});
-        setNewBatchForm({ name: '', schedule: '', branch: 'kuttiady', username: '', password: '', confirmPassword: '', startTime: '09:00', endTime: '10:30', slotType: 'Morning' });
+        if (rawCredentials) {
+          setRawCredentials(prev => ({
+            ...prev,
+            customBatches: data.customBatches || [],
+            batchCredentials: data.batchCredentials || {}
+          }));
+        }
+        reloadAllAppData();
+        setNewBatchForm({ name: '', schedule: '', branch: 'kuttiady', username: '', password: '', confirmPassword: '', startTime: '09:00', endTime: '10:30', slotType: 'Morning', status: 'Active' });
         setNewBatchDays({ Mon: true, Tue: true, Wed: true, Thu: true, Fri: false, Sat: false, Sun: false });
         setSettingsSuccess(`Batch "${name}" added and credentials configured successfully!`);
       })
@@ -2938,7 +2997,18 @@ function App() {
       return;
     }
 
-    const updatedCustomBatches = customBatches.filter(b => b.id !== batchIdToDelete);
+    const existingBatchesMapped = customBatches.map(b => ({
+      id: b.id || b.code || b._id,
+      name: b.name || b.batchName || '',
+      schedule: b.schedule || 'Mon-Thu',
+      branch: b.branch || '',
+      startTime: b.startTime || '09:00',
+      endTime: b.endTime || '10:30',
+      slotType: b.slotType || 'Morning',
+      status: b.status || 'Active'
+    }));
+
+    const updatedCustomBatches = existingBatchesMapped.filter(b => b.id !== batchIdToDelete);
 
     // Also delete from batchCredentials map
     const updatedBatchCreds = { ...batchCredentials };
@@ -2950,7 +3020,11 @@ function App() {
 
     // Optimistically update
     setCustomBatches(updatedCustomBatches);
-    setBatchOptions(sortBatchesAlphabetically([...DEFAULT_BATCH_OPTIONS, ...updatedCustomBatches]));
+    const uniqueBatches = [
+      ...DEFAULT_BATCH_OPTIONS.map(b => ({ ...b, branch: 'all' })),
+      ...updatedCustomBatches.map(b => ({ id: b.code || b.id || b._id, name: b.name, schedule: b.schedule, branch: b.branch, slotType: b.slotType || 'Morning', status: b.status || 'Active' }))
+    ];
+    setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
     setBatchCredentials(updatedBatchCreds);
 
     // Delete from DB Batch collection
@@ -3000,27 +3074,48 @@ function App() {
       });
   };
 
-  const handleEditCustomBatch = (batchId, newName, newSchedule, newStartTime, newEndTime, newSlotType) => {
+  const handleEditCustomBatch = (batchId, newName, newSchedule, newStartTime, newEndTime, newSlotType, newStatus) => {
     const nameClean = newName.trim();
     const scheduleClean = newSchedule.trim();
     const startTimeClean = (newStartTime || '').trim();
     const endTimeClean = (newEndTime || '').trim();
     const slotTypeClean = (newSlotType || 'Morning').trim();
+    const statusClean = newStatus || 'Active';
 
     if (!nameClean || !scheduleClean) {
-      alert('Batch name and schedule are required.');
+      setEditBatchModalError('Batch name and schedule are required.');
       return;
     }
 
-    if (batchOptions.some(b => b.id !== batchId && (b.name.toLowerCase() === nameClean.toLowerCase() && b.schedule.toLowerCase() === scheduleClean.toLowerCase() && (b.slotType || 'Morning') === slotTypeClean))) {
-      alert('A batch with this name, schedule, and slot already exists!');
+    if (batchOptions.some(b => {
+      const bId = b.id || b.code || b._id;
+      const bSchedule = b.schedule || '';
+      return bId !== batchId && (b.name.toLowerCase() === nameClean.toLowerCase() && bSchedule.toLowerCase() === scheduleClean.toLowerCase() && (b.slotType || 'Morning') === slotTypeClean);
+    })) {
+      setEditBatchModalError('A batch with this name, schedule, and slot already exists!');
       return;
     }
 
-    const updatedCustomBatches = customBatches.map(b => b.id === batchId ? { ...b, name: nameClean, schedule: scheduleClean, startTime: startTimeClean, endTime: endTimeClean, slotType: slotTypeClean } : b);
+    setEditBatchSaving(true);
+    setEditBatchModalError('');
+    setEditBatchModalSuccess('');
 
-    setCustomBatches(updatedCustomBatches);
-    setBatchOptions(sortBatchesAlphabetically([...DEFAULT_BATCH_OPTIONS, ...updatedCustomBatches]));
+    const existingBatchesMapped = customBatches.map(b => ({
+      id: b.id || b.code || b._id,
+      name: b.name || b.batchName || '',
+      schedule: b.schedule || 'Mon-Thu',
+      branch: b.branch || '',
+      startTime: b.startTime || '09:00',
+      endTime: b.endTime || '10:30',
+      slotType: b.slotType || 'Morning',
+      status: b.status || 'Active'
+    }));
+
+    const updatedCustomBatches = existingBatchesMapped.map(b => {
+      return b.id === batchId
+        ? { ...b, name: nameClean, schedule: scheduleClean, startTime: startTimeClean, endTime: endTimeClean, slotType: slotTypeClean, status: statusClean }
+        : b;
+    });
 
     // Update name, schedule, timings & slotType in DB Batch collection
     const matchedBatchObj = Array.isArray(customBatches) && customBatches.find(b => {
@@ -3031,39 +3126,65 @@ function App() {
       }
       return false;
     });
-    if (matchedBatchObj && typeof matchedBatchObj === 'object' && matchedBatchObj._id) {
-      fetch(`${API_BASE_URL}/batches/${matchedBatchObj._id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: nameClean, schedule: scheduleClean, startTime: startTimeClean, endTime: endTimeClean, slotType: slotTypeClean })
-      }).catch(err => console.error("Error updating batch in DB:", err));
-    }
 
-    fetch(`${API_BASE_URL}/credentials`, {
+    const updateDBPromise = matchedBatchObj && matchedBatchObj._id
+      ? fetch(`${API_BASE_URL}/batches/${matchedBatchObj._id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: nameClean, schedule: scheduleClean, startTime: startTimeClean, endTime: endTimeClean, slotType: slotTypeClean, status: statusClean })
+        }).then(res => {
+          if (!res.ok) {
+            return res.json().then(data => { throw new Error(data.error || 'Failed to update batch details in database') });
+          }
+          return res.json();
+        })
+      : Promise.resolve();
+
+    const updateCredsPromise = fetch(`${API_BASE_URL}/credentials`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         customBatches: updatedCustomBatches
       })
-    })
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to update batch on server');
-        return res.json();
-      })
-      .then(data => {
-        setCustomBatches(data.customBatches || []);
+    }).then(res => {
+      if (!res.ok) {
+        return res.json().then(data => { throw new Error(data.error || 'Failed to update batches list on server') });
+      }
+      return res.json();
+    });
+
+    Promise.all([updateDBPromise, updateCredsPromise])
+      .then(([dbData, credsData]) => {
+        setCustomBatches(credsData.customBatches || []);
+        
+        const uniqueBatches = [
+          ...DEFAULT_BATCH_OPTIONS.map(b => ({ ...b, branch: 'all' })),
+          ...(credsData.customBatches || []).map(b => ({ id: b.code || b.id || b._id, name: b.name, schedule: b.schedule, branch: b.branch, slotType: b.slotType || 'Morning', status: b.status || 'Active' }))
+        ];
+        setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
         reloadAllAppData();
 
         if (rawCredentials) {
           setRawCredentials(prev => ({
             ...prev,
-            customBatches: data.customBatches || []
+            customBatches: credsData.customBatches || []
           }));
         }
-        setSettingsSuccess(`Batch "${nameClean}" updated successfully!`);
+
+        setEditBatchModalSuccess(`Batch "${nameClean}" updated successfully!`);
+        setEditBatchSaving(false);
+
+        // Auto-close modal after 1.5s
+        setTimeout(() => {
+          setIsEditBatchModalOpen(false);
+          setEditingBatchObj(null);
+          setEditBatchModalSuccess('');
+        }, 1500);
       })
       .catch(err => {
-        setSettingsError('Error renaming batch: ' + err.message);
+        console.error('Error updating batch:', err);
+        setEditBatchModalError(err.message || 'Error updating batch settings.');
+        setEditBatchSaving(false);
         reloadAllAppData();
       });
   };
@@ -3204,8 +3325,19 @@ function App() {
       const matchesBranch = activeBranch === 'All' ||
         (s.branch && s.branch.toLowerCase().trim() === activeBranch.toLowerCase().trim());
 
-      const matchesBatch = activeBatch === 'All' ||
-        (s.schedule && s.schedule.toLowerCase().trim() === activeBatch.toLowerCase().trim());
+      const matchesBatch = activeBatch === 'All' || (() => {
+        const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === activeBatch.toLowerCase());
+        if (!selectedBatchObj) return false;
+        const studentBatchLower = (s.batch || '').toLowerCase().trim();
+        const targetIdLower = selectedBatchObj.id.toLowerCase().trim();
+        const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
+        if (studentBatchLower === targetIdLower) return true;
+        if (studentBatchLower === targetNameLower) return true;
+        if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
+          return false;
+        }
+        return schedulesMatch(s.schedule, selectedBatchObj.schedule);
+      })();
 
       return matchesBranch && matchesBatch;
     });
@@ -3407,15 +3539,15 @@ function App() {
             // Auto default the open form's batch and schedule
             if (isAddModalOpen) {
               setNewStudent(prev => {
-                if (prev.branch === activeFormBranch && !list.some(b => b.name === prev.batch && b.schedule === prev.schedule)) {
-                  return { ...prev, batch: firstBatch.name, schedule: firstBatch.schedule };
+                if (prev.branch === activeFormBranch && !list.some(b => b.code === prev.batch)) {
+                  return { ...prev, batch: firstBatch.code, schedule: firstBatch.schedule };
                 }
                 return prev;
               });
             } else if (isEditingStudent) {
               setEditingStudentData(prev => {
-                if (prev && prev.branch === activeFormBranch && !list.some(b => b.name === prev.batch && b.schedule === prev.schedule)) {
-                  return { ...prev, batch: firstBatch.name, schedule: firstBatch.schedule };
+                if (prev && prev.branch === activeFormBranch && !list.some(b => b.code === prev.batch)) {
+                  return { ...prev, batch: firstBatch.code, schedule: firstBatch.schedule };
                 }
                 return prev;
               });
@@ -3526,14 +3658,27 @@ function App() {
       ? true
       : (s.status || 'Active') === statusFilter;
 
-    // Filter by global batch schedule
-    const matchesBatch = batchFilter === 'All' ||
-      (s.schedule && batchFilter && s.schedule.toLowerCase().trim() === batchFilter.toLowerCase().trim());
+    // Filter by global batch (code check with fallback to schedule for legacy)
+    const matchesBatch = batchFilter === 'All' || (() => {
+      const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchFilter.toLowerCase());
+      if (!selectedBatchObj) return false;
+      const studentBatchLower = (s.batch || '').toLowerCase().trim();
+      const targetIdLower = selectedBatchObj.id.toLowerCase().trim();
+      const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
+      if (studentBatchLower === targetIdLower) return true;
+      if (studentBatchLower === targetNameLower) return true;
+      if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
+        return false;
+      }
+      return schedulesMatch(s.schedule, selectedBatchObj.schedule);
+    })();
 
     if (userRole === 'trainer' || userRole === 'coordinator') {
       const activeBatch = batchOptions.find(b => b.id.toLowerCase() === userBatch.toLowerCase());
       if (activeBatch) {
-        return matchesSearch && matchesBranch && matchesStatus && matchesBatch && s.schedule === activeBatch.schedule;
+        const studentMatchesTrainerBatch = (s.batch && s.batch.toLowerCase() === userBatch.toLowerCase()) ||
+          (s.schedule && schedulesMatch(s.schedule, activeBatch.schedule) && !s.batch?.toLowerCase().startsWith('batch'));
+        return matchesSearch && matchesBranch && matchesStatus && matchesBatch && studentMatchesTrainerBatch;
       }
     }
 
@@ -3619,7 +3764,7 @@ function App() {
     if (userRole === 'trainer' || userRole === 'coordinator') {
       const activeBatch = batchOptions.find(b => b.id.toLowerCase() === userBatch.toLowerCase());
       if (activeBatch) {
-        studentBatch = activeBatch.name;
+        studentBatch = activeBatch.id;
         studentSchedule = activeBatch.schedule;
       }
     }
@@ -4415,7 +4560,7 @@ function App() {
                   <h4 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Student Profile Summary</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem' }}>
                     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Belt Level: <strong style={{ color: '#fff', float: 'right' }}>{student.belt}</strong></div>
-                    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Admission Number: <strong style={{ color: '#fff', float: 'right' }}>{student.admissionNo}</strong></div>
+                    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Admission Number: <strong style={{ color: '#fff', float: 'right' }}>{student.admissionNumber || student.admissionNo || student.id}</strong></div>
                     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Attendance: <strong style={{ float: 'right' }}><span style={{ color: '#30d158' }}>{attendanceSummary.present}P</span> / <span style={{ color: '#ff453a' }}>{attendanceSummary.absent}A</span> ({attendanceSummary.total} Total)</strong></div>
                     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Fees Paid: <strong style={{ color: '#30d158', float: 'right' }}>₹{feeSummary.totalPaid}</strong></div>
                     <div>Total Payments: <strong style={{ color: '#fff', float: 'right' }}>{feeSummary.payments.length}</strong></div>
@@ -6499,7 +6644,7 @@ function App() {
                     >
                       <option value="All">All Batches</option>
                       {getFilteredBatchOptions().map(opt => (
-                        <option key={opt.id} value={opt.schedule}>{opt.name}</option>
+                        <option key={opt.id} value={opt.id}>{opt.name}</option>
                       ))}
                     </select>
                   </div>
@@ -6539,8 +6684,25 @@ function App() {
                     {searchedStudents.filter(s => {
                       const isInactive = (s.status || 'Active') === 'Inactive';
                       if (isInactive) return false;
-                      const matchBatch = attendanceBatchFilter === 'All' || s.batch === attendanceBatchFilter;
-                      const matchSchedule = batchFilter === 'All' || s.schedule === batchFilter;
+                      const matchBatch = attendanceBatchFilter === 'All' || 
+                        s.batch === attendanceBatchFilter || 
+                        (() => {
+                          const batchObj = batchOptions.find(b => b.id.toLowerCase() === (s.batch || '').toLowerCase());
+                          return batchObj && batchObj.slotType && batchObj.slotType.toLowerCase() === attendanceBatchFilter.toLowerCase();
+                        })();
+                      const matchSchedule = batchFilter === 'All' || (() => {
+                        const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchFilter.toLowerCase());
+                        if (!selectedBatchObj) return false;
+                        const studentBatchLower = (s.batch || '').toLowerCase().trim();
+                        const targetIdLower = selectedBatchObj.id.toLowerCase().trim();
+                        const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
+                        if (studentBatchLower === targetIdLower) return true;
+                        if (studentBatchLower === targetNameLower) return true;
+                        if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
+                          return false;
+                        }
+                        return schedulesMatch(s.schedule, selectedBatchObj.schedule);
+                      })();
                       return matchBatch && matchSchedule;
                     }).map(student => {
                       const status = attendanceRecords[markingDate]?.[student.id];
@@ -6551,9 +6713,9 @@ function App() {
                             style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}
                             onClick={() => handleSelectStudent(student)}
                           >
-                            {student.name}
+                            {student.studentName || student.name}
                           </td>
-                          <td data-label="Batch Info"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule)} • {student.batch}</span></td>
+                          <td data-label="Batch Info"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule)} • {student.schedule}</span></td>
                           <td data-label="Status">
                             {status === 'present' && <span className="badge badge-green">Present</span>}
                             {status === 'absent' && <span className="badge badge-red">Absent</span>}
@@ -6616,8 +6778,25 @@ function App() {
     const baseFeeStudents = searchedStudents.filter(s => (s.status || 'Active') !== 'Inactive');
 
     const filteredFeeStudents = baseFeeStudents.filter(s => {
-      const matchBatch = feeBatchFilter === 'All' || s.batch === feeBatchFilter;
-      const matchSchedule = batchFilter === 'All' || s.schedule === batchFilter;
+      const matchBatch = feeBatchFilter === 'All' || 
+        s.batch === feeBatchFilter || 
+        (() => {
+          const batchObj = batchOptions.find(b => b.id.toLowerCase() === (s.batch || '').toLowerCase());
+          return batchObj && batchObj.slotType && batchObj.slotType.toLowerCase() === feeBatchFilter.toLowerCase();
+        })();
+      const matchSchedule = batchFilter === 'All' || (() => {
+        const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchFilter.toLowerCase());
+        if (!selectedBatchObj) return false;
+        const studentBatchLower = (s.batch || '').toLowerCase().trim();
+        const targetIdLower = selectedBatchObj.id.toLowerCase().trim();
+        const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
+        if (studentBatchLower === targetIdLower) return true;
+        if (studentBatchLower === targetNameLower) return true;
+        if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
+          return false;
+        }
+        return schedulesMatch(s.schedule, selectedBatchObj.schedule);
+      })();
       return matchBatch && matchSchedule;
     });
 
@@ -6823,7 +7002,7 @@ function App() {
                               style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}
                               onClick={() => handleSelectStudent(student)}
                             >
-                              {student.name}
+                              {student.studentName || student.name}
                             </div>
                             <button
                               onClick={() => {
@@ -6874,7 +7053,7 @@ function App() {
                             <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.branch}</span>
                           </td>
                         )}
-                        <td data-label="Batch Time"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule)} • {student.batch}</span></td>
+                        <td data-label="Batch Time"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule)} • {student.schedule}</span></td>
                         <td data-label="Admission" style={{ textAlign: 'center' }}>
                           <select
                             value={student.admissionPaid ? "paid" : "pending"}
@@ -7150,9 +7329,9 @@ function App() {
         {/* Student Details Card */}
         <div className="panel" style={{ marginBottom: '2rem', display: 'flex', flexWrap: 'wrap', gap: '2rem', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <h3 style={{ margin: 0, fontSize: '1.4rem', color: '#E50914', fontFamily: 'var(--font-heading)' }}>{student.name}</h3>
+            <h3 style={{ margin: 0, fontSize: '1.4rem', color: '#E50914', fontFamily: 'var(--font-heading)' }}>{student.studentName || student.name}</h3>
             <p style={{ margin: '0.25rem 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>
-              Branch: <strong>{student.branch}</strong> • Batch: <strong>{getBatchNameFromSchedule(student.schedule)} • {student.batch}</strong>
+              Branch: <strong>{student.branch}</strong> • Batch: <strong>{getBatchNameFromSchedule(student.schedule)} • {student.schedule}</strong>
             </p>
             <p style={{ margin: '0.25rem 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>
               Joined: <strong>{student.joinDate}</strong>
@@ -7356,9 +7535,9 @@ function App() {
             <tbody>
               {searchedStudents.map(student => (
                 <tr key={student.id}>
-                  <td data-label="Name" onClick={() => handleSelectStudent(student)} style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}>{student.name}</td>
+                  <td data-label="Name" onClick={() => handleSelectStudent(student)} style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}>{student.studentName || student.name}</td>
                   <td data-label="Belt Level"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
-                  <td data-label="Batch"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>{getBatchNameFromSchedule(student.schedule)} • {student.batch}</span></td>
+                  <td data-label="Batch"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>{getBatchNameFromSchedule(student.schedule)} • {student.schedule}</span></td>
                   <td data-label="Skill Score"><span style={{ fontWeight: 'bold', color: student.performanceScore > 80 ? '#4CAF50' : '#FF9800' }}>{student.performanceScore}/100</span></td>
                   <td data-label="Progress to Next Belt" style={{ width: '30%' }}>
                     <div className="progress-container">
@@ -7430,7 +7609,7 @@ function App() {
                   {unpaidStudents.map(student => {
                     const fees = calculateStudentFees(student, currentSystemMonth);
                     const brName = student.branch.toUpperCase();
-                    let msg = `Hi ${student.name}, this is a reminder from MASTER FIT Academy (${brName}). You have pending dues: `;
+                    let msg = `Hi ${student.studentName || student.name}, this is a reminder from MASTER FIT Academy (${brName}). You have pending dues: `;
                     const items = [];
                     if (fees.admissionDue > 0) items.push(`Admission Fee (₹${fees.admissionDue})`);
                     if (fees.unpaidMonths.length > 0) items.push(`Monthly Fees for ${fees.unpaidMonths.join(', ')} (₹${fees.monthlyDue})`);
@@ -7439,7 +7618,7 @@ function App() {
 
                     return (
                       <tr key={student.id}>
-                        <td data-label="Student Name" onClick={() => handleSelectStudent(student)} style={{ cursor: 'pointer', color: '#E50914', textDecoration: 'underline' }}>{student.name}</td>
+                        <td data-label="Student Name" onClick={() => handleSelectStudent(student)} style={{ cursor: 'pointer', color: '#E50914', textDecoration: 'underline' }}>{student.studentName || student.name}</td>
                         <td data-label="Phone">{student.phone}</td>
                         <td data-label="Due Amount">
                           <span className="badge badge-red">₹{fees.totalDue}</span>
@@ -7530,7 +7709,17 @@ function App() {
           setCredentialModalError('Batch name cannot be empty');
           return;
         }
-        const updatedCustomBatches = customBatches.map(b =>
+        const existingBatchesMapped = customBatches.map(b => ({
+          id: b.id || b.code || b._id,
+          name: b.name || b.batchName || '',
+          schedule: b.schedule || 'Mon-Thu',
+          branch: b.branch || '',
+          startTime: b.startTime || '09:00',
+          endTime: b.endTime || '10:30',
+          slotType: b.slotType || 'Morning',
+          status: b.status || 'Active'
+        }));
+        const updatedCustomBatches = existingBatchesMapped.map(b =>
           (b.id === batchId || b.id === `batch_${batchId}`) ? { ...b, name: newBatchName } : b
         );
         payload.customBatches = updatedCustomBatches;
@@ -7771,19 +7960,29 @@ function App() {
         <div className="modal-content" style={{ maxWidth: '450px', width: '90%', background: '#0b0b14', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '2rem' }}>
           <div className="panel-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 className="panel-title" style={{ color: '#fff', fontSize: '1.25rem', margin: 0 }}>Edit Batch Details</h3>
-            <button className="btn-icon" onClick={() => { setIsEditBatchModalOpen(false); setEditingBatchObj(null); }} style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer' }}><X size={24} /></button>
+            <button className="btn-icon" onClick={() => { if (!editBatchSaving) { setIsEditBatchModalOpen(false); setEditingBatchObj(null); } }} style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer' }} disabled={editBatchSaving}><X size={24} /></button>
           </div>
+
+          {editBatchModalError && (
+            <div style={{ color: '#ff453a', background: 'rgba(255,69,58,0.1)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,69,58,0.2)', fontWeight: 500, marginBottom: '1.5rem' }}>
+              {editBatchModalError}
+            </div>
+          )}
+          {editBatchModalSuccess && (
+            <div style={{ color: '#30d158', background: 'rgba(48,209,88,0.1)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(48,209,88,0.2)', fontWeight: 500, marginBottom: '1.5rem' }}>
+              {editBatchModalSuccess}
+            </div>
+          )}
+
           <form onSubmit={(e) => {
             e.preventDefault();
             const newName = newBatchNameField.trim();
             const newSchedule = formatSelectedDays(editBatchDays);
             const newSlot = editBatchSlotType;
             if (newName && newSchedule) {
-              handleEditCustomBatch(editingBatchObj.id, newName, newSchedule, newSlot, '', newSlot);
-              setIsEditBatchModalOpen(false);
-              setEditingBatchObj(null);
+              handleEditCustomBatch(editingBatchObj.id, newName, newSchedule, newSlot, '', newSlot, editBatchStatusField);
             } else {
-              alert("Name and at least one schedule day are required.");
+              setEditBatchModalError("Name and at least one schedule day are required.");
             }
           }}>
             <div className="form-group" style={{ marginBottom: '1.25rem' }}>
@@ -7795,6 +7994,7 @@ function App() {
                 required
                 value={newBatchNameField}
                 onChange={(e) => setNewBatchNameField(e.target.value)}
+                disabled={editBatchSaving}
               />
             </div>
             <div className="form-group" style={{ marginBottom: '1.25rem' }}>
@@ -7807,6 +8007,7 @@ function App() {
                       checked={editBatchDays[day]}
                       onChange={(e) => setEditBatchDays(prev => ({ ...prev, [day]: e.target.checked }))}
                       style={{ accentColor: 'var(--color-primary)' }}
+                      disabled={editBatchSaving}
                     />
                     {day}
                   </label>
@@ -7824,15 +8025,32 @@ function App() {
                 value={editBatchSlotType}
                 onChange={(e) => setEditBatchSlotType(e.target.value)}
                 required
+                disabled={editBatchSaving}
               >
                 <option value="Morning">Morning</option>
                 <option value="Evening">Evening</option>
                 <option value="Night">Night</option>
               </select>
             </div>
+            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Status</label>
+              <select
+                className="form-control"
+                style={{ width: '100%' }}
+                value={editBatchStatusField || 'Active'}
+                onChange={(e) => setEditBatchStatusField(e.target.value)}
+                required
+                disabled={editBatchSaving}
+              >
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+              </select>
+            </div>
             <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button type="button" className="btn-secondary" onClick={() => { setIsEditBatchModalOpen(false); setEditingBatchObj(null); }}>Cancel</button>
-              <button type="submit" className="btn-primary">Save Changes</button>
+              <button type="button" className="btn-secondary" onClick={() => { setIsEditBatchModalOpen(false); setEditingBatchObj(null); }} disabled={editBatchSaving}>Cancel</button>
+              <button type="submit" className="btn-primary" disabled={editBatchSaving}>
+                {editBatchSaving ? 'Saving...' : 'Save Changes'}
+              </button>
             </div>
           </form>
         </div>
@@ -7959,22 +8177,8 @@ function App() {
           <div className="stat-card">
             <div className="stat-icon-wrapper"><MapPin className="stat-icon" /></div>
             <div className="stat-details">
-              <h3>Total Mapped Branches</h3>
+              <h3>Total Active Academy Branches</h3>
               <p className="stat-value">{branches.length}</p>
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(52, 152, 219, 0.1)' }}><Users className="stat-icon" style={{ color: '#3498db' }} /></div>
-            <div className="stat-details">
-              <h3>System Default</h3>
-              <p className="stat-value" style={{ color: '#3498db' }}>{DEFAULT_BRANCHES.length}</p>
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(48, 209, 88, 0.1)' }}><CheckCircle className="stat-icon" style={{ color: '#30d158' }} /></div>
-            <div className="stat-details">
-              <h3>Custom Configured</h3>
-              <p className="stat-value" style={{ color: '#30d158' }}>{customBranches.length}</p>
             </div>
           </div>
         </div>
@@ -7995,45 +8199,97 @@ function App() {
                     placeholder="Enter branch name"
                     className="form-control"
                     value={newBranchForm.name}
-                    onChange={(e) => setNewBranchForm(prev => ({ ...prev, name: e.target.value }))}
+                    onChange={(e) => {
+                      const nameVal = e.target.value;
+                      setNewBranchForm(prev => ({
+                        ...prev,
+                        name: nameVal,
+                        username: nameVal ? `admin@${nameVal.toLowerCase().trim().replace(/\s+/g, '')}` : ''
+                      }));
+                    }}
                     required
                   />
                 </div>
                 <div className="form-group">
-                  <label>Inspector Username (Will default to admin@name)</label>
+                  <label>Trainer Username (Will default to admin@name)</label>
                   <input
                     type="text"
                     placeholder="admin@name"
                     className="form-control"
-                    value={newBranchForm.name ? `admin@${newBranchForm.name.toLowerCase().trim()}` : ''}
-                    disabled
+                    value={newBranchForm.username}
+                    onChange={(e) => setNewBranchForm(prev => ({ ...prev, username: e.target.value }))}
+                    required
                   />
                 </div>
                 <div className="form-group">
                   <label>Admin Password</label>
-                  <input
-                    type="password"
-                    placeholder="••••••••"
-                    className="form-control"
-                    value={newBranchForm.password}
-                    onChange={(e) => setNewBranchForm(prev => ({ ...prev, password: e.target.value }))}
-                    required
-                  />
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type={showNewBranchPassword ? "text" : "password"}
+                      placeholder="••••••••"
+                      className="form-control"
+                      style={{ paddingRight: '2.5rem' }}
+                      value={newBranchForm.password}
+                      onChange={(e) => setNewBranchForm(prev => ({ ...prev, password: e.target.value }))}
+                      required
+                    />
+                    <button
+                      type="button"
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: 'rgba(255, 255, 255, 0.4)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: 0
+                      }}
+                      onClick={() => setShowNewBranchPassword(prev => !prev)}
+                    >
+                      {showNewBranchPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
                 <div className="form-group">
                   <label>Confirm Password</label>
-                  <input
-                    type="password"
-                    placeholder="••••••••"
-                    className="form-control"
-                    value={newBranchForm.confirmPassword || ''}
-                    onChange={(e) => setNewBranchForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
-                    required
-                  />
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type={showNewBranchConfirmPassword ? "text" : "password"}
+                      placeholder="••••••••"
+                      className="form-control"
+                      style={{ paddingRight: '2.5rem' }}
+                      value={newBranchForm.confirmPassword || ''}
+                      onChange={(e) => setNewBranchForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                      required
+                    />
+                    <button
+                      type="button"
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: 'rgba(255, 255, 255, 0.4)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: 0
+                      }}
+                      onClick={() => setShowNewBranchConfirmPassword(prev => !prev)}
+                    >
+                      {showNewBranchConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                   {newBranchPasswordError && <span style={{ color: '#ff453a', fontSize: '0.75rem', marginTop: '4px', display: 'block' }}>{newBranchPasswordError}</span>}
                 </div>
               </div>
-              <button className="btn-primary" type="submit" style={{ width: '100%', justifyContent: 'center', marginTop: '1.5rem' }}>Create Mapped Branch & Inspector Credentials</button>
+              <button className="btn-primary" type="submit" style={{ width: '100%', justifyContent: 'center', marginTop: '1.5rem' }}>Create Mapped Branch & Trainer Credentials</button>
             </form>
           </div>
 
@@ -8061,11 +8317,69 @@ function App() {
                 </div>
                 <div className="form-group">
                   <label>New Password</label>
-                  <input type="password" className="form-control" placeholder="Enter new password" required value={branchForm.newPassword} onChange={(e) => { setBranchForm({ ...branchForm, newPassword: e.target.value }); setBranchPasswordError(''); }} />
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type={showManageBranchPassword ? "text" : "password"}
+                      className="form-control"
+                      placeholder="Enter new password"
+                      style={{ paddingRight: '2.5rem' }}
+                      required
+                      value={branchForm.newPassword}
+                      onChange={(e) => { setBranchForm({ ...branchForm, newPassword: e.target.value }); setBranchPasswordError(''); }}
+                    />
+                    <button
+                      type="button"
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: 'rgba(255, 255, 255, 0.4)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: 0
+                      }}
+                      onClick={() => setShowManageBranchPassword(prev => !prev)}
+                    >
+                      {showManageBranchPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
                 <div className="form-group">
                   <label>Confirm Password</label>
-                  <input type="password" className="form-control" placeholder="Confirm new password" required value={branchForm.confirmPassword} onChange={(e) => { setBranchForm({ ...branchForm, confirmPassword: e.target.value }); setBranchPasswordError(''); }} />
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type={showManageBranchConfirmPassword ? "text" : "password"}
+                      className="form-control"
+                      placeholder="Confirm new password"
+                      style={{ paddingRight: '2.5rem' }}
+                      required
+                      value={branchForm.confirmPassword}
+                      onChange={(e) => { setBranchForm({ ...branchForm, confirmPassword: e.target.value }); setBranchPasswordError(''); }}
+                    />
+                    <button
+                      type="button"
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: 'rgba(255, 255, 255, 0.4)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: 0
+                      }}
+                      onClick={() => setShowManageBranchConfirmPassword(prev => !prev)}
+                    >
+                      {showManageBranchConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                   {branchPasswordError && (
                     <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{branchPasswordError}</div>
                   )}
@@ -8089,7 +8403,7 @@ function App() {
                   <th>Branch Code / Key</th>
                   <th>Credentials Account</th>
                   <th>Students Roster</th>
-                  <th>Staff / Inspectors</th>
+                  <th>Staff / Trainers</th>
                   <th>Type</th>
                   <th>Actions</th>
                 </tr>
@@ -8113,11 +8427,11 @@ function App() {
                             <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Password: {cred.password}</span>
                           </div>
                         ) : (
-                          <span style={{ color: 'var(--color-text-muted)' }}>No Default Inspector Set</span>
+                          <span style={{ color: 'var(--color-text-muted)' }}>No Default Trainer Set</span>
                         )}
                       </td>
                       <td data-label="Students Roster"><span className="badge badge-green">{studentCount} Students</span></td>
-                      <td data-label="Staff / Inspectors"><span className="badge" style={{ background: 'rgba(52, 152, 219, 0.15)', color: '#3498db' }}>{adminCount} Admin / Inspector(s)</span></td>
+                      <td data-label="Staff / Trainers"><span className="badge" style={{ background: 'rgba(52, 152, 219, 0.15)', color: '#3498db' }}>{adminCount} Admin / Trainer(s)</span></td>
                       <td data-label="Type">
                         {isDefault ? (
                           <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}>System Default</span>
@@ -8196,22 +8510,8 @@ function App() {
           <div className="stat-card">
             <div className="stat-icon-wrapper"><CalendarDays className="stat-icon" /></div>
             <div className="stat-details">
-              <h3>Total Configured Batches</h3>
+              <h3>Total Active Academy Batches</h3>
               <p className="stat-value">{batchOptions.length}</p>
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(52, 152, 219, 0.1)' }}><Users className="stat-icon" style={{ color: '#3498db' }} /></div>
-            <div className="stat-details">
-              <h3>System Default</h3>
-              <p className="stat-value" style={{ color: '#3498db' }}>{DEFAULT_BATCH_OPTIONS.length}</p>
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(48, 209, 88, 0.1)' }}><CheckCircle className="stat-icon" style={{ color: '#30d158' }} /></div>
-            <div className="stat-details">
-              <h3>Custom Configured</h3>
-              <p className="stat-value" style={{ color: '#30d158' }}>{customBatches.length}</p>
             </div>
           </div>
         </div>
@@ -8286,6 +8586,18 @@ function App() {
                   </select>
                 </div>
                 <div className="form-group">
+                  <label>Status</label>
+                  <select
+                    className="form-control"
+                    value={newBatchForm.status || 'Active'}
+                    onChange={(e) => setNewBatchForm(prev => ({ ...prev, status: e.target.value }))}
+                    required
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                  </select>
+                </div>
+                <div className="form-group">
                   <label>Trainer Username</label>
                   <input
                     type="text"
@@ -8298,25 +8610,69 @@ function App() {
                 </div>
                 <div className="form-group">
                   <label>Trainer Password</label>
-                  <input
-                    type="password"
-                    placeholder="••••••••"
-                    className="form-control"
-                    value={newBatchForm.password}
-                    onChange={(e) => setNewBatchForm(prev => ({ ...prev, password: e.target.value }))}
-                    required
-                  />
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type={showNewBatchPassword ? "text" : "password"}
+                      placeholder="••••••••"
+                      className="form-control"
+                      style={{ paddingRight: '2.5rem' }}
+                      value={newBatchForm.password}
+                      onChange={(e) => setNewBatchForm(prev => ({ ...prev, password: e.target.value }))}
+                      required
+                    />
+                    <button
+                      type="button"
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: 'rgba(255, 255, 255, 0.4)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: 0
+                      }}
+                      onClick={() => setShowNewBatchPassword(prev => !prev)}
+                    >
+                      {showNewBatchPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
                 <div className="form-group">
                   <label>Confirm Password</label>
-                  <input
-                    type="password"
-                    placeholder="••••••••"
-                    className="form-control"
-                    value={newBatchForm.confirmPassword || ''}
-                    onChange={(e) => setNewBatchForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
-                    required
-                  />
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type={showNewBatchConfirmPassword ? "text" : "password"}
+                      placeholder="••••••••"
+                      className="form-control"
+                      style={{ paddingRight: '2.5rem' }}
+                      value={newBatchForm.confirmPassword || ''}
+                      onChange={(e) => setNewBatchForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                      required
+                    />
+                    <button
+                      type="button"
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: 'rgba(255, 255, 255, 0.4)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: 0
+                      }}
+                      onClick={() => setShowNewBatchConfirmPassword(prev => !prev)}
+                    >
+                      {showNewBatchConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                   {newBatchPasswordError && <span style={{ color: '#ff453a', fontSize: '0.75rem', marginTop: '4px', display: 'block' }}>{newBatchPasswordError}</span>}
                 </div>
               </div>
@@ -8365,11 +8721,69 @@ function App() {
                 </div>
                 <div className="form-group">
                   <label>New Password</label>
-                  <input type="password" className="form-control" placeholder="Enter new password" required value={batchForm.newPassword} onChange={(e) => { setBatchForm({ ...batchForm, newPassword: e.target.value }); setBatchPasswordError(''); }} />
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type={showManageBatchPassword ? "text" : "password"}
+                      className="form-control"
+                      placeholder="Enter new password"
+                      style={{ paddingRight: '2.5rem' }}
+                      required
+                      value={batchForm.newPassword}
+                      onChange={(e) => { setBatchForm({ ...batchForm, newPassword: e.target.value }); setBatchPasswordError(''); }}
+                    />
+                    <button
+                      type="button"
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: 'rgba(255, 255, 255, 0.4)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: 0
+                      }}
+                      onClick={() => setShowManageBatchPassword(prev => !prev)}
+                    >
+                      {showManageBatchPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
                 <div className="form-group">
                   <label>Confirm Password</label>
-                  <input type="password" className="form-control" placeholder="Confirm new password" required value={batchForm.confirmPassword} onChange={(e) => { setBatchForm({ ...batchForm, confirmPassword: e.target.value }); setBatchPasswordError(''); }} />
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type={showManageBatchConfirmPassword ? "text" : "password"}
+                      className="form-control"
+                      placeholder="Confirm new password"
+                      style={{ paddingRight: '2.5rem' }}
+                      required
+                      value={batchForm.confirmPassword}
+                      onChange={(e) => { setBatchForm({ ...batchForm, confirmPassword: e.target.value }); setBatchPasswordError(''); }}
+                    />
+                    <button
+                      type="button"
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: 'rgba(255, 255, 255, 0.4)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: 0
+                      }}
+                      onClick={() => setShowManageBatchConfirmPassword(prev => !prev)}
+                    >
+                      {showManageBatchConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                   {branchPasswordError && (
                     <div style={{ color: '#E50914', fontSize: '0.85rem', marginTop: '0.4rem', fontWeight: 500 }}>{branchPasswordError}</div>
                   )}
@@ -8406,61 +8820,33 @@ function App() {
               <thead>
                 <tr>
                   <th>Batch Name</th>
-                  <th>Timing</th>
-                  <th>Schedule Pattern</th>
-                  <th>Mapped Trainer Accounts</th>
-                  <th>Students Active</th>
-                  <th>Type</th>
+                  <th>Schedule</th>
+                  <th>Branch Name</th>
+                  <th>Student Count</th>
+                  <th>Status</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {getFilteredBatchOptions(isSuper ? batchesBranchFilter : undefined, false).map((b) => {
                   const isDefault = DEFAULT_BATCH_OPTIONS.some(opt => opt.id === b.id);
-                  const studentCount = students.filter(s => s.batch === b.id || s.schedule === b.schedule).length;
-                  const selectedBranchKey = isSuper ? batchesBranchFilter.toLowerCase() : getLoggedInUserBranch().toLowerCase();
-
-                  // Collect mapped credentials across branches
-                  const matchedCreds = [];
-                  for (const [key, val] of Object.entries(batchCredentials)) {
-                    if (key.endsWith(`_${b.id}`) || key === b.id) {
-                      const branchPart = key.includes('_') ? key.split('_')[0] : 'Kuttiady';
-                      if (selectedBranchKey !== 'all' && branchPart.toLowerCase() !== selectedBranchKey) {
-                        continue;
-                      }
-                      matchedCreds.push({ branch: branchPart.toUpperCase(), user: val.username, pass: val.password });
-                    }
-                  }
+                  const studentCount = students.filter(s => 
+                    s.batch === b.id || 
+                    (schedulesMatch(s.schedule, b.schedule) && !s.batch?.toLowerCase().startsWith('batch'))
+                  ).length;
+                  const dispBranch = branches.find(br => br.toLowerCase() === b.branch.toLowerCase()) || 
+                    (b.branch ? b.branch.charAt(0).toUpperCase() + b.branch.slice(1).toLowerCase() : 'Global');
 
                   return (
                     <tr key={b.id}>
                       <td data-label="Batch Name" style={{ fontWeight: 600, color: 'white' }}>{b.name}</td>
-                      <td data-label="Timing">
-                        <span className="badge" style={{ fontSize: '0.85rem', padding: '4px 10px', background: 'rgba(255,255,255,0.05)', color: 'var(--color-primary)', border: '1px solid rgba(255,255,255,0.08)', fontWeight: 500 }}>
-                          {b.slotType || 'Morning'}
+                      <td data-label="Schedule" style={{ color: 'var(--color-primary)' }}>{b.schedule}</td>
+                      <td data-label="Branch Name" style={{ color: 'white' }}>{dispBranch}</td>
+                      <td data-label="Student Count"><span className="badge badge-green">{studentCount} Students</span></td>
+                      <td data-label="Status">
+                        <span className={`badge ${b.status === 'Inactive' ? 'badge-red' : 'badge-green'}`}>
+                          {b.status || 'Active'}
                         </span>
-                      </td>
-                      <td data-label="Schedule Pattern" style={{ color: 'var(--color-primary)' }}>{b.schedule}</td>
-                      <td data-label="Mapped Trainer Accounts">
-                        {matchedCreds.length > 0 ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            {matchedCreds.map((cred, idx) => (
-                              <div key={idx} style={{ fontSize: '0.8rem', borderBottom: idx < matchedCreds.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none', paddingBottom: '2px' }}>
-                                <span style={{ color: '#3498db', fontWeight: 500 }}>{cred.branch}</span>: {cred.user} <span style={{ color: 'var(--color-text-muted)' }}>(Pass: {cred.pass})</span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <span style={{ color: 'var(--color-text-muted)' }}>No Trainer Creds configured</span>
-                        )}
-                      </td>
-                      <td data-label="Students Active"><span className="badge badge-green">{studentCount} Students</span></td>
-                      <td data-label="Type">
-                        {isDefault ? (
-                          <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}>System Default</span>
-                        ) : (
-                          <span className="badge" style={{ background: 'rgba(48, 209, 88, 0.15)', color: '#30d158' }}>Custom Config</span>
-                        )}
                       </td>
                       <td data-label="Actions">
                         {!isDefault ? (
@@ -8481,7 +8867,11 @@ function App() {
                                 setNewBatchStartTimeField(b.startTime || '09:00');
                                 setNewBatchEndTimeField(b.endTime || '10:30');
                                 setEditBatchSlotType(b.slotType || 'Morning');
+                                setEditBatchStatusField(b.status || 'Active');
                                 setIsEditBatchModalOpen(true);
+                                setEditBatchModalError('');
+                                setEditBatchModalSuccess('');
+                                setEditBatchSaving(false);
                               }}
                             >
                               Edit
@@ -8674,7 +9064,7 @@ function App() {
                 <tr>
                   <th>Full Name</th>
                   <th>Role / Code</th>
-                  <th>Employee ID / Branch</th>
+                  <th>Branch / Batch / Schedule</th>
                   <th>Session Status</th>
                   <th>Account Lock</th>
                   <th>Last Session Activity</th>
@@ -8710,10 +9100,17 @@ function App() {
                           {admin.batch && <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>Batch: {admin.batch}</span>}
                         </div>
                       </td>
-                      <td data-label="Employee ID / Branch">
+                      <td data-label="Branch / Batch / Schedule">
                         <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left' }}>
-                          <span style={{ color: '#fff', fontSize: '0.85rem' }}>{admin.branch || 'Global'}</span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>ID: {admin.employeeId || 'N/A'}</span>
+                          <span style={{ color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>{admin.branch || 'Global'}</span>
+                          {(admin.role === 'trainer' || admin.role === 'coordinator') && admin.batch && (
+                            (() => {
+                              const batchObj = batchOptions.find(b => b.id.toLowerCase() === admin.batch.toLowerCase());
+                              const batchDisp = batchObj ? `${batchObj.name} (${batchObj.schedule})` : admin.batch;
+                              return <span style={{ fontSize: '0.75rem', color: 'var(--color-primary)', fontWeight: '500', marginTop: '2px' }}>{batchDisp}</span>;
+                            })()
+                          )}
+                          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>ID: {admin.employeeId || 'N/A'}</span>
                         </div>
                       </td>
                       <td data-label="Session Status">
@@ -9487,7 +9884,7 @@ function App() {
         .then(res => res.json())
         .then(data => {
           setBranchCredentials(data.branchCredentials || {});
-          setSettingsSuccess(`Branch Inspector credentials for "${br.toUpperCase()}" updated successfully!`);
+          setSettingsSuccess(`Branch Trainer credentials for "${br.toUpperCase()}" updated successfully!`);
           setBranchForm({ branch: br, newUsername: '', newPassword: '', confirmPassword: '' });
         })
         .catch(err => {
@@ -9908,9 +10305,10 @@ function App() {
               <p className="animate-item-3" style={{ color: 'var(--color-text-muted)', marginBottom: '1.5rem' }}>If you forgot your password, please contact the administrator via WhatsApp.</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 {(() => {
+                  const batchObj = batchOptions.find(b => b.id === selectedBatchLogin);
                   const batchName = selectedBatchLogin === 'admin'
                     ? 'Branch Admin (All Batches)'
-                    : (batchOptions.find(b => b.id === selectedBatchLogin)?.name || selectedBatchLogin);
+                    : (batchObj ? `${batchObj.name} (${batchObj.schedule})` : selectedBatchLogin);
                   const msgText = `Hi, I need to reset my password for the MASTER FIT dashboard. Branch: ${selectedBranchLogin}, Batch: ${batchName}.`;
                   return (
                     <a
@@ -10022,7 +10420,7 @@ function App() {
                   >
                     <option value="admin" style={{ background: '#1a1a1a', color: '#ffffff' }}>Branch Admin (All Batches)</option>
                     {getFilteredBatchOptions(selectedBranchLogin).map(opt => (
-                      <option key={opt.id} value={opt.id} style={{ background: '#1a1a1a', color: '#ffffff' }}>{opt.name}</option>
+                      <option key={opt.id} value={opt.id} style={{ background: '#1a1a1a', color: '#ffffff' }}>{opt.name} ({opt.schedule})</option>
                     ))}
                   </select>
                 </div>
@@ -10035,7 +10433,37 @@ function App() {
                     <label style={{ margin: 0, fontSize: '0.85rem' }}>Password</label>
                     <a href="#" style={{ fontSize: '0.8rem', color: 'var(--color-primary)', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); if (!isLoggingIn) { setIsForgotPassword(true); setLoginError(''); } }}>Forgot Password?</a>
                   </div>
-                  <input type="password" className="form-control form-control-animated" placeholder="Enter password" value={loginData.password} onChange={(e) => setLoginData({ ...loginData, password: e.target.value })} disabled={isLoggingIn} required style={{ height: '38px' }} />
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type={showLoginPassword ? "text" : "password"}
+                      className="form-control form-control-animated"
+                      placeholder="Enter password"
+                      value={loginData.password}
+                      onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
+                      disabled={isLoggingIn}
+                      required
+                      style={{ height: '38px', paddingRight: '2.5rem' }}
+                    />
+                    <button
+                      type="button"
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: 'rgba(255, 255, 255, 0.4)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: 0
+                      }}
+                      onClick={() => setShowLoginPassword(prev => !prev)}
+                    >
+                      {showLoginPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
                 <button type="submit" className="btn-primary animate-item-7" style={{ width: '100%', justifyContent: 'center', marginTop: '0.75rem', height: '38px' }} disabled={isLoggingIn}>
                   {isLoggingIn ? (
@@ -10454,7 +10882,37 @@ function App() {
                   <label style={{ margin: 0, fontSize: '0.85rem' }}>Password</label>
                   <a href="#" style={{ fontSize: '0.8rem', color: 'var(--color-primary)', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); if (!isLoggingIn) { setIsForgotPassword(true); setLoginError(''); } }}>Forgot Password?</a>
                 </div>
-                <input type="password" className="form-control form-control-animated" placeholder="Enter password" value={loginData.password} onChange={(e) => setLoginData({ ...loginData, password: e.target.value })} disabled={isLoggingIn} required style={{ height: '38px' }} />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showSuperadminLoginPassword ? "text" : "password"}
+                    className="form-control form-control-animated"
+                    placeholder="Enter password"
+                    value={loginData.password}
+                    onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
+                    disabled={isLoggingIn}
+                    required
+                    style={{ height: '38px', paddingRight: '2.5rem' }}
+                  />
+                  <button
+                    type="button"
+                    style={{
+                      position: 'absolute',
+                      right: '10px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      color: 'rgba(255, 255, 255, 0.4)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: 0
+                    }}
+                    onClick={() => setShowSuperadminLoginPassword(prev => !prev)}
+                  >
+                    {showSuperadminLoginPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </div>
               <button type="submit" className="btn-primary animate-item-5" style={{ width: '100%', justifyContent: 'center', marginTop: '0.75rem', height: '38px' }} disabled={isLoggingIn}>
                 {isLoggingIn ? (
@@ -10784,7 +11242,7 @@ function App() {
               >
                 <option value="All">All Batches</option>
                 {getFilteredBatchOptions().map(opt => (
-                  <option key={opt.id} value={opt.schedule}>{opt.name}</option>
+                  <option key={opt.id} value={opt.id}>{opt.name}</option>
                 ))}
               </select>
             </div>
@@ -11060,7 +11518,7 @@ function App() {
                       joinDate: new Date().toISOString().split('T')[0],
                       branch: initialBranch,
                       schedule: firstBatch ? firstBatch.schedule : 'Mon-Thu',
-                      batch: firstBatch ? firstBatch.name : 'Morning',
+                      batch: firstBatch ? firstBatch.id : 'Morning',
                       photo: null
                     });
                     setIsAddModalOpen(true);
@@ -11089,7 +11547,7 @@ function App() {
                                   <img src={student.photo} alt="" style={{ width: '30px', height: '40px', borderRadius: '4px', objectFit: 'cover' }} />
                                 ) : (
                                   <div style={{ width: '30px', height: '40px', borderRadius: '4px', background: 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem', color: 'white', textDecoration: 'none' }}>
-                                    {student.name.charAt(0)}
+                                    {(student.studentName || student.name).charAt(0)}
                                   </div>
                                 )}
                                 <span style={{
@@ -11097,7 +11555,7 @@ function App() {
                                   color: student.status === 'Inactive' ? 'var(--color-text-muted)' : '#E50914',
                                   textDecoration: 'underline'
                                 }}>
-                                  {student.name}
+                                  {student.studentName || student.name}
                                 </span>
                                 {student.status === 'Inactive' && (
                                   <span className="badge" style={{ background: 'rgba(244, 67, 54, 0.15)', color: '#F44336', border: '1px solid rgba(244, 67, 54, 0.3)', marginLeft: '8px' }}>
@@ -11108,7 +11566,7 @@ function App() {
                             </td>
                             <td data-label="Batch Schedule">
                               <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', marginRight: '8px' }}>{student.branch}</span>
-                              <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule)} • {student.batch}</span>
+                              <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule)} • {student.schedule}</span>
                             </td>
                             <td data-label="Belt Level"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
                             <td data-label="Phone" style={{ color: 'var(--color-text-muted)' }}>{student.phone}</td>
@@ -11504,18 +11962,19 @@ function App() {
                   <div className="profile-header-top">
                     <div className="profile-info-left">
                       {selectedStudent.photo ? (
-                        <img src={selectedStudent.photo} alt={selectedStudent.name} style={{ width: '90px', height: '120px', borderRadius: '8px', objectFit: 'cover', border: '2px solid var(--color-primary)' }} />
+                        <img src={selectedStudent.photo} alt={selectedStudent.studentName || selectedStudent.name} style={{ width: '90px', height: '120px', borderRadius: '8px', objectFit: 'cover', border: '2px solid var(--color-primary)' }} />
                       ) : (
                         <div style={{ width: '90px', height: '120px', borderRadius: '8px', background: 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2.5rem', fontWeight: 'bold' }}>
-                          {selectedStudent.name.charAt(0)}
+                          {(selectedStudent.studentName || selectedStudent.name).charAt(0)}
                         </div>
                       )}
-                      <h3 style={{ margin: 0, fontSize: '1.5rem' }}>{selectedStudent.name}</h3>
+                      <h3 style={{ margin: 0, fontSize: '1.5rem' }}>{selectedStudent.studentName || selectedStudent.name}</h3>
                     </div>
                     <span className={`badge ${getBeltColorClass(selectedStudent.belt)}`}>{selectedStudent.belt}</span>
                   </div>
 
                   <div className="grid-2-col" style={{ marginBottom: '1.5rem', background: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--glass-border)', gap: '1rem' }}>
+                    <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Admission Number</span><div style={{ fontWeight: 600 }}>{selectedStudent.admissionNumber || selectedStudent.admissionNo || selectedStudent.id}</div></div>
                     <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Age</span><div style={{ fontWeight: 600 }}>{selectedStudent.age} Years</div></div>
                     <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Date of Birth (DOB)</span><div style={{ fontWeight: 600 }}>{selectedStudent.dob || 'N/A'}</div></div>
                     <div>
@@ -11549,7 +12008,7 @@ function App() {
                     <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                       <span className="badge" style={{ background: 'var(--color-primary)', color: 'white' }}>{selectedStudent.branch} Branch</span>
                       <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>{getBatchNameFromSchedule(selectedStudent.schedule)}</span>
-                      <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>{selectedStudent.batch} Batch</span>
+                      <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>{selectedStudent.schedule} Batch</span>
                     </div>
                   </div>
 

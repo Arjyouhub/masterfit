@@ -35,6 +35,66 @@ if (fs.existsSync(envPath)) {
   dotenv.config();
 }
 
+const parseScheduleToDays = (schedule) => {
+  const defaults = { Mon: false, Tue: false, Wed: false, Thu: false, Fri: false, Sat: false, Sun: false };
+  if (!schedule) return defaults;
+  
+  const cleanSched = schedule.toLowerCase().replace(/\s+/g, '');
+  if (cleanSched === 'daily') {
+    return { Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true };
+  }
+  if (cleanSched === 'weekday' || cleanSched === 'weekdays') {
+    return { Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: false, Sun: false };
+  }
+  if (cleanSched === 'weekend' || cleanSched === 'weekends') {
+    return { Mon: false, Tue: false, Wed: false, Thu: false, Fri: false, Sat: true, Sun: true };
+  }
+  
+  const dayNamesShort = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const dayKeys = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  
+  if (cleanSched.includes('-')) {
+    const parts = cleanSched.split('-');
+    if (parts.length === 2) {
+      const startIdx = dayNamesShort.indexOf(parts[0].substring(0, 3));
+      const endIdx = dayNamesShort.indexOf(parts[1].substring(0, 3));
+      if (startIdx !== -1 && endIdx !== -1) {
+        const res = { ...defaults };
+        let curr = startIdx;
+        while (true) {
+          res[dayKeys[curr]] = true;
+          if (curr === endIdx) break;
+          curr = (curr + 1) % 7;
+        }
+        return res;
+      }
+    }
+  }
+  
+  const items = cleanSched.split(',');
+  const res = { ...defaults };
+  let foundAny = false;
+  for (const item of items) {
+    const trimmed = item.trim().substring(0, 3);
+    const dayIdx = dayNamesShort.indexOf(trimmed);
+    if (dayIdx !== -1) {
+      res[dayKeys[dayIdx]] = true;
+      foundAny = true;
+    }
+  }
+  
+  if (foundAny) return res;
+  return defaults;
+};
+
+const schedulesMatch = (s1, s2) => {
+  if (!s1 || !s2) return false;
+  const d1 = parseScheduleToDays(s1);
+  const d2 = parseScheduleToDays(s2);
+  const keys = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  return keys.every(k => d1[k] === d2[k]);
+};
+
 // Console logs in-memory buffer for developer diagnostics
 const appLogs = [];
 
@@ -486,6 +546,13 @@ async function syncUsersAndSeed() {
     const upsertUser = async (username, password, role, branch = '', batch = '') => {
       const uClean = username.toLowerCase().trim();
       activeUsernames.add(uClean);
+      let schedule = '';
+      if (batch) {
+        const cb = (creds.customBatches || []).find(b => b.id.toLowerCase().trim() === batch.toLowerCase().trim());
+        if (cb) {
+          schedule = cb.schedule || '';
+        }
+      }
       const existing = await User.findOne({ username: uClean });
       if (!existing) {
         await new User({
@@ -494,6 +561,7 @@ async function syncUsersAndSeed() {
           role,
           branch,
           batch,
+          schedule,
           status: 'Active'
         }).save();
         console.log(`[Sync] Created User account for ${uClean} (Role: ${role})`);
@@ -513,6 +581,10 @@ async function syncUsersAndSeed() {
         }
         if (existing.batch !== batch) {
           existing.batch = batch;
+          changed = true;
+        }
+        if (existing.schedule !== schedule) {
+          existing.schedule = schedule;
           changed = true;
         }
         if (existing.status !== 'Active') {
@@ -608,12 +680,8 @@ async function seedBranchesAndBatches() {
     }
 
     let credsUpdated = false;
-    const defaultBranches = ["Kuttiady", "Perambra", "Orkatteri", "Paarakadav", "Kallachi", "Chambra", "Devargovil"];
-    const defaultBatches = [
-      { id: 'batch1', name: 'Batch 1', schedule: 'Mon-Thu' },
-      { id: 'batch2', name: 'Batch 2', schedule: 'Tue-Fri' },
-      { id: 'batch3', name: 'Batch 3', schedule: 'Wed-Sat' }
-    ];
+    const defaultBranches = [];
+    const defaultBatches = [];
 
     if (!creds.customBranches || creds.customBranches.length === 0) {
       creds.customBranches = defaultBranches;
@@ -703,6 +771,7 @@ async function seedBranchesAndBatches() {
         const cbStartTime = cb.startTime || '09:00';
         const cbEndTime = cb.endTime || '10:30';
         const cbSlotType = cb.slotType || 'Morning';
+        const cbStatus = cb.status || 'Active';
         if (!existing && branchObj) {
           await new Batch({
             name: cbName,
@@ -716,7 +785,7 @@ async function seedBranchesAndBatches() {
             startTime: cbStartTime,
             endTime: cbEndTime,
             slotType: cbSlotType,
-            status: 'Active'
+            status: cbStatus
           }).save();
           console.log(`[Seed] Created Batch: ${cbName} for Branch: ${brClean}`);
         } else if (existing) {
@@ -726,6 +795,7 @@ async function seedBranchesAndBatches() {
           if (existing.endTime !== cbEndTime) { existing.endTime = cbEndTime; changed = true; }
           if (existing.slotType !== cbSlotType) { existing.slotType = cbSlotType; changed = true; }
           if (existing.name !== cbName) { existing.name = cbName; existing.batchName = cbName; changed = true; }
+          if (existing.status !== cbStatus) { existing.status = cbStatus; changed = true; }
           if (changed) {
             await existing.save();
             console.log(`[Seed] Synced Batch Config: ${cbId} of Branch: ${brClean}`);
@@ -758,11 +828,13 @@ async function seedBranchesAndBatches() {
             const cbSlotType = cb.slotType || 'Morning';
             const cbName = cb.name.trim();
             const cbSchedule = cb.schedule.trim();
+            const cbStatus = cb.status || 'Active';
             if (existing.startTime !== cbStartTime) { existing.startTime = cbStartTime; changed = true; }
             if (existing.endTime !== cbEndTime) { existing.endTime = cbEndTime; changed = true; }
             if (existing.slotType !== cbSlotType) { existing.slotType = cbSlotType; changed = true; }
             if (existing.schedule !== cbSchedule) { existing.schedule = cbSchedule; changed = true; }
             if (existing.name !== cbName) { existing.name = cbName; existing.batchName = cbName; changed = true; }
+            if (existing.status !== cbStatus) { existing.status = cbStatus; changed = true; }
           }
           if (changed) {
             await existing.save();
@@ -776,6 +848,7 @@ async function seedBranchesAndBatches() {
           const startTime = cb ? (cb.startTime || '09:00') : '09:00';
           const endTime = cb ? (cb.endTime || '10:30') : '10:30';
           const slotType = cb ? (cb.slotType || 'Morning') : 'Morning';
+          const status = cb && cb.status ? cb.status : 'Active';
           const branchObj = await Branch.findOne({ code: brClean.toLowerCase().replace(/\s+/g, '-') });
           
           if (branchObj) {
@@ -792,7 +865,7 @@ async function seedBranchesAndBatches() {
               startTime,
               endTime,
               slotType,
-              status: 'Active'
+              status
             }).save();
             console.log(`[Seed] Created Batch: ${name} for Branch: ${brClean} with Trainer: ${trainerUser}`);
           }
@@ -1245,8 +1318,18 @@ app.post('/api/batches', authenticateSession, authorizeRoles('superadmin', 'deve
 
     const cleanCode = code.toLowerCase().trim();
     const cleanBranch = branch.trim();
+
+    const branchObj = await Branch.findOne({
+      $or: [
+        { name: new RegExp(`^${cleanBranch}$`, 'i') },
+        { code: cleanBranch.toLowerCase().replace(/\s+/g, '-') }
+      ]
+    });
+    if (!branchObj) {
+      return res.status(400).json({ error: 'Branch not found. Cannot create batch.' });
+    }
     
-    const existing = await Batch.findOne({ branch: cleanBranch, code: cleanCode });
+    const existing = await Batch.findOne({ branchId: branchObj._id, code: cleanCode });
     if (existing) {
       return res.status(400).json({ error: 'Batch code already exists for this branch' });
     }
@@ -1254,7 +1337,9 @@ app.post('/api/batches', authenticateSession, authorizeRoles('superadmin', 'deve
     const newBatch = new Batch({
       name: name.trim(),
       code: cleanCode,
-      branch: cleanBranch,
+      branch: branchObj.name,
+      branchId: branchObj._id,
+      branchName: branchObj.name,
       trainer: trainer || '',
       schedule: schedule || 'Mon-Thu',
       startTime: startTime || '09:00',
@@ -1288,12 +1373,27 @@ app.put('/api/batches/:id', authenticateSession, authorizeRoles('superadmin', 'd
     if (code || branch) {
       const cleanCode = code ? code.toLowerCase().trim() : batch.code;
       const cleanBranch = branch ? branch.trim() : batch.branch;
-      if (cleanCode !== batch.code || cleanBranch !== batch.branch) {
-        const existing = await Batch.findOne({ branch: cleanBranch, code: cleanCode });
-        if (existing) return res.status(400).json({ error: 'Batch code already exists for this branch' });
+
+      const branchObj = await Branch.findOne({
+        $or: [
+          { name: new RegExp(`^${cleanBranch}$`, 'i') },
+          { code: cleanBranch.toLowerCase().replace(/\s+/g, '-') }
+        ]
+      });
+      if (!branchObj) {
+        return res.status(400).json({ error: 'Branch not found. Cannot reassign batch.' });
+      }
+
+      if (cleanCode !== batch.code || branchObj._id.toString() !== batch.branchId?.toString()) {
+        const existing = await Batch.findOne({ branchId: branchObj._id, code: cleanCode });
+        if (existing && existing._id.toString() !== batch._id.toString()) {
+          return res.status(400).json({ error: 'Batch code already exists for this branch' });
+        }
       }
       batch.code = cleanCode;
-      batch.branch = cleanBranch;
+      batch.branch = branchObj.name;
+      batch.branchId = branchObj._id;
+      batch.branchName = branchObj.name;
     }
 
     if (name) batch.name = name.trim();
@@ -1687,17 +1787,45 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
       adminQuery.branch = brRegex;
       batchQuery.branch = brRegex;
     }
+    let selectedBatchObj = null;
     if (selectedBatchCode && selectedBatchCode.toLowerCase() !== 'all') {
-      const btRegex = new RegExp(`^${selectedBatchCode.trim()}$`, 'i');
-      if (selectedBatchCode.includes('-')) {
-        studentQuery.schedule = btRegex;
-      } else {
-        studentQuery.batch = btRegex;
-        batchQuery.code = btRegex;
-      }
+      const BatchModel = mongoose.model('Batch');
+      selectedBatchObj = await BatchModel.findOne({ code: new RegExp(`^${selectedBatchCode.trim()}$`, 'i') });
+      batchQuery.code = new RegExp(`^${selectedBatchCode.trim()}$`, 'i');
     }
 
-    const totalStudents = await Student.countDocuments(studentQuery);
+    // Fetch active students and filter in memory to support legacy fallbacks consistently
+    const baseStudents = await Student.find(studentQuery).select('-photo').lean();
+    const filteredStudents = baseStudents.filter(s => {
+      if (!selectedBatchCode || selectedBatchCode.toLowerCase() === 'all') return true;
+
+      const studentBatchLower = (s.batch || '').toLowerCase().trim();
+      const targetIdLower = selectedBatchCode.toLowerCase().trim();
+
+      if (studentBatchLower === targetIdLower) return true;
+
+      if (selectedBatchObj) {
+        const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
+        if (studentBatchLower === targetNameLower) return true;
+      }
+
+      // Fallback check for legacy students using schedule
+      if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
+        return false;
+      }
+
+      if (selectedBatchObj) {
+        return schedulesMatch(s.schedule, selectedBatchObj.schedule);
+      }
+
+      if (selectedBatchCode.includes('-') || selectedBatchCode.includes(',')) {
+        return schedulesMatch(s.schedule, selectedBatchCode);
+      }
+
+      return false;
+    });
+
+    const totalStudents = filteredStudents.length;
     const totalTrainers = await User.countDocuments(trainerQuery);
     const totalAdmins = await User.countDocuments(adminQuery);
     const totalBranches = await Branch.countDocuments(branchQuery);
@@ -1718,8 +1846,7 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
     let totalAbsentCount = 0;
 
     // Filter student IDs in our scope to only count attendance of students we care about
-    const scopedStudents = await Student.find(studentQuery).select('id').lean();
-    const scopedStudentIds = new Set(scopedStudents.map(s => String(s.id)));
+    const scopedStudentIds = new Set(filteredStudents.map(s => String(s.id)));
 
     // Process all attendance records for stats
     for (const record of allAttendance) {
@@ -1779,7 +1906,7 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
     const currentYearMonth = `${currentYear}-${String(currentMonthNum).padStart(2, '0')}`;
 
     // Loop through scoped students
-    const fullScopedStudents = await Student.find(studentQuery).select('-photo').lean();
+    const fullScopedStudents = filteredStudents;
     for (const student of fullScopedStudents) {
       const joinDate = student.joinDate || '2026-01-01';
       const joinYearMonth = joinDate.substring(0, 7); // YYYY-MM
@@ -1861,19 +1988,147 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
 app.get('/api/students', authenticateSession, async (req, res) => {
   try {
     const { role, branch, batch } = req.user;
+    
+    // Support query parameters
+    const queryBranch = req.query.branchId || req.query.branch || '';
+    const queryBatch = req.query.batchId || req.query.batch || '';
+
     let filter = {};
-    if (role !== 'superadmin' && role !== 'developer') {
-      filter.branch = new RegExp(`^${branch}$`, 'i');
+    
+    // Resolve branch scoping
+    let targetBranch = '';
+    if (role === 'superadmin' || role === 'developer') {
+      targetBranch = queryBranch;
+    } else {
+      targetBranch = branch;
     }
-    if (role === 'trainer') {
-      const schedule = await getBatchSchedule(batch, branch);
-      if (schedule) {
-        filter.schedule = schedule;
+
+    if (targetBranch && targetBranch.toLowerCase() !== 'all') {
+      // If queryBranch is an ObjectId, resolve the branch name from Branch model
+      if (mongoose.Types.ObjectId.isValid(targetBranch)) {
+        const branchObj = await Branch.findById(targetBranch);
+        if (branchObj) {
+          filter.branch = new RegExp(`^${branchObj.name}$`, 'i');
+        } else {
+          filter.branch = targetBranch;
+        }
+      } else {
+        filter.branch = new RegExp(`^${targetBranch}$`, 'i');
       }
-      filter.batch = batch.toLowerCase().trim();
     }
-    const students = await Student.find(filter).select('-photo').lean();
-    res.json(students.map(decryptStudent));
+
+    // Fetch active students and filter by batch (supporting legacy and batchId/batchName mapping)
+    const baseStudents = await Student.find(filter).select('-photo').lean();
+
+    // Resolve batch details if targetBatch is selected
+    let targetBatchCode = '';
+    if (role === 'trainer') {
+      targetBatchCode = batch;
+    } else {
+      targetBatchCode = queryBatch;
+    }
+
+    let selectedBatchObj = null;
+    if (targetBatchCode && targetBatchCode.toLowerCase() !== 'all') {
+      // Look up by ObjectId, code, or name
+      if (mongoose.Types.ObjectId.isValid(targetBatchCode)) {
+        selectedBatchObj = await Batch.findById(targetBatchCode);
+      } else {
+        selectedBatchObj = await Batch.findOne({
+          $or: [
+            { code: new RegExp(`^${targetBatchCode.trim()}$`, 'i') },
+            { name: new RegExp(`^${targetBatchCode.trim()}$`, 'i') }
+          ]
+        });
+      }
+    }
+
+    const decryptedStudents = baseStudents.map(decryptStudent);
+
+    const filteredStudents = decryptedStudents.filter(s => {
+      if (!targetBatchCode || targetBatchCode.toLowerCase() === 'all') return true;
+
+      const studentBatchLower = (s.batch || '').toLowerCase().trim();
+      const targetIdLower = targetBatchCode.toLowerCase().trim();
+
+      // Check direct code match
+      if (studentBatchLower === targetIdLower) return true;
+
+      // Check direct match with selectedBatchObj code or name
+      if (selectedBatchObj) {
+        if (studentBatchLower === selectedBatchObj.code.toLowerCase().trim()) return true;
+        if (studentBatchLower === selectedBatchObj.name.toLowerCase().trim()) return true;
+        // Check database ID match if targetBatchCode is an ObjectId
+        if (mongoose.Types.ObjectId.isValid(targetBatchCode) && String(selectedBatchObj._id) === targetBatchCode) {
+          if (studentBatchLower === selectedBatchObj.code.toLowerCase().trim() || studentBatchLower === selectedBatchObj.name.toLowerCase().trim()) return true;
+        }
+      }
+
+      // Fallback for legacy students using schedule
+      if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
+        return false;
+      }
+
+      if (selectedBatchObj) {
+        return schedulesMatch(s.schedule, selectedBatchObj.schedule);
+      }
+
+      if (targetBatchCode.includes('-') || targetBatchCode.includes(',')) {
+        return schedulesMatch(s.schedule, targetBatchCode);
+      }
+
+      return false;
+    });
+
+    // Populate required fields: studentName, admissionNumber, branchId, branchName, batchId, batchName
+    const populatedStudents = await Promise.all(filteredStudents.map(async (s) => {
+      // Find branchId and branchName
+      let branchId = '';
+      let branchName = s.branch || '';
+      
+      const branchDoc = await Branch.findOne({ name: new RegExp(`^${branchName.trim()}$`, 'i') });
+      if (branchDoc) {
+        branchId = String(branchDoc._id);
+        branchName = branchDoc.name;
+      }
+
+      // Find batchId and batchName
+      let batchId = '';
+      let batchName = s.batch || '';
+
+      const batchDoc = await Batch.findOne({
+        $or: [
+          { code: new RegExp(`^${batchName.trim()}$`, 'i') },
+          { name: new RegExp(`^${batchName.trim()}$`, 'i') }
+        ]
+      });
+      if (batchDoc) {
+        batchId = String(batchDoc._id);
+        batchName = batchDoc.name;
+      } else {
+        // Look up by schedule fallback if legacy
+        const legacyBatch = await Batch.findOne({
+          branchId: branchDoc ? branchDoc._id : undefined,
+          schedule: new RegExp(`^${s.schedule}$`, 'i')
+        });
+        if (legacyBatch) {
+          batchId = String(legacyBatch._id);
+          batchName = legacyBatch.name;
+        }
+      }
+
+      return {
+        ...s,
+        studentName: s.name,
+        admissionNumber: s.admissionNo || String(s.id),
+        branchId,
+        branchName,
+        batchId,
+        batchName
+      };
+    }));
+
+    res.json(populatedStudents);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2188,6 +2443,7 @@ app.delete('/api/students/:id', authenticateSession, async (req, res) => {
 app.get('/api/attendance', authenticateSession, async (req, res) => {
   try {
     const { role, branch, batch } = req.user;
+    let allowedStudentIds = null;
     
     const currentYear = new Date().getFullYear();
     let queryYear = currentYear;
@@ -2697,6 +2953,42 @@ app.post('/api/login', async (req, res) => {
           screenResolution: resolution
         }).save();
         return res.status(401).json({ success: false, error: 'Unauthorized login type for this account' });
+      }
+
+      // Enforce strict branch and batch selection checks for Trainer and Branch Admin portals
+      if (isTrainer) {
+        const bodyBranch = String(branch || '').toLowerCase().trim();
+        const bodyBatch = String(batch || '').toLowerCase().trim();
+        const userBranch = String(user.branch || '').toLowerCase().trim();
+        const userBatch = String(user.batch || '').toLowerCase().trim();
+
+        if (user.role === 'branchadmin') {
+          if (bodyBranch !== userBranch || bodyBatch !== 'admin') {
+            await new LoginHistory({
+              username: user.username,
+              status: 'Failed',
+              ipAddress: clientIp,
+              userAgent,
+              deviceName: deviceName || 'Unknown Device',
+              ...deviceDetails,
+              screenResolution: resolution
+            }).save();
+            return res.status(401).json({ success: false, error: 'Invalid branch selection for this Branch Admin account' });
+          }
+        } else if (user.role === 'trainer') {
+          if (bodyBranch !== userBranch || bodyBatch !== userBatch) {
+            await new LoginHistory({
+              username: user.username,
+              status: 'Failed',
+              ipAddress: clientIp,
+              userAgent,
+              deviceName: deviceName || 'Unknown Device',
+              ...deviceDetails,
+              screenResolution: resolution
+            }).save();
+            return res.status(401).json({ success: false, error: 'Invalid branch or batch selection for this Trainer account' });
+          }
+        }
       }
 
       const token = crypto.randomBytes(32).toString('hex');
@@ -3220,8 +3512,8 @@ app.get('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
   }
 });
 
-// Update credentials (auto-hashes new passwords - Super Admin only)
-app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
+// Update credentials (auto-hashes new passwords - Super Admin and Branch Admin)
+app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
   try {
     const body = { ...req.body };
 
@@ -3229,6 +3521,106 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
     let credsDoc = await Credential.findOne({ configType: 'main' });
     if (!credsDoc) {
       credsDoc = new Credential({ configType: 'main' });
+    }
+
+    // Role-based validation for branchadmin
+    if (req.user.role === 'branchadmin') {
+      const userBranch = String(req.user.branch || '').toLowerCase().trim();
+      if (!userBranch) {
+        return res.status(403).json({ error: 'Access denied: Branch admin has no assigned branch.' });
+      }
+
+      // 1. Reject modifications to disallowed fields
+      const disallowed = ['adminCredentials', 'branchCredentials', 'customBranches', 'monthlyFeeRate', 'admissionFeeRate', 'coupons'];
+      for (const field of disallowed) {
+        if (body[field] !== undefined) {
+          const existingVal = credsDoc[field] && typeof credsDoc[field].toJSON === 'function'
+            ? credsDoc[field].toJSON()
+            : credsDoc[field];
+          const newVal = body[field];
+          if (JSON.stringify(existingVal) !== JSON.stringify(newVal)) {
+            return res.status(403).json({ error: `Access denied: Branch admin is not authorized to modify ${field}.` });
+          }
+        }
+      }
+
+      // 2. Validate customBatches additions/modifications/deletions belong only to their own branch
+      if (body.customBatches !== undefined) {
+        const existingBatches = credsDoc.customBatches || [];
+        const newBatches = body.customBatches;
+        if (!Array.isArray(newBatches)) {
+          return res.status(400).json({ error: 'customBatches must be an array.' });
+        }
+
+        // Helper to resolve the branch of a custom batch using db state & patterns
+        const getBatchBranch = (cb) => {
+          const cbId = String(cb.id || cb.code || cb._id || '').trim().toLowerCase();
+          const existing = existingBatches.find(eb => String(eb.id || eb.code || eb._id || '').trim().toLowerCase() === cbId);
+          
+          if (existing && existing.branch) {
+            return existing.branch.toLowerCase().trim();
+          }
+          if (cb.branch) {
+            return cb.branch.toLowerCase().trim();
+          }
+
+          const batchEntries = credsDoc.batchCredentials instanceof Map 
+            ? Array.from(credsDoc.batchCredentials.entries()) 
+            : Object.entries(credsDoc.batchCredentials || {});
+          const matchingCredKey = batchEntries.find(([key]) => key.toLowerCase().endsWith(`_${cbId}`));
+          if (matchingCredKey) {
+            return matchingCredKey[0].split('_')[0].toLowerCase().trim();
+          }
+          
+          const nameToTest = existing ? existing.name : cb.name;
+          const nameLower = String(nameToTest || '').toLowerCase();
+          if (nameLower.includes('ork')) return 'orkatteri';
+          if (nameLower.includes('prkdv') || nameLower.includes('paarakadav')) return 'paarakadav';
+          if (nameLower.includes('pba') || nameLower.includes('perambra')) return 'perambra';
+          if (nameLower.includes('klkndy') || nameLower.includes('kallikandy')) return 'kallikandy';
+          if (nameLower.includes('ktdy') || nameLower.includes('kuttiady')) return 'kuttiady';
+          
+          return 'all';
+        };
+
+        // Every batch in the request must belong to userBranch
+        for (const b of newBatches) {
+          const bBranch = getBatchBranch(b);
+          if (bBranch !== userBranch) {
+            return res.status(403).json({ error: 'Access denied: You can only add, remove, or modify batches for your own branch.' });
+          }
+        }
+      }
+
+      // 3. Validate batchCredentials additions/modifications/deletions match prefix userBranch + '_'
+      if (body.batchCredentials !== undefined) {
+        const existingCreds = credsDoc.batchCredentials && typeof credsDoc.batchCredentials.toJSON === 'function'
+          ? credsDoc.batchCredentials.toJSON()
+          : (credsDoc.batchCredentials || {});
+        const newCreds = body.batchCredentials;
+
+        const prefix = userBranch + '_';
+
+        for (const [key, val] of Object.entries(existingCreds)) {
+          if (!key.toLowerCase().startsWith(prefix)) {
+            if (!newCreds[key]) {
+              return res.status(403).json({ error: `Access denied: You cannot delete batch credentials for other branches (${key}).` });
+            }
+            const newVal = newCreds[key];
+            if (newVal.username !== val.username || newVal.password !== val.password) {
+              return res.status(403).json({ error: `Access denied: You cannot modify batch credentials for other branches (${key}).` });
+            }
+          }
+        }
+
+        for (const key of Object.keys(newCreds)) {
+          if (!key.toLowerCase().startsWith(prefix)) {
+            if (!existingCreds[key]) {
+              return res.status(403).json({ error: `Access denied: You cannot add batch credentials for other branches (${key}).` });
+            }
+          }
+        }
+      }
     }
 
     if (body.adminCredentials) {
@@ -3340,12 +3732,75 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
     }
 
     if (body.customBranches !== undefined) {
-      credsDoc.customBranches = body.customBranches;
+      if (Array.isArray(body.customBranches)) {
+        credsDoc.customBranches = body.customBranches.map(b => {
+          if (typeof b === 'string') return b.trim();
+          if (b && typeof b === 'object') return (b.name || '').trim();
+          return '';
+        }).filter(name => name !== '' && !/^[0-9a-fA-F]{24}$/.test(name));
+      } else {
+        credsDoc.customBranches = [];
+      }
       credsDoc.markModified('customBranches');
     }
 
     if (body.customBatches !== undefined) {
-      credsDoc.customBatches = body.customBatches;
+      let sanitizedCustomBatches = [];
+      if (Array.isArray(body.customBatches)) {
+        sanitizedCustomBatches = body.customBatches.map(b => {
+          const id = b.id || b.code || b._id || '';
+          const name = b.name || b.batchName || '';
+          const schedule = b.schedule || 'Mon-Thu';
+          return {
+            id: String(id).trim(),
+            name: String(name).trim(),
+            schedule: String(schedule).trim(),
+            branch: b.branch ? String(b.branch).trim() : undefined,
+            startTime: b.startTime ? String(b.startTime).trim() : undefined,
+            endTime: b.endTime ? String(b.endTime).trim() : undefined,
+            slotType: b.slotType ? String(b.slotType).trim() : undefined,
+            status: b.status ? String(b.status).trim() : 'Active'
+          };
+        }).filter(b => b.id !== '' && b.name !== '');
+      }
+
+      if (req.user.role === 'branchadmin') {
+        const userBranch = String(req.user.branch || '').toLowerCase().trim();
+        const getBatchBranch = (cb) => {
+          const cbId = String(cb.id || cb.code || cb._id || '').trim().toLowerCase();
+          const existing = credsDoc.customBatches.find(eb => String(eb.id || eb.code || eb._id || '').trim().toLowerCase() === cbId);
+          
+          if (existing && existing.branch) {
+            return existing.branch.toLowerCase().trim();
+          }
+          if (cb.branch) {
+            return cb.branch.toLowerCase().trim();
+          }
+
+          const batchEntries = credsDoc.batchCredentials instanceof Map 
+            ? Array.from(credsDoc.batchCredentials.entries()) 
+            : Object.entries(credsDoc.batchCredentials || {});
+          const matchingCredKey = batchEntries.find(([key]) => key.toLowerCase().endsWith(`_${cbId}`));
+          if (matchingCredKey) {
+            return matchingCredKey[0].split('_')[0].toLowerCase().trim();
+          }
+          
+          const nameToTest = existing ? existing.name : cb.name;
+          const nameLower = String(nameToTest || '').toLowerCase();
+          if (nameLower.includes('ork')) return 'orkatteri';
+          if (nameLower.includes('prkdv') || nameLower.includes('paarakadav')) return 'paarakadav';
+          if (nameLower.includes('pba') || nameLower.includes('perambra')) return 'perambra';
+          if (nameLower.includes('klkndy') || nameLower.includes('kallikandy')) return 'kallikandy';
+          if (nameLower.includes('ktdy') || nameLower.includes('kuttiady')) return 'kuttiady';
+          
+          return 'all';
+        };
+
+        const otherBranchesBatches = credsDoc.customBatches.filter(b => getBatchBranch(b) !== userBranch);
+        credsDoc.customBatches = [...otherBranchesBatches, ...sanitizedCustomBatches];
+      } else {
+        credsDoc.customBatches = sanitizedCustomBatches;
+      }
       credsDoc.markModified('customBatches');
     }
 
@@ -3379,6 +3834,8 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
     
     // Automatically synchronize user collection
     await syncUsersAndSeed();
+    // Seed/sync branches and batches collection immediately
+    await seedBranchesAndBatches();
     
     res.json(credsDoc);
   } catch (err) {

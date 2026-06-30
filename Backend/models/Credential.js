@@ -25,7 +25,11 @@ const credentialsSchema = new mongoose.Schema({
       id: { type: String, required: true },
       name: { type: String, required: true },
       schedule: { type: String, required: true },
-      branch: { type: String }
+      branch: { type: String },
+      startTime: { type: String },
+      endTime: { type: String },
+      slotType: { type: String },
+      status: { type: String, default: 'Active' }
     }, { _id: false })],
     default: []
   },
