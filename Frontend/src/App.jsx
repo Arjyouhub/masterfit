@@ -3715,7 +3715,7 @@ function App() {
       const activeBatch = batchOptions.find(b => b.id.toLowerCase() === userBatch.toLowerCase());
       if (activeBatch) {
         const studentMatchesTrainerBatch = (s.batch && s.batch.toLowerCase() === userBatch.toLowerCase()) ||
-          (s.schedule && schedulesMatch(s.schedule, activeBatch.schedule) && !s.batch?.toLowerCase().startsWith('batch'));
+          (s.schedule && schedulesMatch(s.schedule, activeBatch.schedule) && !(s.batch && s.batch.toLowerCase().startsWith('batch')));
         return matchesSearch && matchesBranch && matchesStatus && matchesBatch && studentMatchesTrainerBatch;
       }
     }
@@ -8149,14 +8149,16 @@ function App() {
       );
     }
 
+    const effectiveSubTab = (!isSuper && (mappingSubTab === 'credentials' || mappingSubTab === 'branches')) ? 'batches' : mappingSubTab;
+
     return (
       <div className="credentials-view" style={{ maxWidth: '1100px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
         {/* Consolidated Sub-tab Navigation */}
         <div style={{ display: 'flex', gap: '10px', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem', flexWrap: 'wrap' }}>
           {isSuper && (
             <button
-              className={`btn-primary ${mappingSubTab === 'credentials' ? '' : 'btn-secondary'}`}
-              style={mappingSubTab === 'credentials' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
+              className={`btn-primary ${effectiveSubTab === 'credentials' ? '' : 'btn-secondary'}`}
+              style={effectiveSubTab === 'credentials' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
               onClick={() => setMappingSubTab('credentials')}
             >
               User Accounts
@@ -8164,16 +8166,16 @@ function App() {
           )}
           {isSuper && (
             <button
-              className={`btn-primary ${mappingSubTab === 'branches' ? '' : 'btn-secondary'}`}
-              style={mappingSubTab === 'branches' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
+              className={`btn-primary ${effectiveSubTab === 'branches' ? '' : 'btn-secondary'}`}
+              style={effectiveSubTab === 'branches' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
               onClick={() => setMappingSubTab('branches')}
             >
               Branches Setup
             </button>
           )}
           <button
-            className={`btn-primary ${mappingSubTab === 'batches' ? '' : 'btn-secondary'}`}
-            style={mappingSubTab === 'batches' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
+            className={`btn-primary ${effectiveSubTab === 'batches' ? '' : 'btn-secondary'}`}
+            style={effectiveSubTab === 'batches' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
             onClick={() => setMappingSubTab('batches')}
           >
             Batches Setup
@@ -8192,10 +8194,10 @@ function App() {
         )}
 
         {/* Tab Contents */}
-        {mappingSubTab === 'credentials' && isSuper && renderAdminsPage()}
+        {effectiveSubTab === 'credentials' && isSuper && renderAdminsPage()}
 
-        {mappingSubTab === 'branches' && isSuper && renderBranchesPage()}
-        {mappingSubTab === 'batches' && renderBatchesPage()}
+        {effectiveSubTab === 'branches' && isSuper && renderBranchesPage()}
+        {effectiveSubTab === 'batches' && renderBatchesPage()}
       </div>
     );
   };
@@ -8909,7 +8911,7 @@ function App() {
                   const isDefault = DEFAULT_BATCH_OPTIONS.some(opt => opt.id === b.id);
                   const studentCount = students.filter(s => 
                     s.batch === b.id || 
-                    (schedulesMatch(s.schedule, b.schedule) && !s.batch?.toLowerCase().startsWith('batch'))
+                    (schedulesMatch(s.schedule, b.schedule) && !(s.batch && s.batch.toLowerCase().startsWith('batch')))
                   ).length;
                   const dispBranch = branches.find(br => br.toLowerCase() === b.branch.toLowerCase()) || 
                     (b.branch ? b.branch.charAt(0).toUpperCase() + b.branch.slice(1).toLowerCase() : 'Global');
