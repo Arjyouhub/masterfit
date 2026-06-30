@@ -13413,17 +13413,10 @@ function App() {
                 Expected back online: <strong style={{ color: '#ff9f0a' }}>{formatMaintenanceTime(maintenanceEnd)}</strong>
               </div>
             )}
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button
-                className="btn-secondary"
-                style={{ flex: 1, padding: '0.65rem', borderRadius: '8px', fontWeight: 600 }}
-                onClick={() => setMaintenanceDismissed(true)}
-              >
-                Dismiss / Close
-              </button>
+            <div style={{ display: 'flex', width: '100%' }}>
               <button
                 className="btn-primary"
-                style={{ flex: 1, padding: '0.65rem', borderRadius: '8px', fontWeight: 600, background: '#ff453a', borderColor: '#ff453a', color: '#fff' }}
+                style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', fontWeight: 600, background: '#ff453a', borderColor: '#ff453a', color: '#fff' }}
                 onClick={() => {
                   const token = getSessionToken();
                   if (token) {
