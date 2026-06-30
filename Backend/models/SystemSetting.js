@@ -13,7 +13,10 @@ const systemSettingSchema = new mongoose.Schema({
   failedLoginThreshold: { type: Number, default: 5 },
   failedLoginBlockTimeMinutes: { type: Number, default: 15 },
   logRetentionLimit: { type: Number, default: 1000 },
-  startingBillingMonth: { type: String, default: '' } // e.g. "2026-01"
+  startingBillingMonth: { type: String, default: '' }, // e.g. "2026-01"
+  lockPerformancePage: { type: Boolean, default: false },
+  lockBranchBatchMappingPage: { type: Boolean, default: false },
+  lockFeesPage: { type: Boolean, default: false }
 }, { timestamps: true });
 
 export default mongoose.model('SystemSetting', systemSettingSchema);

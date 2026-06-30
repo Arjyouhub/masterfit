@@ -1102,6 +1102,9 @@ async function loadSettingsCache() {
     if (!cachedSettings.maintenanceEnd) {
       cachedSettings.maintenanceEnd = null;
     }
+    if (cachedSettings.lockPerformancePage === undefined) cachedSettings.lockPerformancePage = false;
+    if (cachedSettings.lockBranchBatchMappingPage === undefined) cachedSettings.lockBranchBatchMappingPage = false;
+    if (cachedSettings.lockFeesPage === undefined) cachedSettings.lockFeesPage = false;
     console.log('[Settings Cache] Loaded from database:', cachedSettings);
   } catch (err) {
     console.error('[Settings Cache] Failed to load settings:', err);
@@ -2842,7 +2845,10 @@ app.get('/api/system/maintenance', async (req, res) => {
       isMaintenanceActive: isActive,
       systemAlertMessage: cachedSettings.systemAlertMessage || '',
       systemUpdateNotification: cachedSettings.systemUpdateNotification || '',
-      systemUpdateNotificationId: cachedSettings.systemUpdateNotificationId || ''
+      systemUpdateNotificationId: cachedSettings.systemUpdateNotificationId || '',
+      lockPerformancePage: !!cachedSettings.lockPerformancePage,
+      lockBranchBatchMappingPage: !!cachedSettings.lockBranchBatchMappingPage,
+      lockFeesPage: !!cachedSettings.lockFeesPage
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2870,7 +2876,7 @@ app.post('/api/login', async (req, res) => {
     const userRole = user ? user.role : '';
 
     // --- ENFORCE MAINTENANCE MODE ON LOGIN ---
-    if (cachedSettings.maintenanceMode && cachedSettings.maintenanceMode !== 'none' && enteredUser !== 'developer' && userRole !== 'superadmin') {
+    if (cachedSettings.maintenanceMode && cachedSettings.maintenanceMode !== 'none' && enteredUser !== 'developer') {
       let active = true;
       if (cachedSettings.maintenanceStart && cachedSettings.maintenanceEnd) {
         const now = new Date();
@@ -2879,16 +2885,26 @@ app.post('/api/login', async (req, res) => {
         active = now >= start && now <= end;
       }
       
-      if (active && userRole !== 'developer' && userRole !== 'superadmin') {
+      if (active) {
         const mode = cachedSettings.maintenanceMode;
+        const isAd = userRole === 'superadmin';
+        const isBr = userRole === 'branchadmin';
+        const isTr = userRole === 'trainer' || userRole === 'coordinator';
+
         if (mode === 'all') {
           return res.status(503).json({ success: false, error: 'System is under maintenance. Login is currently locked.' });
-        } else if (mode === 'admin' && userRole === 'superadmin') {
+        } else if (mode === 'admin' && isAd) {
           return res.status(503).json({ success: false, error: 'Admin portal login is currently under maintenance.' });
-        } else if (mode === 'branch' && userRole === 'branchadmin') {
+        } else if (mode === 'branch' && isBr) {
           return res.status(503).json({ success: false, error: 'Branch Admin portal login is currently under maintenance.' });
-        } else if (mode === 'batch' && userRole === 'trainer') {
+        } else if (mode === 'batch' && isTr) {
           return res.status(503).json({ success: false, error: 'Trainer portal login is currently under maintenance.' });
+        } else if (mode === 'branch-batch' && (isBr || isTr)) {
+          return res.status(503).json({ success: false, error: 'Branch Admin & Trainer portals are under maintenance.' });
+        } else if (mode === 'batch-admin' && (isTr || isAd)) {
+          return res.status(503).json({ success: false, error: 'Trainer & Admin portals are under maintenance.' });
+        } else if (mode === 'admin-branch' && (isAd || isBr)) {
+          return res.status(503).json({ success: false, error: 'Admin & Branch Admin portals are under maintenance.' });
         }
       }
     }
@@ -4884,7 +4900,22 @@ developerRouter.get('/settings', (req, res) => {
 // Developer settings POST
 developerRouter.post('/settings', async (req, res) => {
   try {
-    const { maintenanceMode, maintenanceStart, maintenanceEnd, systemAlertMessage, systemUpdateNotification, sessionTimeoutMinutes, minPasswordLength, failedLoginThreshold, failedLoginBlockTimeMinutes, logRetentionLimit, startingBillingMonth } = req.body;
+    const { 
+      maintenanceMode, 
+      maintenanceStart, 
+      maintenanceEnd, 
+      systemAlertMessage, 
+      systemUpdateNotification, 
+      sessionTimeoutMinutes, 
+      minPasswordLength, 
+      failedLoginThreshold, 
+      failedLoginBlockTimeMinutes, 
+      logRetentionLimit, 
+      startingBillingMonth,
+      lockPerformancePage,
+      lockBranchBatchMappingPage,
+      lockFeesPage
+    } = req.body;
     
     // Validate inputs
     if (sessionTimeoutMinutes !== undefined && (isNaN(sessionTimeoutMinutes) || sessionTimeoutMinutes <= 0)) {
@@ -4914,6 +4945,10 @@ developerRouter.post('/settings', async (req, res) => {
     if (maintenanceEnd !== undefined) settings.maintenanceEnd = maintenanceEnd ? new Date(maintenanceEnd) : null;
     if (systemAlertMessage !== undefined) settings.systemAlertMessage = String(systemAlertMessage).trim();
     
+    if (lockPerformancePage !== undefined) settings.lockPerformancePage = !!lockPerformancePage;
+    if (lockBranchBatchMappingPage !== undefined) settings.lockBranchBatchMappingPage = !!lockBranchBatchMappingPage;
+    if (lockFeesPage !== undefined) settings.lockFeesPage = !!lockFeesPage;
+
     if (systemUpdateNotification !== undefined && systemUpdateNotification !== settings.systemUpdateNotification) {
       settings.systemUpdateNotification = String(systemUpdateNotification).trim();
       settings.systemUpdateNotificationId = Date.now().toString(); // Generate unique notification ID
@@ -4948,6 +4983,12 @@ developerRouter.post('/settings', async (req, res) => {
         blockedRoles = ['branchadmin'];
       } else if (settings.maintenanceMode === 'batch') {
         blockedRoles = ['trainer'];
+      } else if (settings.maintenanceMode === 'branch-batch') {
+        blockedRoles = ['branchadmin', 'trainer'];
+      } else if (settings.maintenanceMode === 'batch-admin') {
+        blockedRoles = ['trainer', 'superadmin'];
+      } else if (settings.maintenanceMode === 'admin-branch') {
+        blockedRoles = ['superadmin', 'branchadmin'];
       }
 
       if (blockedRoles.length > 0) {

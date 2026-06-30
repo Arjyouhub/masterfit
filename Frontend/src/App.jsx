@@ -213,7 +213,9 @@ function App() {
       return 'admin'; // Always restore admin dashboard if session exists!
     }
 
-    if (hash === '#/superadmin') {
+    if (hash === '#/developer/login') {
+      return 'developer-login';
+    } else if (hash === '#/superadmin') {
       return 'superadmin-login';
     } else if (hash === '#/login' || hash === '#/branch' || hash === '#/batch') {
       return 'login';
@@ -340,6 +342,9 @@ function App() {
   const [maintenanceStart, setMaintenanceStart] = useState(null);
   const [maintenanceEnd, setMaintenanceEnd] = useState(null);
   const [systemAlertMessage, setSystemAlertMessage] = useState('');
+  const [lockPerformancePage, setLockPerformancePage] = useState(false);
+  const [lockBranchBatchMappingPage, setLockBranchBatchMappingPage] = useState(false);
+  const [lockFeesPage, setLockFeesPage] = useState(false);
   const [unseenResolvedReports, setUnseenResolvedReports] = useState([]);
   const [activeUpdateNotification, setActiveUpdateNotification] = useState(null);
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
@@ -2544,7 +2549,9 @@ function App() {
           setMaintenanceStart(data.maintenanceStart || null);
           setMaintenanceEnd(data.maintenanceEnd || null);
           setSystemAlertMessage(data.systemAlertMessage || '');
-
+          setLockPerformancePage(!!data.lockPerformancePage);
+          setLockBranchBatchMappingPage(!!data.lockBranchBatchMappingPage);
+          setLockFeesPage(!!data.lockFeesPage);
         })
         .catch(err => console.error("Error checking maintenance status:", err));
 
@@ -3229,7 +3236,17 @@ function App() {
       const hasSession = getSessionUser();
       const isDevSession = hasSession && (hasSession.toLowerCase() === 'developer' || hasSession.toLowerCase().startsWith('developer@'));
 
-      if (hash.startsWith('#/developer')) {
+      if (hash === '#/developer/login') {
+        if (hasSession) {
+          if (isDevSession) {
+            window.location.hash = '#/developer/dashboard';
+          } else {
+            window.location.hash = '#/admin';
+          }
+        } else {
+          setAppMode('developer-login');
+        }
+      } else if (hash.startsWith('#/developer')) {
         if (isDevSession) {
           setAppMode('developer');
           const subview = hash.split('/')[2] || 'dashboard';
@@ -5645,11 +5662,14 @@ function App() {
                     transition: 'all 0.3s ease'
                   }}
                 >
-                  <option value="none" style={{ color: '#fff', background: '#1c1c2e' }}>All Logins Open</option>
-                  <option value="batch" style={{ color: '#fff', background: '#1c1c2e' }}>Batch Login Only</option>
-                  <option value="branch" style={{ color: '#fff', background: '#1c1c2e' }}>Branch Login Only</option>
-                  <option value="admin" style={{ color: '#fff', background: '#1c1c2e' }}>Admin Login Only</option>
-                  <option value="all" style={{ color: '#fff', background: '#1c1c2e' }}>All Logins Except Developer</option>
+                  <option value="none" style={{ color: '#fff', background: '#1c1c2e' }}>No Portals Locked (Fully Open)</option>
+                  <option value="batch" style={{ color: '#fff', background: '#1c1c2e' }}>Lock Trainer / Batch Portal</option>
+                  <option value="branch" style={{ color: '#fff', background: '#1c1c2e' }}>Lock Branch Admin Portal</option>
+                  <option value="admin" style={{ color: '#fff', background: '#1c1c2e' }}>Lock Super Admin Portal</option>
+                  <option value="branch-batch" style={{ color: '#fff', background: '#1c1c2e' }}>Lock Branch Admin & Trainer Portals</option>
+                  <option value="batch-admin" style={{ color: '#fff', background: '#1c1c2e' }}>Lock Trainer & Super Admin Portals</option>
+                  <option value="admin-branch" style={{ color: '#fff', background: '#1c1c2e' }}>Lock Super Admin & Branch Admin Portals</option>
+                  <option value="all" style={{ color: '#fff', background: '#1c1c2e' }}>Lock All Portals (Developer Only Bypass)</option>
                 </select>
                 <span className="badge" style={{
                   padding: '8px 12px',
@@ -5698,6 +5718,40 @@ function App() {
                 value={toDatetimeLocal(devSettings.maintenanceEnd)}
                 onChange={(e) => setDevSettings({ ...devSettings, maintenanceEnd: e.target.value ? new Date(e.target.value).toISOString() : null })}
               />
+            </div>
+
+            {/* Logged-In Page Lockout Options */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label style={{ color: '#fff', display: 'block', marginBottom: '8px' }}>Individual Feature Lockouts (Logged-in Pages)</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!devSettings.lockPerformancePage}
+                    onChange={(e) => setDevSettings({ ...devSettings, lockPerformancePage: e.target.checked })}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Lock Student Performance Page
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!devSettings.lockBranchBatchMappingPage}
+                    onChange={(e) => setDevSettings({ ...devSettings, lockBranchBatchMappingPage: e.target.checked })}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Lock Branch & Batch Mapping Page
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!devSettings.lockFeesPage}
+                    onChange={(e) => setDevSettings({ ...devSettings, lockFeesPage: e.target.checked })}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Lock Fees Page
+                </label>
+              </div>
             </div>
 
 
@@ -9561,6 +9615,23 @@ function App() {
     );
   };
 
+  const renderSectionMaintenance = (sectionName) => (
+    <div className="glass-panel text-center" style={{ padding: '3rem', margin: '2rem auto', maxWidth: '600px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem', border: '1px solid rgba(255, 159, 10, 0.2)' }}>
+      <div style={{ background: 'rgba(255, 159, 10, 0.1)', padding: '1rem', borderRadius: '50%' }}>
+        <AlertTriangle size={48} color="#ff9f0a" className="pulse-icon" />
+      </div>
+      <h2 style={{ fontSize: '1.5rem', color: '#fff', margin: 0 }}>Section Under Maintenance</h2>
+      <p style={{ color: 'var(--color-text-muted)', fontSize: '0.95rem', lineHeight: '1.6', margin: 0 }}>
+        The <strong>{sectionName}</strong> is temporarily disabled for maintenance. The developers are working to update this section. Please try again later.
+      </p>
+      {maintenanceEnd && (
+        <span style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.4)' }}>
+          Expected back online: <strong style={{ color: '#ff9f0a' }}>{formatMaintenanceTime(maintenanceEnd)}</strong>
+        </span>
+      )}
+    </div>
+  );
+
   const renderSettings = () => {
     const isSuper = isAdminUser(loggedInUser);
     const isBranchAdm = isBranchAdmin(loggedInUser);
@@ -10960,6 +11031,104 @@ function App() {
     </div>
   );
 
+  const renderDeveloperLogin = () => {
+    const handleDevLoginSubmit = (e) => {
+      e.preventDefault();
+      setIsLoggingIn(true);
+      setLoginError('');
+
+      const usernameLower = loginData.username.toLowerCase().trim();
+      const enteredPassword = loginData.password;
+
+      let devName = '';
+      if (navigator.userAgentData) {
+        try {
+          navigator.userAgentData.getHighEntropyValues(['model']).then(uaData => {
+            if (uaData && uaData.model) devName = uaData.model;
+          });
+        } catch (err) {}
+      }
+
+      fetch(`${API_BASE_URL}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          loginType: 'superadmin',
+          username: usernameLower,
+          password: enteredPassword,
+          deviceName: devName
+        })
+      })
+        .then(res => {
+          if (!res.ok) {
+            return res.json().then(errData => {
+              throw new Error(errData.error || 'Invalid developer credentials');
+            });
+          }
+          return res.json();
+        })
+        .then(data => {
+          setIsLoggingIn(false);
+          if (data.success && data.role === 'developer') {
+            setLoginError('');
+            setLoggedInUser(data.username);
+            setSession(data.username, data.token, data.role, data.branch, data.batch);
+            setUserRole(data.role || '');
+            setUserBranch(data.branch || '');
+            setUserBatch(data.batch || '');
+            setUserLoginCount(data.loginCount);
+            setLoginData({ username: '', password: '' });
+            window.location.hash = '#/developer/dashboard';
+          } else {
+            setLoginError('Access denied: You are not authorized as a developer.');
+            setIsLoggingIn(false);
+          }
+        })
+        .catch(err => {
+          setIsLoggingIn(false);
+          setLoginError(err.message || 'Developer login failed');
+        });
+    };
+
+    return (
+      <div className="login-layout" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: "url('https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?q=80&w=2070&auto=format&fit=crop')", backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', overflowY: 'auto', padding: '1rem 0.5rem' }}>
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,10,5,0.92)' }}></div>
+        <div className="login-grid-overlay" style={{ backgroundImage: 'radial-gradient(circle, rgba(0,255,0,0.05) 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
+        <div className="login-bg-glows">
+          <div className="login-glow-1" style={{ background: 'rgba(0, 255, 100, 0.15)' }}></div>
+        </div>
+        <div className="glass-panel login-card-animated" style={{ zIndex: 1, padding: '1.5rem 2rem', width: '100%', maxWidth: '400px', textAlign: 'center', border: '1px solid rgba(0, 255, 100, 0.2)', boxShadow: '0 8px 32px 0 rgba(0, 255, 0, 0.1)' }}>
+          <h2 className="brand animate-item-1" style={{ justifyContent: 'center', marginBottom: '0.25rem', fontSize: '1.8rem', color: '#00ff66', fontFamily: 'monospace' }}>
+            &lt;DEV_PORTAL&gt;
+          </h2>
+          <p className="animate-item-2" style={{ color: 'rgba(0, 255, 100, 0.7)', fontSize: '0.8rem', marginBottom: '1.5rem', fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase', fontFamily: 'monospace' }}>Restricted System Control</p>
+          
+          {loginError && <div style={{ color: '#ff453a', marginBottom: '1rem', background: 'rgba(255, 69, 58, 0.1)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(255, 69, 58, 0.3)', fontSize: '0.85rem' }}>{loginError}</div>}
+          
+          <form onSubmit={handleDevLoginSubmit}>
+            <div className="form-group animate-item-3" style={{ textAlign: 'left', marginBottom: '0.85rem' }}>
+              <label style={{ marginBottom: '0.25rem', fontSize: '0.85rem', color: 'rgba(0, 255, 100, 0.8)', fontFamily: 'monospace' }}>Developer Username</label>
+              <input type="text" className="form-control" placeholder="developer" value={loginData.username} onChange={(e) => setLoginData({ ...loginData, username: e.target.value })} disabled={isLoggingIn} required style={{ height: '38px', background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(0,255,100,0.3)', color: '#00ff66', fontFamily: 'monospace' }} />
+            </div>
+            <div className="form-group animate-item-4" style={{ textAlign: 'left', marginBottom: '1.25rem' }}>
+              <label style={{ marginBottom: '0.25rem', fontSize: '0.85rem', color: 'rgba(0, 255, 100, 0.8)', fontFamily: 'monospace' }}>System Key (Password)</label>
+              <input type="password" className="form-control" placeholder="••••••••" value={loginData.password} onChange={(e) => setLoginData({ ...loginData, password: e.target.value })} disabled={isLoggingIn} required style={{ height: '38px', background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(0,255,100,0.3)', color: '#00ff66', fontFamily: 'monospace' }} />
+            </div>
+            <button type="submit" className="btn-primary animate-item-5" style={{ width: '100%', justifyContent: 'center', height: '38px', background: '#00ff66', color: '#000', fontWeight: 'bold', border: 'none', fontFamily: 'monospace' }} disabled={isLoggingIn}>
+              {isLoggingIn ? "DECRYPTING..." : "ENTER PORTAL"}
+            </button>
+          </form>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '1rem' }} className="animate-item-6">
+            <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', padding: '4px 0', fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('login'); window.location.hash = '#/login'; }}>
+              Trainer Login
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const isMaintenanceBlocked = () => {
     if (!loggedInUser) {
       return false;
@@ -10968,10 +11137,20 @@ function App() {
       if (userRole === 'developer') {
         return false;
       }
-      if (maintenanceMode === 'all') return true;
-      if (maintenanceMode === 'admin' && userRole === 'superadmin') return true;
-      if (maintenanceMode === 'branch' && userRole === 'branchadmin') return true;
-      if (maintenanceMode === 'batch' && (userRole === 'trainer' || userRole === 'coordinator')) return true;
+      const mode = maintenanceMode;
+      if (mode === 'all') return true;
+      
+      const isAd = userRole === 'superadmin';
+      const isBr = userRole === 'branchadmin';
+      const isTr = userRole === 'trainer' || userRole === 'coordinator';
+      
+      if (mode === 'admin' && isAd) return true;
+      if (mode === 'branch' && isBr) return true;
+      if (mode === 'batch' && isTr) return true;
+      
+      if (mode === 'branch-batch' && (isBr || isTr)) return true;
+      if (mode === 'batch-admin' && (isTr || isAd)) return true;
+      if (mode === 'admin-branch' && (isAd || isBr)) return true;
     }
     return false;
   };
@@ -11115,6 +11294,10 @@ function App() {
 
   if (appMode === 'superadmin-login') {
     return renderSuperAdminLogin();
+  }
+
+  if (appMode === 'developer-login') {
+    return renderDeveloperLogin();
   }
 
   if (appMode === 'developer') {
@@ -11693,12 +11876,12 @@ function App() {
           )}
 
           {currentView === 'attendance' && renderAttendance()}
-          {currentView === 'fees' && renderFees()}
+          {currentView === 'fees' && (lockFeesPage && userRole !== 'developer' ? renderSectionMaintenance('Fees Portal') : renderFees())}
           {currentView === 'student-fees' && renderStudentFees()}
           {currentView === 'reminders' && renderReminders()}
-          {currentView === 'performance' && renderPerformance()}
+          {currentView === 'performance' && (lockPerformancePage && userRole !== 'developer' ? renderSectionMaintenance('Performance Portal') : renderPerformance())}
           {currentView === 'settings' && renderSettings()}
-          {currentView === 'credentials-list' && renderCredentialsList()}
+          {currentView === 'credentials-list' && (lockBranchBatchMappingPage && userRole !== 'developer' ? renderSectionMaintenance('Branch & Batch Mapping') : renderCredentialsList())}
         </div>
       </main>
 
