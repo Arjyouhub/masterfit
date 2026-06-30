@@ -11118,12 +11118,6 @@ function App() {
               {isLoggingIn ? "DECRYPTING..." : "ENTER PORTAL"}
             </button>
           </form>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '1rem' }} className="animate-item-6">
-            <button type="button" className="btn-outline-primary" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', padding: '4px 0', fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)' }} disabled={isLoggingIn} onClick={() => { setLoginError(''); setAppMode('login'); window.location.hash = '#/login'; }}>
-              Trainer Login
-            </button>
-          </div>
         </div>
       </div>
     );
