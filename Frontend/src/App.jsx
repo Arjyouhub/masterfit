@@ -1277,10 +1277,10 @@ function App() {
       });
   };
 
-  // Sync state with backend on mount
+  // Sync state with backend when login state changes
   useEffect(() => {
     reloadAllAppData();
-  }, []);
+  }, [loggedInUser]);
 
   // Fetch dashboard stats whenever filters change
   useEffect(() => {
