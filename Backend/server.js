@@ -767,7 +767,10 @@ async function seedBranchesAndBatches() {
       for (const brName of targetBranchesForBatch) {
         const brClean = brName.trim();
         const branchObj = await Branch.findOne({ code: brClean.toLowerCase().replace(/\s+/g, '-') });
-        const existing = await Batch.findOne({ branch: brClean, code: cbId.toLowerCase() });
+        const existing = await Batch.findOne({ 
+          branch: new RegExp(`^${brClean}$`, 'i'), 
+          code: cbId.toLowerCase() 
+        });
         const cbStartTime = cb.startTime || '09:00';
         const cbEndTime = cb.endTime || '10:30';
         const cbSlotType = cb.slotType || 'Morning';
@@ -790,6 +793,12 @@ async function seedBranchesAndBatches() {
           console.log(`[Seed] Created Batch: ${cbName} for Branch: ${brClean}`);
         } else if (existing) {
           let changed = false;
+          if (existing.branch !== brClean) {
+            existing.branch = brClean;
+            existing.branchName = branchObj ? branchObj.name : brClean;
+            existing.branchId = branchObj ? branchObj._id : existing.branchId;
+            changed = true;
+          }
           if (existing.schedule !== cbSchedule) { existing.schedule = cbSchedule; changed = true; }
           if (existing.startTime !== cbStartTime) { existing.startTime = cbStartTime; changed = true; }
           if (existing.endTime !== cbEndTime) { existing.endTime = cbEndTime; changed = true; }
@@ -812,7 +821,10 @@ async function seedBranchesAndBatches() {
         const btCode = parts.slice(1).join('_').trim().toLowerCase();
         
         // Find existing or create
-        const existing = await Batch.findOne({ branch: brClean, code: btCode });
+        const existing = await Batch.findOne({ 
+          branch: new RegExp(`^${brClean}$`, 'i'), 
+          code: btCode 
+        });
         const trainerUser = info.username || `${btCode}@${brClean}`;
         
         if (existing) {
@@ -1240,9 +1252,6 @@ app.delete('/api/branches/:id', authenticateSession, authorizeRoles('superadmin'
 // --- Batches CRUD ---
 app.get('/api/public/batches', async (req, res) => {
   try {
-    const creds = await Credential.findOne({ configType: 'main' }).lean();
-    const batchCreds = creds?.batchCredentials || {};
-    
     let query = { status: 'Active' };
     const { branchId, branch } = req.query;
     
@@ -1256,14 +1265,7 @@ app.get('/api/public/batches', async (req, res) => {
     }
     
     const list = await Batch.find(query).sort({ name: 1 }).lean();
-    
-    // Filter the list to only include batches that have credentials for their branch
-    const filteredList = list.filter(b => {
-      const key = `${b.branch.toLowerCase().trim()}_${b.code.toLowerCase().trim()}`;
-      return batchCreds[key] !== undefined;
-    });
-    
-    res.json(filteredList);
+    res.json(list);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3607,7 +3609,7 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
               return res.status(403).json({ error: `Access denied: You cannot delete batch credentials for other branches (${key}).` });
             }
             const newVal = newCreds[key];
-            if (newVal.username !== val.username || newVal.password !== val.password) {
+            if (newVal.username !== val.username || (newVal.password !== val.password && newVal.password !== '••••••')) {
               return res.status(403).json({ error: `Access denied: You cannot modify batch credentials for other branches (${key}).` });
             }
           }

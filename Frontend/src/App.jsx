@@ -834,7 +834,7 @@ function App() {
     return userBranch || 'All';
   };
 
-  const getFilteredBatchOptions = (branchOverride, requireCredentials = true) => {
+  const getFilteredBatchOptions = (branchOverride, requireCredentials = false) => {
     let targetBranch = 'All';
     if (branchOverride) {
       targetBranch = branchOverride;
@@ -1347,6 +1347,23 @@ function App() {
   }, [selectedBranchLogin, customBranches]);
 
 
+
+  // Synchronize default branch for login page when branches list is loaded/updated
+  useEffect(() => {
+    const token = getSessionToken();
+    if (token) return; // Only when logged out
+    
+    if (branches.length > 0) {
+      const matched = branches.find(b => b.toLowerCase() === selectedBranchLogin.toLowerCase());
+      if (matched) {
+        if (selectedBranchLogin !== matched) {
+          setSelectedBranchLogin(matched);
+        }
+      } else {
+        setSelectedBranchLogin(branches[0]);
+      }
+    }
+  }, [branches, selectedBranchLogin]);
 
   // Verify session validity on mount
   useEffect(() => {
