@@ -3429,7 +3429,7 @@ function App() {
     });
 
     // Sort classes chronologically by startTime
-    const sortedClasses = [...filteredClasses].sort((a, b) => a.startTime.localeCompare(b.startTime));
+    const sortedClasses = [...filteredClasses].sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
 
     // Fee calculations
     let feeCollection = 0;
