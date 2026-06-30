@@ -2922,10 +2922,11 @@ app.post('/api/login', async (req, res) => {
     }
 
     if (verifyPassword(password, user.password)) {
-      const isSuper = loginType === 'superadmin' && (user.role === 'superadmin' || user.role === 'developer');
+      const isSuper = loginType === 'superadmin' && user.role === 'superadmin';
       const isTrainer = (loginType === 'trainer' || loginType === 'coordinator') && (user.role === 'branchadmin' || user.role === 'trainer');
+      const isDeveloper = loginType === 'developer' && user.role === 'developer';
 
-      if (!isSuper && !isTrainer) {
+      if (!isSuper && !isTrainer && !isDeveloper) {
         // Log unauthorized type attempts
         await new LoginHistory({
           username: user.username,

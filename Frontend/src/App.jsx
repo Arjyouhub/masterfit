@@ -11091,7 +11091,7 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          loginType: 'superadmin',
+          loginType: 'developer',
           username: usernameLower,
           password: enteredPassword,
           deviceName: devName
