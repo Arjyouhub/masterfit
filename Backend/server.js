@@ -2875,40 +2875,6 @@ app.post('/api/login', async (req, res) => {
 
     const userRole = user ? user.role : '';
 
-    // --- ENFORCE MAINTENANCE MODE ON LOGIN ---
-    if (cachedSettings.maintenanceMode && cachedSettings.maintenanceMode !== 'none' && enteredUser !== 'developer') {
-      let active = true;
-      if (cachedSettings.maintenanceStart && cachedSettings.maintenanceEnd) {
-        const now = new Date();
-        const start = new Date(cachedSettings.maintenanceStart);
-        const end = new Date(cachedSettings.maintenanceEnd);
-        active = now >= start && now <= end;
-      }
-      
-      if (active) {
-        const mode = cachedSettings.maintenanceMode;
-        const isAd = userRole === 'superadmin';
-        const isBr = userRole === 'branchadmin';
-        const isTr = userRole === 'trainer' || userRole === 'coordinator';
-
-        if (mode === 'all') {
-          return res.status(503).json({ success: false, error: 'System is under maintenance. Login is currently locked.' });
-        } else if (mode === 'admin' && isAd) {
-          return res.status(503).json({ success: false, error: 'Admin portal login is currently under maintenance.' });
-        } else if (mode === 'branch' && isBr) {
-          return res.status(503).json({ success: false, error: 'Branch Admin portal login is currently under maintenance.' });
-        } else if (mode === 'batch' && isTr) {
-          return res.status(503).json({ success: false, error: 'Trainer portal login is currently under maintenance.' });
-        } else if (mode === 'branch-batch' && (isBr || isTr)) {
-          return res.status(503).json({ success: false, error: 'Branch Admin & Trainer portals are under maintenance.' });
-        } else if (mode === 'batch-admin' && (isTr || isAd)) {
-          return res.status(503).json({ success: false, error: 'Trainer & Admin portals are under maintenance.' });
-        } else if (mode === 'admin-branch' && (isAd || isBr)) {
-          return res.status(503).json({ success: false, error: 'Admin & Branch Admin portals are under maintenance.' });
-        }
-      }
-    }
-
     // --- ENFORCE ACCOUNT LOCKED STATE (Level 1, Level 2, Permanent) ---
     if (user && user.role !== 'developer') {
       if (user.isLocked) {

@@ -11276,9 +11276,6 @@ function App() {
     );
   };
 
-  if (isMaintenanceBlocked()) {
-    return renderMaintenancePage();
-  }
 
   if (appMode === 'website') {
     return renderPublic();
@@ -13358,6 +13355,58 @@ function App() {
             >
               Get Started
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Maintenance Notification Modal */}
+      {showMaintenanceModal && !maintenanceDismissed && (
+        <div className="modal-overlay" style={{ zIndex: 15000 }}>
+          <div className="modal-content glass-panel" style={{ maxWidth: '500px', padding: '2.5rem 2rem', textAlign: 'center', border: '1px solid rgba(255, 69, 58, 0.3)', background: 'rgba(10,5,5,0.96)', backdropFilter: 'blur(20px)' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.25rem', color: '#ff453a' }}>
+              <AlertTriangle size={48} className="pulse-icon" />
+            </div>
+            <h2 style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, textTransform: 'uppercase', marginBottom: '1rem', color: '#fff', fontSize: '1.4rem' }}>
+              System Maintenance Active
+            </h2>
+            <p style={{ color: 'var(--color-text-muted)', fontSize: '0.925rem', lineHeight: '1.6', marginBottom: '1.75rem' }}>
+              The system is currently undergoing scheduled updates and maintenance. Some features may be restricted or offline. Please save your progress and log out to prevent any data loss.
+            </p>
+            {maintenanceEnd && (
+              <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)', fontSize: '0.85rem', color: '#fff', marginBottom: '1.75rem' }}>
+                Expected back online: <strong style={{ color: '#ff9f0a' }}>{formatMaintenanceTime(maintenanceEnd)}</strong>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button
+                className="btn-secondary"
+                style={{ flex: 1, padding: '0.65rem', borderRadius: '8px', fontWeight: 600 }}
+                onClick={() => setMaintenanceDismissed(true)}
+              >
+                Dismiss / Close
+              </button>
+              <button
+                className="btn-primary"
+                style={{ flex: 1, padding: '0.65rem', borderRadius: '8px', fontWeight: 600, background: '#ff453a', borderColor: '#ff453a', color: '#fff' }}
+                onClick={() => {
+                  const token = getSessionToken();
+                  if (token) {
+                    fetch(`${API_BASE_URL}/logout`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ token })
+                    }).catch(err => console.error(err));
+                  }
+                  clearSession();
+                  setLoggedInUser('');
+                  setAppMode('login');
+                  setShowMaintenanceModal(false);
+                  setMaintenanceDismissed(false);
+                }}
+              >
+                Logout Now
+              </button>
+            </div>
           </div>
         </div>
       )}
