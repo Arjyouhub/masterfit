@@ -1387,7 +1387,11 @@ function App() {
         .then(data => {
           if (data && data.success) {
             setLoggedInUser(data.username);
-            setAppMode('admin');
+            if (data.role === 'developer') {
+              setAppMode('developer');
+            } else {
+              setAppMode('admin');
+            }
             // Ensure localStorage/cookies are in sync
             setSession(data.username, sessionToken, data.role, data.branch, data.batch);
             setUserRole(data.role || '');
