@@ -2558,6 +2558,34 @@ function App() {
           setLockPerformancePage(!!data.lockPerformancePage);
           setLockBranchBatchMappingPage(!!data.lockBranchBatchMappingPage);
           setLockFeesPage(!!data.lockFeesPage);
+
+          // Check if current user is affected by maintenance
+          let isBlocked = false;
+          if (loggedInUser && userRole !== 'developer') {
+            const mode = data.maintenanceMode || 'none';
+            if (mode === 'all') {
+              isBlocked = true;
+            } else {
+              const isAd = userRole === 'superadmin';
+              const isBr = userRole === 'branchadmin';
+              const isTr = userRole === 'trainer' || userRole === 'coordinator';
+              
+              if (mode === 'admin' && isAd) isBlocked = true;
+              if (mode === 'branch' && isBr) isBlocked = true;
+              if (mode === 'batch' && isTr) isBlocked = true;
+              
+              if (mode === 'branch-batch' && (isBr || isTr)) isBlocked = true;
+              if (mode === 'batch-admin' && (isTr || isAd)) isBlocked = true;
+              if (mode === 'admin-branch' && (isAd || isBr)) isBlocked = true;
+            }
+          }
+
+          if (data.isMaintenanceActive && isBlocked) {
+            setShowMaintenanceModal(prev => prev || true);
+          } else {
+            setShowMaintenanceModal(false);
+            setMaintenanceDismissed(false);
+          }
         })
         .catch(err => console.error("Error checking maintenance status:", err));
 
@@ -2570,7 +2598,7 @@ function App() {
     checkMaintenance();
     const interval = setInterval(checkMaintenance, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [loggedInUser, userRole]);
 
   useEffect(() => {
     if (isHelpModalOpen && loggedInUser) {
