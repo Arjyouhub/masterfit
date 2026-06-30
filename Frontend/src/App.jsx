@@ -6166,7 +6166,8 @@ function App() {
                 }
                 clearSession();
                 setLoggedInUser('');
-                setAppMode('superadmin-login');
+                setAppMode('developer-login');
+                window.location.hash = '#/developer/login';
               }}
             >
               <LogOut size={20} />
@@ -6216,7 +6217,8 @@ function App() {
               }
               clearSession();
               setLoggedInUser('');
-              setAppMode('superadmin-login');
+              setAppMode('developer-login');
+              window.location.hash = '#/developer/login';
             }}>
               <LogOut className="dev-nav-icon" style={{ color: '#ff453a' }} /> <span>Console Logout</span>
             </a>
