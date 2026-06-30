@@ -342,6 +342,8 @@ function App() {
   const [maintenanceStart, setMaintenanceStart] = useState(null);
   const [maintenanceEnd, setMaintenanceEnd] = useState(null);
   const [systemAlertMessage, setSystemAlertMessage] = useState('');
+  const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
+  const [maintenanceDismissed, setMaintenanceDismissed] = useState(false);
   const [lockPerformancePage, setLockPerformancePage] = useState(false);
   const [lockBranchBatchMappingPage, setLockBranchBatchMappingPage] = useState(false);
   const [lockFeesPage, setLockFeesPage] = useState(false);
