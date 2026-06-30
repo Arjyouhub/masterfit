@@ -4938,6 +4938,50 @@ developerRouter.post('/settings', async (req, res) => {
     await settings.save();
     cachedSettings = settings.toObject();
 
+    // Automatically publish a system-wide announcement/notification when a maintenance is scheduled
+    if (settings.maintenanceStart && settings.maintenanceEnd && settings.maintenanceMode !== 'none') {
+      const startStr = new Date(settings.maintenanceStart).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+      const endStr = new Date(settings.maintenanceEnd).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+      
+      let portalNames = 'All Portals';
+      if (settings.maintenanceMode === 'batch') portalNames = 'Trainer / Batch Portal';
+      else if (settings.maintenanceMode === 'branch') portalNames = 'Branch Admin Portal';
+      else if (settings.maintenanceMode === 'admin') portalNames = 'Super Admin Portal';
+      else if (settings.maintenanceMode === 'branch-batch') portalNames = 'Branch Admin & Trainer Portals';
+      else if (settings.maintenanceMode === 'batch-admin') portalNames = 'Trainer & Super Admin Portals';
+      else if (settings.maintenanceMode === 'admin-branch') portalNames = 'Super Admin & Branch Admin Portals';
+
+      const announcementTitle = `⚠️ Scheduled System Maintenance Warning`;
+      const announcementMessage = `Dear Users,\n\nPlease be advised that the system has scheduled maintenance from ${startStr} to ${endStr}.\n\nDuring this time, the following portals will be locked: ${portalNames}.\n\nPlease ensure you save all your active work and log out of the system before the maintenance starts.`;
+
+      // Check if a warning for this exact start time already exists to avoid duplicate spam
+      const existingNotif = await Notification.findOne({
+        title: announcementTitle,
+        message: { $regex: startStr }
+      });
+
+      if (!existingNotif) {
+        // Delete any previous system maintenance warning notifications to keep it clean
+        await Notification.deleteMany({ type: 'maintenance' });
+
+        const newNotif = new Notification({
+          title: announcementTitle,
+          message: announcementMessage,
+          type: 'maintenance',
+          sender: 'developer',
+          priority: 'high',
+          branch: 'all',
+          batch: 'all',
+          targetUser: 'all'
+        });
+        await newNotif.save();
+        console.log(`[Maintenance Announcement] Created auto warning: "${newNotif.title}"`);
+      }
+    } else if (settings.maintenanceMode === 'none') {
+      await Notification.deleteMany({ type: 'maintenance' });
+      console.log(`[Maintenance Announcement] Deleted maintenance warnings because mode is set to none.`);
+    }
+
     // Immediately terminate active sessions of blocked roles
     if (settings.maintenanceMode && settings.maintenanceMode !== 'none') {
       let blockedRoles = [];
