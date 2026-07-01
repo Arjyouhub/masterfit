@@ -1069,7 +1069,8 @@ function App() {
             startTime: b.startTime || '09:00',
             endTime: b.endTime || '10:30',
             slotType: b.slotType || 'Morning',
-            status: b.status || 'Active'
+            status: b.status || 'Active',
+            _id: b._id
           }))
         ];
         setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
@@ -3086,7 +3087,7 @@ function App() {
     setBatchCredentials(updatedBatchCreds);
 
     // Delete from DB Batch collection
-    const matchedBatchObj = Array.isArray(customBatches) && customBatches.find(b => {
+    const matchedBatchObj = Array.isArray(batchOptions) && batchOptions.find(b => {
       if (b && typeof b === 'object') {
         const bId = String(b.id || b.code || b._id).toLowerCase();
         const targetId = String(batchIdToDelete).toLowerCase();
@@ -3176,7 +3177,7 @@ function App() {
     });
 
     // Update name, schedule, timings & slotType in DB Batch collection
-    const matchedBatchObj = Array.isArray(customBatches) && customBatches.find(b => {
+    const matchedBatchObj = Array.isArray(batchOptions) && batchOptions.find(b => {
       if (b && typeof b === 'object') {
         const bId = String(b.id || b.code || b._id).toLowerCase();
         const targetId = String(batchId).toLowerCase();
