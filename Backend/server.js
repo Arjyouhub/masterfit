@@ -703,7 +703,15 @@ async function seedBranchesAndBatches() {
     // Seed Branches
     for (const name of allBranchNames) {
       const cleanName = name.trim();
+      if (/^[0-9a-fA-F]{24}$/.test(cleanName)) {
+        console.warn(`[Seed] Skipping seeding branch with invalid hexadecimal name: ${cleanName}`);
+        continue;
+      }
       const code = cleanName.toLowerCase().replace(/\s+/g, '-');
+      if (/^[0-9a-fA-F]{24}$/.test(code)) {
+        console.warn(`[Seed] Skipping seeding branch with invalid hexadecimal code: ${code}`);
+        continue;
+      }
       const existing = await Branch.findOne({ code });
       if (!existing) {
         await new Branch({
@@ -1202,6 +1210,9 @@ app.post('/api/branches', authenticateSession, authorizeRoles('superadmin', 'dev
       return res.status(400).json({ error: 'Name and Code are required' });
     }
     const cleanCode = code.toLowerCase().trim();
+    if (/^[0-9a-fA-F]{24}$/.test(name.trim()) || /^[0-9a-fA-F]{24}$/.test(cleanCode)) {
+      return res.status(400).json({ error: 'Branch name and code cannot be a valid hexadecimal ObjectId' });
+    }
     const existing = await Branch.findOne({ code: cleanCode });
     if (existing) {
       return res.status(400).json({ error: 'Branch code already exists' });
@@ -1226,13 +1237,22 @@ app.put('/api/branches/:id', authenticateSession, authorizeRoles('superadmin', '
 
     if (code) {
       const cleanCode = code.toLowerCase().trim();
+      if (/^[0-9a-fA-F]{24}$/.test(cleanCode)) {
+        return res.status(400).json({ error: 'Branch code cannot be a valid hexadecimal ObjectId' });
+      }
       if (cleanCode !== branch.code) {
         const existing = await Branch.findOne({ code: cleanCode });
         if (existing) return res.status(400).json({ error: 'Branch code already exists' });
         branch.code = cleanCode;
       }
     }
-    if (name) branch.name = name.trim();
+    if (name) {
+      const trimmedName = name.trim();
+      if (/^[0-9a-fA-F]{24}$/.test(trimmedName)) {
+        return res.status(400).json({ error: 'Branch name cannot be a valid hexadecimal ObjectId' });
+      }
+      branch.name = trimmedName;
+    }
     if (status) branch.status = status;
 
     await branch.save();
