@@ -1179,47 +1179,6 @@ connectDb();
 
 // Routes
 
-app.get('/api/public/wipe-db-temp', async (req, res) => {
-  const { secret } = req.query;
-  if (secret !== 'WIPE_DB_SECRET_789456') {
-    return res.status(403).json({ error: 'Unauthorized' });
-  }
-  try {
-    await mongoose.model('Branch').deleteMany({});
-    await mongoose.model('Batch').deleteMany({});
-    await mongoose.model('Student').deleteMany({});
-    await mongoose.model('Attendance').deleteMany({});
-    await mongoose.model('Class').deleteMany({});
-    await mongoose.model('Session').deleteMany({});
-    await mongoose.model('HelpReport').deleteMany({});
-    await mongoose.model('LoginHistory').deleteMany({});
-    await mongoose.model('Notification').deleteMany({});
-    await mongoose.model('SecurityLog').deleteMany({});
-    
-    const Credential = mongoose.model('Credential');
-    const creds = await Credential.findOne({ configType: 'main' });
-    if (creds) {
-      creds.customBranches = [];
-      creds.customBatches = [];
-      if (creds.branchCredentials instanceof Map) creds.branchCredentials.clear();
-      else creds.branchCredentials = {};
-      if (creds.batchCredentials instanceof Map) creds.batchCredentials.clear();
-      else creds.batchCredentials = {};
-      creds.markModified('customBranches');
-      creds.markModified('customBatches');
-      creds.markModified('branchCredentials');
-      creds.markModified('batchCredentials');
-      await creds.save();
-    }
-    
-    await mongoose.model('User').deleteMany({ role: { $in: ['branchadmin', 'trainer'] } });
-    
-    res.json({ success: true, message: 'Database wiped successfully' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // --- Branches CRUD ---
 app.get('/api/public/branches', async (req, res) => {
   try {
