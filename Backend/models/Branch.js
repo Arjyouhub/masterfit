@@ -6,7 +6,6 @@ const branchSchema = new mongoose.Schema({
   status: { type: String, required: true, enum: ['Active', 'Inactive'], default: 'Active' }
 }, { timestamps: true });
 
-branchSchema.index({ code: 1 });
 branchSchema.index({ status: 1 });
 
 export default mongoose.model('Branch', branchSchema);

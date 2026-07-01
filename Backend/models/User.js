@@ -24,7 +24,6 @@ const userSchema = new mongoose.Schema({
   failedAttempts: { type: Number, default: 0 }
 }, { timestamps: true });
 
-userSchema.index({ username: 1 });
 userSchema.index({ status: 1 });
 
 export default mongoose.model('User', userSchema);
