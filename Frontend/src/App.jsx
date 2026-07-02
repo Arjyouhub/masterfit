@@ -910,8 +910,16 @@ function App() {
     return userRole === 'trainer' || userRole === 'coordinator';
   };
 
-  const getBatchNameFromSchedule = (schedule) => {
+  const getBatchNameFromSchedule = (schedule, studentBranch = '') => {
     if (!schedule) return '';
+    const cleanBranch = String(studentBranch || '').toLowerCase().trim();
+    if (cleanBranch) {
+      const opt = batchOptions.find(b => 
+        b.schedule.toLowerCase() === schedule.toLowerCase() &&
+        (b.branch && b.branch.toLowerCase().trim() === cleanBranch)
+      );
+      if (opt) return opt.name;
+    }
     const opt = batchOptions.find(b => b.schedule.toLowerCase() === schedule.toLowerCase());
     return opt ? opt.name : schedule;
   };
@@ -1051,7 +1059,12 @@ function App() {
           ...DEFAULT_BRANCHES,
           ...branchNames
         ]));
-        setBranches(sortBranchesAlphabetically(uniqueBranches));
+        const sorted = sortBranchesAlphabetically(uniqueBranches);
+        setBranches(sorted);
+        setBranchFilter(prev => {
+          const match = sorted.find(b => b.toLowerCase() === prev.toLowerCase());
+          return match || prev;
+        });
       })
       .catch(err => console.error('Error fetching branches:', err));
 
@@ -1421,10 +1434,12 @@ function App() {
   useEffect(() => {
     if (loggedInUser) {
       if (isAdminUser(loggedInUser)) {
-        setBranchFilter('Kuttiady');
+        const matching = branches.find(b => b.toLowerCase() === 'kuttiady');
+        setBranchFilter(matching || 'Kuttiady');
       } else {
         const resolvedBranch = getLoggedInUserBranch();
-        setBranchFilter(resolvedBranch);
+        const matching = branches.find(b => b.toLowerCase() === resolvedBranch.toLowerCase());
+        setBranchFilter(matching || resolvedBranch);
         setBatchForm(prev => ({ ...prev, branch: resolvedBranch.toLowerCase() }));
         setNewBatchForm(prev => ({ ...prev, branch: resolvedBranch.toLowerCase() }));
       }
@@ -6823,7 +6838,7 @@ function App() {
                           >
                             {student.studentName || student.name}
                           </td>
-                          <td data-label="Batch Info"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule)} • {student.schedule}</span></td>
+                          <td data-label="Batch Info"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}</span></td>
                           <td data-label="Status">
                             {status === 'present' && <span className="badge badge-green">Present</span>}
                             {status === 'absent' && <span className="badge badge-red">Absent</span>}
@@ -7161,7 +7176,7 @@ function App() {
                             <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.branch}</span>
                           </td>
                         )}
-                        <td data-label="Batch Time"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule)} • {student.schedule}</span></td>
+                        <td data-label="Batch Time"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}</span></td>
                         <td data-label="Admission" style={{ textAlign: 'center' }}>
                           <select
                             value={student.admissionPaid ? "paid" : "pending"}
@@ -7439,7 +7454,7 @@ function App() {
           <div>
             <h3 style={{ margin: 0, fontSize: '1.4rem', color: '#E50914', fontFamily: 'var(--font-heading)' }}>{student.studentName || student.name}</h3>
             <p style={{ margin: '0.25rem 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>
-              Branch: <strong>{student.branch}</strong> • Batch: <strong>{getBatchNameFromSchedule(student.schedule)} • {student.schedule}</strong>
+              Branch: <strong>{student.branch}</strong> • Batch: <strong>{getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}</strong>
             </p>
             <p style={{ margin: '0.25rem 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>
               Joined: <strong>{student.joinDate}</strong>
@@ -7645,7 +7660,7 @@ function App() {
                 <tr key={student.id}>
                   <td data-label="Name" onClick={() => handleSelectStudent(student)} style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}>{student.studentName || student.name}</td>
                   <td data-label="Belt Level"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
-                  <td data-label="Batch"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>{getBatchNameFromSchedule(student.schedule)} • {student.schedule}</span></td>
+                  <td data-label="Batch"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>{getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}</span></td>
                   <td data-label="Skill Score"><span style={{ fontWeight: 'bold', color: student.performanceScore > 80 ? '#4CAF50' : '#FF9800' }}>{student.performanceScore}/100</span></td>
                   <td data-label="Progress to Next Belt" style={{ width: '30%' }}>
                     <div className="progress-container">
@@ -11796,7 +11811,7 @@ function App() {
                             </td>
                             <td data-label="Batch Schedule">
                               <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', marginRight: '8px' }}>{student.branch}</span>
-                              <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule)} • {student.schedule}</span>
+                              <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}</span>
                             </td>
                             <td data-label="Belt Level"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
                             <td data-label="Phone" style={{ color: 'var(--color-text-muted)' }}>{student.phone}</td>
@@ -12237,7 +12252,7 @@ function App() {
                     <h4 style={{ margin: '0 0 1rem 0', color: 'var(--color-secondary)', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Academy Details</h4>
                     <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                       <span className="badge" style={{ background: 'var(--color-primary)', color: 'white' }}>{selectedStudent.branch} Branch</span>
-                      <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>{getBatchNameFromSchedule(selectedStudent.schedule)}</span>
+                      <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>{getBatchNameFromSchedule(selectedStudent.schedule, selectedStudent.branch)}</span>
                       <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>{selectedStudent.schedule} Batch</span>
                     </div>
                   </div>
