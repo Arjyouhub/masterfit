@@ -924,6 +924,21 @@ function App() {
     return opt ? opt.name : schedule;
   };
 
+  const getBatchNameFromCode = (batchCode, branchName = '') => {
+    if (!batchCode) return '';
+    const cleanCode = batchCode.toLowerCase().trim();
+    const cleanBranch = String(branchName || '').toLowerCase().trim();
+    if (cleanBranch) {
+      const opt = batchOptions.find(b => 
+        (String(b.id).toLowerCase() === cleanCode || String(b.code || '').toLowerCase() === cleanCode) &&
+        (b.branch && b.branch.toLowerCase().trim() === cleanBranch)
+      );
+      if (opt) return opt.name;
+    }
+    const opt = batchOptions.find(b => String(b.id).toLowerCase() === cleanCode || String(b.code || '').toLowerCase() === cleanCode);
+    return opt ? opt.name : batchCode;
+  };
+
   const hasSettingsAccess = (user) => {
     return isAdminUser(user) || isBranchAdmin(user);
   };
@@ -11865,7 +11880,7 @@ function App() {
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
                                 <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                                   <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)' }}>{cls.branch}</span>
-                                  <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{cls.batch}</span>
+                                  <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromCode(cls.batch, cls.branch)}</span>
                                 </div>
                                 {(cls.schedule || cls.slotType) && (
                                   <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
