@@ -543,11 +543,11 @@ async function syncUsersAndSeed() {
     const activeUsernames = new Set();
     activeUsernames.add('developer');
 
-    const upsertUser = async (username, password, role, branch = '', batch = '') => {
+    const upsertUser = async (username, password, role, branch = '', batch = '', scheduleOverride = '') => {
       const uClean = username.toLowerCase().trim();
       activeUsernames.add(uClean);
-      let schedule = '';
-      if (batch) {
+      let schedule = scheduleOverride;
+      if (!schedule && batch) {
         const cb = (creds.customBatches || []).find(b => b.id.toLowerCase().trim() === batch.toLowerCase().trim());
         if (cb) {
           schedule = cb.schedule || '';
@@ -616,16 +616,46 @@ async function syncUsersAndSeed() {
       }
     }
 
-    // 3. Sync Batch Coordinators
+    // 3. Sync Batch Coordinators (Consolidated by Trainer Username)
     const batchEntries = getEntries(creds.batchCredentials);
+    const trainerBatches = {}; // username -> { password, branch, batches: [], schedules: [] }
     for (const [key, info] of batchEntries) {
       if (info && info.password) {
         const parts = key.split('_');
         const br = parts[0];
         const bt = parts.slice(1).join('_');
-        const username = info.username || `${bt}@${br}`;
-        await upsertUser(username, info.password, 'trainer', br, bt);
+        const username = (info.username || `${bt}@${br}`).toLowerCase().trim();
+
+        let schedule = '';
+        if (bt) {
+          const cb = (creds.customBatches || []).find(b => b.id.toLowerCase().trim() === bt.toLowerCase().trim());
+          if (cb) {
+            schedule = cb.schedule || '';
+          }
+        }
+
+        if (!trainerBatches[username]) {
+          trainerBatches[username] = {
+            password: info.password,
+            branch: br,
+            batches: [bt],
+            schedules: schedule ? [schedule] : []
+          };
+        } else {
+          if (!trainerBatches[username].batches.includes(bt)) {
+            trainerBatches[username].batches.push(bt);
+          }
+          if (schedule && !trainerBatches[username].schedules.includes(schedule)) {
+            trainerBatches[username].schedules.push(schedule);
+          }
+        }
       }
+    }
+
+    for (const [username, data] of Object.entries(trainerBatches)) {
+      const consolidatedBatch = data.batches.join(',');
+      const consolidatedSchedule = data.schedules.join(', ');
+      await upsertUser(username, data.password, 'trainer', data.branch, consolidatedBatch, consolidatedSchedule);
     }
 
     // 4. Seed Developer
@@ -890,6 +920,27 @@ async function seedBranchesAndBatches() {
             console.log(`[Seed] Created Batch: ${name} for Branch: ${brClean} with Trainer: ${trainerUser}`);
           }
         }
+      }
+    }
+
+    // Clean up outdated/removed batches from MongoDB Batch collection
+    const activeBatchCodes = new Set();
+    customBatches.forEach(cb => {
+      if (cb.id) activeBatchCodes.add(cb.id.trim().toLowerCase());
+    });
+    batchEntries.forEach(([key]) => {
+      const parts = key.split('_');
+      if (parts.length > 1) {
+        const btCode = parts.slice(1).join('_').trim().toLowerCase();
+        activeBatchCodes.add(btCode);
+      }
+    });
+
+    const allDbBatches = await Batch.find({});
+    for (const b of allDbBatches) {
+      if (b.code && !activeBatchCodes.has(b.code.toLowerCase().trim())) {
+        await Batch.deleteOne({ _id: b._id });
+        console.log(`[Seed] Deleted outdated/removed Batch from DB: ${b.name} (${b.code})`);
       }
     }
   } catch (err) {
@@ -1492,7 +1543,8 @@ app.get('/api/classes', authenticateSession, async (req, res) => {
     if (role !== 'superadmin' && role !== 'developer') {
       batchQuery.branch = new RegExp(`^${branch}$`, 'i');
       if (role === 'trainer') {
-        batchQuery.code = new RegExp(`^${batch}$`, 'i');
+        const allowedBatches = (batch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+        batchQuery.code = { $in: allowedBatches.map(b => new RegExp(`^${b}$`, 'i')) };
       }
     }
     
@@ -1557,7 +1609,8 @@ app.get('/api/classes', authenticateSession, async (req, res) => {
     if (role !== 'superadmin' && role !== 'developer') {
       classQuery.branch = new RegExp(`^${branch}$`, 'i');
       if (role === 'trainer') {
-        classQuery.batch = new RegExp(`^${batch}$`, 'i');
+        const allowedBatches = (batch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+        classQuery.batch = { $in: allowedBatches.map(b => new RegExp(`^${b}$`, 'i')) };
       }
     }
     
@@ -1627,8 +1680,11 @@ app.post('/api/classes', authenticateSession, authorizeRoles('superadmin', 'deve
       if (branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
         return res.status(403).json({ error: 'Access denied: Cannot schedule class for another branch.' });
       }
-      if (req.user.role === 'trainer' && batch.toLowerCase().trim() !== req.user.batch.toLowerCase().trim()) {
-        return res.status(403).json({ error: 'Access denied: Cannot schedule class for another batch.' });
+      if (req.user.role === 'trainer') {
+        const allowedBatches = (req.user.batch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+        if (!allowedBatches.includes(batch.toLowerCase().trim())) {
+          return res.status(403).json({ error: 'Access denied: Cannot schedule class for another batch.' });
+        }
       }
     }
 
@@ -1706,10 +1762,11 @@ app.put('/api/classes/:id', authenticateSession, authorizeRoles('superadmin', 'd
         return res.status(403).json({ error: 'Access denied: Cannot reassign class to another branch.' });
       }
       if (req.user.role === 'trainer') {
-        if (cls.batch.toLowerCase().trim() !== req.user.batch.toLowerCase().trim()) {
+        const allowedBatches = (req.user.batch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+        if (!allowedBatches.includes(cls.batch.toLowerCase().trim())) {
           return res.status(403).json({ error: 'Access denied: Cannot edit class of another batch.' });
         }
-        if (batch && batch.toLowerCase().trim() !== req.user.batch.toLowerCase().trim()) {
+        if (batch && !allowedBatches.includes(batch.toLowerCase().trim())) {
           return res.status(403).json({ error: 'Access denied: Cannot reassign class to another batch.' });
         }
       }
@@ -1763,8 +1820,11 @@ app.delete('/api/classes/:id', authenticateSession, authorizeRoles('superadmin',
       if (cls.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
         return res.status(403).json({ error: 'Access denied: Cannot delete class of another branch.' });
       }
-      if (req.user.role === 'trainer' && cls.batch.toLowerCase().trim() !== req.user.batch.toLowerCase().trim()) {
-        return res.status(403).json({ error: 'Access denied: Cannot delete class of another batch.' });
+      if (req.user.role === 'trainer') {
+        const allowedBatches = (req.user.batch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+        if (!allowedBatches.includes(cls.batch.toLowerCase().trim())) {
+          return res.status(403).json({ error: 'Access denied: Cannot delete class of another batch.' });
+        }
       }
     }
 
@@ -1799,7 +1859,16 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
     } else {
       selectedBranchName = userBranch;
       if (role === 'trainer') {
-        selectedBatchCode = userBatch;
+        const allowedBatches = (userBatch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+        if (targetBatch && targetBatch.toLowerCase() !== 'all') {
+          if (allowedBatches.includes(targetBatch.toLowerCase().trim())) {
+            selectedBatchCode = targetBatch;
+          } else {
+            selectedBatchCode = 'none'; // block access
+          }
+        } else {
+          selectedBatchCode = userBatch; // comma-separated list of allowed batches
+        }
       } else {
         selectedBatchCode = targetBatch;
       }
@@ -1813,25 +1882,29 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
       batchQuery.branch = brRegex;
     }
     let selectedBatchObj = null;
+    let selectedBatchObjs = [];
     if (selectedBatchCode && selectedBatchCode.toLowerCase() !== 'all') {
       const BatchModel = mongoose.model('Batch');
-      selectedBatchObj = await BatchModel.findOne({ code: new RegExp(`^${selectedBatchCode.trim()}$`, 'i') });
-      batchQuery.code = new RegExp(`^${selectedBatchCode.trim()}$`, 'i');
+      const codes = selectedBatchCode.split(',').map(c => c.trim()).filter(Boolean);
+      selectedBatchObjs = await BatchModel.find({ code: { $in: codes.map(c => new RegExp(`^${c}$`, 'i')) } }).lean();
+      selectedBatchObj = selectedBatchObjs[0] || null;
+      batchQuery.code = { $in: codes.map(c => new RegExp(`^${c}$`, 'i')) };
     }
 
     // Fetch active students and filter in memory to support legacy fallbacks consistently
     const baseStudents = await Student.find(studentQuery).select('-photo').lean();
     const filteredStudents = baseStudents.filter(s => {
       if (!selectedBatchCode || selectedBatchCode.toLowerCase() === 'all') return true;
+      if (selectedBatchCode === 'none') return false;
 
       const studentBatchLower = (s.batch || '').toLowerCase().trim();
-      const targetIdLower = selectedBatchCode.toLowerCase().trim();
+      const codes = selectedBatchCode.toLowerCase().split(',').map(c => c.trim()).filter(Boolean);
 
-      if (studentBatchLower === targetIdLower) return true;
+      if (codes.includes(studentBatchLower)) return true;
 
-      if (selectedBatchObj) {
-        const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
-        if (studentBatchLower === targetNameLower) return true;
+      for (const obj of selectedBatchObjs) {
+        if (studentBatchLower === obj.code.toLowerCase().trim()) return true;
+        if (studentBatchLower === obj.name.toLowerCase().trim()) return true;
       }
 
       // Fallback check for legacy students using schedule
@@ -1839,12 +1912,14 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
         return false;
       }
 
-      if (selectedBatchObj) {
-        return schedulesMatch(s.schedule, selectedBatchObj.schedule);
+      for (const obj of selectedBatchObjs) {
+        if (schedulesMatch(s.schedule, obj.schedule)) return true;
       }
 
-      if (selectedBatchCode.includes('-') || selectedBatchCode.includes(',')) {
-        return schedulesMatch(s.schedule, selectedBatchCode);
+      for (const c of codes) {
+        if (c.includes('-') || c.includes(',')) {
+          if (schedulesMatch(s.schedule, c)) return true;
+        }
       }
 
       return false;
@@ -2047,45 +2122,51 @@ app.get('/api/students', authenticateSession, async (req, res) => {
 
     // Resolve batch details if targetBatch is selected
     let targetBatchCode = '';
+    let allowedTrainerBatches = [];
     if (role === 'trainer') {
-      targetBatchCode = batch;
+      allowedTrainerBatches = (batch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+      if (queryBatch && queryBatch.toLowerCase() !== 'all') {
+        if (allowedTrainerBatches.includes(queryBatch.toLowerCase().trim())) {
+          targetBatchCode = queryBatch;
+        } else {
+          targetBatchCode = 'none'; // unauthorized batch selection
+        }
+      } else {
+        targetBatchCode = batch; // all trainer's batches
+      }
     } else {
       targetBatchCode = queryBatch;
     }
 
     let selectedBatchObj = null;
+    let selectedBatchObjs = [];
     if (targetBatchCode && targetBatchCode.toLowerCase() !== 'all') {
-      // Look up by ObjectId, code, or name
-      if (mongoose.Types.ObjectId.isValid(targetBatchCode)) {
-        selectedBatchObj = await Batch.findById(targetBatchCode);
-      } else {
-        selectedBatchObj = await Batch.findOne({
-          $or: [
-            { code: new RegExp(`^${targetBatchCode.trim()}$`, 'i') },
-            { name: new RegExp(`^${targetBatchCode.trim()}$`, 'i') }
-          ]
-        });
-      }
+      const BatchModel = mongoose.model('Batch');
+      const codes = targetBatchCode.split(',').map(c => c.trim()).filter(Boolean);
+      selectedBatchObjs = await BatchModel.find({
+        code: { $in: codes.map(c => new RegExp(`^${c}$`, 'i')) }
+      }).lean();
+      selectedBatchObj = selectedBatchObjs[0] || null;
     }
 
     const decryptedStudents = baseStudents.map(decryptStudent);
 
     const filteredStudents = decryptedStudents.filter(s => {
       if (!targetBatchCode || targetBatchCode.toLowerCase() === 'all') return true;
+      if (targetBatchCode === 'none') return false;
 
       const studentBatchLower = (s.batch || '').toLowerCase().trim();
-      const targetIdLower = targetBatchCode.toLowerCase().trim();
+      const codes = targetBatchCode.toLowerCase().split(',').map(c => c.trim()).filter(Boolean);
 
-      // Check direct code match
-      if (studentBatchLower === targetIdLower) return true;
+      // Check if student's batch is in the selected batch list
+      if (codes.includes(studentBatchLower)) return true;
 
-      // Check direct match with selectedBatchObj code or name
-      if (selectedBatchObj) {
-        if (studentBatchLower === selectedBatchObj.code.toLowerCase().trim()) return true;
-        if (studentBatchLower === selectedBatchObj.name.toLowerCase().trim()) return true;
-        // Check database ID match if targetBatchCode is an ObjectId
-        if (mongoose.Types.ObjectId.isValid(targetBatchCode) && String(selectedBatchObj._id) === targetBatchCode) {
-          if (studentBatchLower === selectedBatchObj.code.toLowerCase().trim() || studentBatchLower === selectedBatchObj.name.toLowerCase().trim()) return true;
+      // Check direct match with selectedBatchObjs code or name
+      for (const obj of selectedBatchObjs) {
+        if (studentBatchLower === obj.code.toLowerCase().trim()) return true;
+        if (studentBatchLower === obj.name.toLowerCase().trim()) return true;
+        if (mongoose.Types.ObjectId.isValid(targetBatchCode) && String(obj._id) === targetBatchCode) {
+          if (studentBatchLower === obj.code.toLowerCase().trim() || studentBatchLower === obj.name.toLowerCase().trim()) return true;
         }
       }
 
@@ -2094,12 +2175,14 @@ app.get('/api/students', authenticateSession, async (req, res) => {
         return false;
       }
 
-      if (selectedBatchObj) {
-        return schedulesMatch(s.schedule, selectedBatchObj.schedule);
+      for (const obj of selectedBatchObjs) {
+        if (schedulesMatch(s.schedule, obj.schedule)) return true;
       }
 
-      if (targetBatchCode.includes('-') || targetBatchCode.includes(',')) {
-        return schedulesMatch(s.schedule, targetBatchCode);
+      for (const c of codes) {
+        if (c.includes('-') || c.includes(',')) {
+          if (schedulesMatch(s.schedule, c)) return true;
+        }
       }
 
       return false;
@@ -2169,11 +2252,8 @@ app.get('/api/students/:id/photo', authenticateSession, async (req, res) => {
       filter.branch = new RegExp(`^${branch}$`, 'i');
     }
     if (role === 'trainer') {
-      const schedule = await getBatchSchedule(batch, branch);
-      if (schedule) {
-        filter.schedule = schedule;
-      }
-      filter.batch = batch.toLowerCase().trim();
+      const allowedBatches = (batch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+      filter.batch = { $in: allowedBatches };
     }
     const student = await Student.findOne(filter).select('photo').lean();
     if (!student) return res.status(404).json({ error: 'Student not found or unauthorized' });
@@ -2484,11 +2564,8 @@ app.get('/api/attendance', authenticateSession, async (req, res) => {
     if (role !== 'superadmin' && role !== 'developer') {
       let studentFilter = { branch: new RegExp(`^${branch}$`, 'i') };
       if (role === 'trainer') {
-        const schedule = await getBatchSchedule(batch, branch);
-        if (schedule) {
-          studentFilter.schedule = schedule;
-        }
-        studentFilter.batch = batch.toLowerCase().trim();
+        const allowedBatches = (batch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+        studentFilter.batch = { $in: allowedBatches };
       }
       const students = await Student.find(studentFilter).select('id').lean();
       allowedStudentIds = new Set(students.map(s => String(s.id)));
@@ -2532,11 +2609,8 @@ app.post('/api/attendance', authenticateSession, async (req, res) => {
     if (role !== 'superadmin' && role !== 'developer') {
       studentFilter.branch = new RegExp(`^${branch}$`, 'i');
       if (role === 'trainer') {
-        const schedule = await getBatchSchedule(batch, branch);
-        if (schedule) {
-          studentFilter.schedule = schedule;
-        }
-        studentFilter.batch = batch.toLowerCase().trim();
+        const allowedBatches = (batch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+        studentFilter.batch = { $in: allowedBatches };
       }
     }
     
@@ -2981,7 +3055,8 @@ app.post('/api/login', async (req, res) => {
             return res.status(401).json({ success: false, error: 'Invalid branch selection for this Branch Admin account' });
           }
         } else if (user.role === 'trainer') {
-          if (bodyBranch !== userBranch || bodyBatch !== userBatch) {
+          const userBatches = userBatch.split(',').map(b => b.trim());
+          if (bodyBranch !== userBranch || !userBatches.includes(bodyBatch)) {
             await new LoginHistory({
               username: user.username,
               status: 'Failed',
@@ -3588,11 +3663,26 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
           return 'all';
         };
 
-        // Every batch in the request must belong to userBranch
-        for (const b of newBatches) {
-          const bBranch = getBatchBranch(b);
-          if (bBranch !== userBranch) {
-            return res.status(403).json({ error: 'Access denied: You can only add, remove, or modify batches for your own branch.' });
+        // Validate that other branch batches are NOT added, modified, or deleted by branchadmin
+        const dbOthers = existingBatches.filter(b => getBatchBranch(b) !== userBranch);
+        const reqOthers = newBatches.filter(b => getBatchBranch(b) !== userBranch);
+
+        if (dbOthers.length !== reqOthers.length) {
+          return res.status(403).json({ error: 'Access denied: You cannot add or delete batches for other branches.' });
+        }
+
+        for (const dbB of dbOthers) {
+          const dbBId = String(dbB.id || dbB.code || dbB._id || '').trim().toLowerCase();
+          const reqB = reqOthers.find(rb => String(rb.id || rb.code || rb._id || '').trim().toLowerCase() === dbBId);
+          if (!reqB) {
+            return res.status(403).json({ error: 'Access denied: You cannot delete batches for other branches.' });
+          }
+          if (
+            (reqB.name || reqB.batchName || '') !== (dbB.name || dbB.batchName || '') ||
+            (reqB.schedule || '') !== (dbB.schedule || '') ||
+            (reqB.branch || '').toLowerCase().trim() !== (dbB.branch || '').toLowerCase().trim()
+          ) {
+            return res.status(403).json({ error: 'Access denied: You cannot modify batches for other branches.' });
           }
         }
       }
@@ -4292,16 +4382,19 @@ developerRouter.put('/users/:id/reset-password', async (req, res) => {
           }
         }
       } else if (user.role === 'trainer') {
-        const key = `${user.branch}_${user.batch}`;
-        const entry = creds.batchCredentials instanceof Map ? creds.batchCredentials.get(key) : creds.batchCredentials[key];
-        if (entry) {
-          entry.password = newPassword;
-        } else {
-          const newEntry = { username: user.username, password: newPassword };
-          if (creds.batchCredentials instanceof Map) {
-            creds.batchCredentials.set(key, newEntry);
+        const batches = String(user.batch || '').split(',').map(b => b.trim()).filter(Boolean);
+        for (const bt of batches) {
+          const key = `${user.branch}_${bt}`;
+          const entry = creds.batchCredentials instanceof Map ? creds.batchCredentials.get(key) : creds.batchCredentials[key];
+          if (entry) {
+            entry.password = newPassword;
           } else {
-            creds.batchCredentials[key] = newEntry;
+            const newEntry = { username: user.username, password: newPassword };
+            if (creds.batchCredentials instanceof Map) {
+              creds.batchCredentials.set(key, newEntry);
+            } else {
+              creds.batchCredentials[key] = newEntry;
+            }
           }
         }
       }
@@ -5386,9 +5479,12 @@ app.delete('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 
         if (creds.branchCredentials instanceof Map) creds.branchCredentials.delete(uBranch);
         else delete creds.branchCredentials[uBranch];
       } else if (uRole === 'trainer') {
-        const key = `${uBranch}_${uBatch}`;
-        if (creds.batchCredentials instanceof Map) creds.batchCredentials.delete(key);
-        else delete creds.batchCredentials[key];
+        const batches = String(uBatch || '').split(',').map(b => b.trim()).filter(Boolean);
+        for (const bt of batches) {
+          const key = `${uBranch}_${bt}`;
+          if (creds.batchCredentials instanceof Map) creds.batchCredentials.delete(key);
+          else delete creds.batchCredentials[key];
+        }
       }
       creds.markModified('adminCredentials');
       creds.markModified('branchCredentials');
