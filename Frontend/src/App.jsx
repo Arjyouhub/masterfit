@@ -6535,7 +6535,7 @@ function App() {
           <div className="contact-info">
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted)' }}><Phone size={18} color="var(--color-primary)" /> 9995422610</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted)' }}><MapPin size={18} color="var(--color-primary)" /> KUTTIADY HEAD OFFICE</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted)' }}><span style={{ color: 'var(--color-primary)', fontWeight: 600 }}>IG</span> @masterfit_academy</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted)' }}><span style={{ color: 'var(--color-primary)', fontWeight: 600 }}>IG</span> <a href="https://www.instagram.com/master_fit__?igsh=ZTZta2dsMjJpeXR3" target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>@master_fit__</a></div>
           </div>
         </div>
       </section>
