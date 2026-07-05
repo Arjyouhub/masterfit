@@ -429,8 +429,8 @@ const authenticateSession = async (req, res, next) => {
     req.user = {
       ...session,
       role: userDoc.role,
-      branch: userDoc.branch,
-      batch: userDoc.batch
+      branch: session.branch || userDoc.branch,
+      batch: session.batch || userDoc.batch
     };
 
     // --- ENFORCE MAINTENANCE MODE ---
@@ -543,57 +543,29 @@ async function syncUsersAndSeed() {
     const activeUsernames = new Set();
     activeUsernames.add('developer');
 
-    const upsertUser = async (username, password, role, branch = '', batch = '') => {
+    const usersMap = new Map();
+
+    const collectUser = (username, password, role, branch = '', batch = '') => {
       const uClean = username.toLowerCase().trim();
-      activeUsernames.add(uClean);
-      let schedule = '';
-      if (batch) {
-        const cb = (creds.customBatches || []).find(b => b.id.toLowerCase().trim() === batch.toLowerCase().trim());
-        if (cb) {
-          schedule = cb.schedule || '';
-        }
-      }
-      const existing = await User.findOne({ username: uClean });
+      const existing = usersMap.get(uClean);
       if (!existing) {
-        await new User({
-          username: uClean,
+        usersMap.set(uClean, {
           password,
           role,
-          branch,
-          batch,
-          schedule,
-          status: 'Active'
-        }).save();
-        console.log(`[Sync] Created User account for ${uClean} (Role: ${role})`);
+          branches: new Set(branch ? [branch.toLowerCase().trim()] : []),
+          batches: new Set(batch ? [batch.toLowerCase().trim()] : [])
+        });
       } else {
-        let changed = false;
-        if (existing.password !== password) {
-          existing.password = password;
-          changed = true;
-        }
-        if (existing.role !== role) {
+        existing.password = password;
+        const rolesOrder = { developer: 4, superadmin: 3, branchadmin: 2, trainer: 1 };
+        if (rolesOrder[role] > rolesOrder[existing.role]) {
           existing.role = role;
-          changed = true;
         }
-        if (existing.branch !== branch) {
-          existing.branch = branch;
-          changed = true;
+        if (branch) {
+          existing.branches.add(branch.toLowerCase().trim());
         }
-        if (existing.batch !== batch) {
-          existing.batch = batch;
-          changed = true;
-        }
-        if (existing.schedule !== schedule) {
-          existing.schedule = schedule;
-          changed = true;
-        }
-        if (existing.status !== 'Active') {
-          existing.status = 'Active';
-          changed = true;
-        }
-        if (changed) {
-          await existing.save();
-          console.log(`[Sync] Updated User account details for ${uClean}`);
+        if (batch) {
+          existing.batches.add(batch.toLowerCase().trim());
         }
       }
     };
@@ -603,7 +575,7 @@ async function syncUsersAndSeed() {
     for (const [user, pass] of adminEntries) {
       if (pass) {
         const role = user.toLowerCase().trim() === 'developer' ? 'developer' : 'superadmin';
-        await upsertUser(user, pass, role);
+        collectUser(user, pass, role);
       }
     }
 
@@ -612,7 +584,7 @@ async function syncUsersAndSeed() {
     for (const [br, info] of branchEntries) {
       if (info && info.password) {
         const username = info.username || `admin@${br}`;
-        await upsertUser(username, info.password, 'branchadmin', br);
+        collectUser(username, info.password, 'branchadmin', br);
       }
     }
 
@@ -624,7 +596,69 @@ async function syncUsersAndSeed() {
         const br = parts[0];
         const bt = parts.slice(1).join('_');
         const username = info.username || `${bt}@${br}`;
-        await upsertUser(username, info.password, 'trainer', br, bt);
+        collectUser(username, info.password, 'trainer', br, bt);
+      }
+    }
+
+    // Write/Update all users from usersMap to DB
+    for (const [username, userData] of usersMap.entries()) {
+      activeUsernames.add(username);
+      
+      const branchString = Array.from(userData.branches).join(',');
+      const batchString = Array.from(userData.batches).join(',');
+
+      // Retrieve schedules for all batches
+      const schedules = [];
+      for (const b of userData.batches) {
+        const cb = (creds.customBatches || []).find(cbObj => String(cbObj.id || cbObj.code || cbObj._id).toLowerCase().trim() === b);
+        if (cb && cb.schedule) {
+          schedules.push(cb.schedule);
+        }
+      }
+      const scheduleString = Array.from(new Set(schedules)).join(', ');
+
+      const existing = await User.findOne({ username });
+      if (!existing) {
+        await new User({
+          username,
+          password: userData.password,
+          role: userData.role,
+          branch: branchString,
+          batch: batchString,
+          schedule: scheduleString,
+          status: 'Active'
+        }).save();
+        console.log(`[Sync] Created User account for ${username} (Role: ${userData.role})`);
+      } else {
+        let changed = false;
+        if (existing.password !== userData.password) {
+          existing.password = userData.password;
+          changed = true;
+        }
+        if (existing.role !== userData.role) {
+          existing.role = userData.role;
+          changed = true;
+        }
+        if (existing.branch !== branchString) {
+          existing.branch = branchString;
+          changed = true;
+        }
+        if (existing.batch !== batchString) {
+          existing.batch = batchString;
+          changed = true;
+        }
+        if (existing.schedule !== scheduleString) {
+          existing.schedule = scheduleString;
+          changed = true;
+        }
+        if (existing.status !== 'Active') {
+          existing.status = 'Active';
+          changed = true;
+        }
+        if (changed) {
+          await existing.save();
+          console.log(`[Sync] Updated User account details for ${username}`);
+        }
       }
     }
 
@@ -2961,14 +2995,15 @@ app.post('/api/login', async (req, res) => {
       }
 
       // Enforce strict branch and batch selection checks for Trainer and Branch Admin portals
+      const bodyBranch = String(branch || '').toLowerCase().trim();
+      const bodyBatch = String(batch || '').toLowerCase().trim();
+
       if (isTrainer) {
-        const bodyBranch = String(branch || '').toLowerCase().trim();
-        const bodyBatch = String(batch || '').toLowerCase().trim();
-        const userBranch = String(user.branch || '').toLowerCase().trim();
-        const userBatch = String(user.batch || '').toLowerCase().trim();
+        const allowedBranches = String(user.branch || '').toLowerCase().split(',').map(s => s.trim());
+        const allowedBatches = String(user.batch || '').toLowerCase().split(',').map(s => s.trim());
 
         if (user.role === 'branchadmin') {
-          if (bodyBranch !== userBranch || bodyBatch !== 'admin') {
+          if (!allowedBranches.includes(bodyBranch) || bodyBatch !== 'admin') {
             await new LoginHistory({
               username: user.username,
               status: 'Failed',
@@ -2981,7 +3016,7 @@ app.post('/api/login', async (req, res) => {
             return res.status(401).json({ success: false, error: 'Invalid branch selection for this Branch Admin account' });
           }
         } else if (user.role === 'trainer') {
-          if (bodyBranch !== userBranch || bodyBatch !== userBatch) {
+          if (!allowedBranches.includes(bodyBranch) || !allowedBatches.includes(bodyBatch)) {
             await new LoginHistory({
               username: user.username,
               status: 'Failed',
@@ -3000,6 +3035,8 @@ app.post('/api/login', async (req, res) => {
       await new Session({
         username: user.username,
         token,
+        branch: bodyBranch,
+        batch: bodyBatch,
         ipAddress: clientIp,
         userAgent,
         deviceName: deviceName || 'Unknown Device',
@@ -3028,7 +3065,7 @@ app.post('/api/login', async (req, res) => {
       user.lockedAt = null;
       await user.save();
 
-      return res.json({ success: true, username: user.username, token, role: user.role, branch: user.branch, batch: user.batch, loginCount: user.loginCount });
+      return res.json({ success: true, username: user.username, token, role: user.role, branch: branch || user.branch, batch: batch || user.batch, loginCount: user.loginCount });
     }
 
     // Password verification failed
@@ -3105,7 +3142,7 @@ app.get('/api/session/verify', async (req, res) => {
       // Validate user status
       const user = await User.findOne({ username: session.username }).lean();
       if (user && user.status === 'Active') {
-        return res.json({ success: true, username: session.username, role: user.role, branch: user.branch, batch: user.batch, loginCount: user.loginCount });
+        return res.json({ success: true, username: session.username, role: user.role, branch: session.branch || user.branch, batch: session.batch || user.batch, loginCount: user.loginCount });
       }
     }
     return res.status(401).json({ success: false, error: 'Session expired, disabled, or invalid' });

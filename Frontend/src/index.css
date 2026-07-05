@@ -1426,7 +1426,7 @@ select option {
     flex-wrap: wrap !important;
     gap: 6px !important;
     box-sizing: border-box;
-    font-size: 0.85rem !important;
+    font-size: 0.95rem !important;
   }
 
   .responsive-table-cards td:last-child {
@@ -1444,7 +1444,7 @@ select option {
     font-weight: 600;
     color: var(--color-text-muted);
     content: attr(data-label);
-    font-size: 0.8rem;
+    font-size: 0.85rem;
   }
 
   .progress-container {

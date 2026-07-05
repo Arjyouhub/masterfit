@@ -4,6 +4,8 @@ const sessionSchema = new mongoose.Schema({
   username: { type: String, required: true },
   token: { type: String, required: true, unique: true },
   loginTime: { type: Date, default: Date.now, expires: '7d' },
+  branch: { type: String, default: '' },
+  batch: { type: String, default: '' },
   ipAddress: { type: String },
   userAgent: { type: String },
   deviceName: { type: String },
