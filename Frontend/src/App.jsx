@@ -1006,7 +1006,7 @@ function App() {
   const reloadAllAppData = () => {
     const token = getSessionToken();
     if (!token) {
-      // Not logged in: only fetch public branches for the login page
+      // Not logged in: fetch public branches and public batches for the login page
       fetch(`${API_BASE_URL}/public/branches`)
         .then(res => res.ok ? res.json() : [])
         .then(data => {
@@ -1019,6 +1019,27 @@ function App() {
           setBranches(sortBranchesAlphabetically(uniqueBranches));
         })
         .catch(err => console.error('Error fetching public branches:', err));
+
+      fetch(`${API_BASE_URL}/public/batches`)
+        .then(res => res.ok ? res.json() : [])
+        .then(data => {
+          const uniqueBatches = [
+            ...DEFAULT_BATCH_OPTIONS.map(b => ({ ...b, branch: 'all' })),
+            ...(data || []).map(b => ({
+              id: b.code || b.id || b._id,
+              name: b.name,
+              schedule: b.schedule,
+              branch: b.branch,
+              startTime: b.startTime || '09:00',
+              endTime: b.endTime || '10:30',
+              slotType: b.slotType || 'Morning',
+              status: b.status || 'Active',
+              _id: b._id
+            }))
+          ];
+          setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
+        })
+        .catch(err => console.error('Error fetching public batches:', err));
         
       return;
     }

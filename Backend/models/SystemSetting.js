@@ -10,7 +10,7 @@ const systemSettingSchema = new mongoose.Schema({
   systemUpdateNotificationId: { type: String, default: '' },
   sessionTimeoutMinutes: { type: Number, default: 60 },
   minPasswordLength: { type: Number, default: 6 },
-  failedLoginThreshold: { type: Number, default: 5 },
+  failedLoginThreshold: { type: Number, default: 10 },
   failedLoginBlockTimeMinutes: { type: Number, default: 15 },
   logRetentionLimit: { type: Number, default: 1000 },
   startingBillingMonth: { type: String, default: '' }, // e.g. "2026-01"

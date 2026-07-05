@@ -1433,6 +1433,33 @@ select option {
     border-bottom: none !important;
   }
 
+  .responsive-table-cards td[data-label="Student"] {
+    font-size: 1.15rem !important;
+    font-weight: 700 !important;
+  }
+
+  .responsive-table-cards td[data-label="Action"] {
+    min-height: 3.5rem !important;
+  }
+
+  .responsive-table-cards td[data-label="Action"] button,
+  .responsive-table-cards td[data-label="Action"] .btn-small {
+    padding: 0.6rem 1.2rem !important;
+    font-size: 0.95rem !important;
+    font-weight: 700 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex: 1 !important;
+    height: 44px !important;
+  }
+
+  .responsive-table-cards td[data-label="Action"] > div {
+    display: flex !important;
+    width: 100% !important;
+    gap: 12px !important;
+  }
+
   .responsive-table-cards td:before {
     position: absolute;
     left: 10px;

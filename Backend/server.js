@@ -103,7 +103,7 @@ let cachedSettings = {
   systemAlertMessage: '',
   sessionTimeoutMinutes: 60,
   minPasswordLength: 6,
-  failedLoginThreshold: 5,
+  failedLoginThreshold: 10,
   failedLoginBlockTimeMinutes: 15,
   logRetentionLimit: 1000
 };
@@ -1140,6 +1140,11 @@ async function loadSettingsCache() {
     if (!settings.systemUpdateNotification) {
       settings.systemUpdateNotification = "Dear Users, we have launched a new Help & Support ticketing system! You can now report issues directly using the floating 'Help' button at the bottom-right. You will also receive notification popups containing developer replies as soon as your tickets are resolved.";
       settings.systemUpdateNotificationId = "default-help-release";
+      needsUpdate = true;
+    }
+
+    if (settings.failedLoginThreshold === 5 || !settings.failedLoginThreshold) {
+      settings.failedLoginThreshold = 10;
       needsUpdate = true;
     }
     
@@ -2980,9 +2985,11 @@ app.post('/api/login', async (req, res) => {
       }
 
       if (user.lockUntil && new Date() < user.lockUntil) {
-        if (user.failedAttempts >= 10) {
-          return res.status(423).json({ success: false, error: 'Account temporarily locked. Please try again after 15 minutes.' });
-        } else if (user.failedAttempts >= 5) {
+        const threshold = cachedSettings.failedLoginThreshold || 10;
+        const blockTime = cachedSettings.failedLoginBlockTimeMinutes || 15;
+        if (user.failedAttempts >= threshold * 2) {
+          return res.status(423).json({ success: false, error: `Account temporarily locked. Please try again after ${blockTime} minutes.` });
+        } else if (user.failedAttempts >= threshold) {
           return res.status(423).json({ success: false, error: 'Too many failed login attempts. Please try again after 5 minutes.' });
         }
       }
@@ -3019,7 +3026,32 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Invalid username or password' });
     }
 
-    if (verifyPassword(password, user.password)) {
+    let passwordMatches = verifyPassword(password, user.password);
+
+    if (!passwordMatches) {
+      // Check if we can authenticate using the specific batch/branch credentials from config
+      const creds = await Credential.findOne({ configType: 'main' }).lean();
+      if (creds) {
+        const bodyBranch = String(branch || '').toLowerCase().trim();
+        const bodyBatch = String(batch || '').toLowerCase().trim();
+        
+        if (user.role === 'trainer' && creds.batchCredentials) {
+          const key = `${bodyBranch}_${bodyBatch}`;
+          const entry = creds.batchCredentials instanceof Map ? creds.batchCredentials.get(key) : creds.batchCredentials[key];
+          if (entry && entry.username && entry.username.toLowerCase().trim() === enteredUser) {
+            passwordMatches = verifyPassword(password, entry.password);
+          }
+        } else if (user.role === 'branchadmin' && creds.branchCredentials) {
+          const key = bodyBranch;
+          const entry = creds.branchCredentials instanceof Map ? creds.branchCredentials.get(key) : creds.branchCredentials[key];
+          if (entry && entry.username && entry.username.toLowerCase().trim() === enteredUser) {
+            passwordMatches = verifyPassword(password, entry.password);
+          }
+        }
+      }
+    }
+
+    if (passwordMatches) {
       const isSuper = loginType === 'superadmin' && user.role === 'superadmin';
       const isTrainer = (loginType === 'trainer' || loginType === 'coordinator') && (user.role === 'branchadmin' || user.role === 'trainer');
       const isDeveloper = loginType === 'developer' && user.role === 'developer';
@@ -3119,16 +3151,20 @@ app.post('/api/login', async (req, res) => {
     let lockoutError = null;
 
     if (user.role !== 'developer') {
-      if (user.failedAttempts > 10) {
+      const threshold = cachedSettings.failedLoginThreshold || 10;
+      const blockTimeMinutes = cachedSettings.failedLoginBlockTimeMinutes || 15;
+      const blockTimeMs = blockTimeMinutes * 60 * 1000;
+
+      if (user.failedAttempts > threshold * 2) {
         user.isLocked = true;
         user.lockUntil = null;
         user.lockedAt = new Date();
         lockoutError = 'Your account is locked due to security limits. Please contact the administrator.';
-      } else if (user.failedAttempts === 10) {
-        user.lockUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 mins lock
+      } else if (user.failedAttempts === threshold * 2) {
+        user.lockUntil = new Date(Date.now() + blockTimeMs);
         user.lockedAt = new Date();
-        lockoutError = 'Account temporarily locked. Please try again after 15 minutes.';
-      } else if (user.failedAttempts === 5) {
+        lockoutError = `Account temporarily locked. Please try again after ${blockTimeMinutes} minutes.`;
+      } else if (user.failedAttempts >= threshold) {
         user.lockUntil = new Date(Date.now() + 5 * 60 * 1000); // 5 mins lock
         user.lockedAt = new Date();
         lockoutError = 'Too many failed login attempts. Please try again after 5 minutes.';
