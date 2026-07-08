@@ -3680,4 +3680,33 @@ body::-webkit-scrollbar {
     overflow-x: visible !important;
     box-shadow: none !important;
   }
+
+  /* Prevent the circular settings/edit button from stretching on mobile */
+  .responsive-table-cards td[data-label="Actions"] button.btn-icon {
+    width: 32px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    padding: 0 !important;
+    border-radius: 50% !important;
+    flex: none !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  /* Make sure the Action div has full width and aligns items center */
+  .responsive-table-cards td[data-label="Actions"] > div {
+    display: flex !important;
+    width: 100% !important;
+    gap: 8px !important;
+    align-items: center !important;
+  }
+
+  /* Reflow alignment for Contact Outreach cell in performance breakdown */
+  .responsive-table-cards td[data-label="Contact Outreach"] > div {
+    display: flex !important;
+    gap: 8px !important;
+    justify-content: flex-end !important;
+    width: 100% !important;
+  }
 }
