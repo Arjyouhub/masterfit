@@ -3732,3 +3732,10 @@ body::-webkit-scrollbar {
     width: 100% !important;
   }
 }
+
+/* Prevent premium tables from squishing on tablet/desktop viewports */
+@media (min-width: 769px) {
+  .premium-table {
+    min-width: 1100px !important;
+  }
+}
