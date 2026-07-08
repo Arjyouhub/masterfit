@@ -7851,7 +7851,7 @@ function App() {
         if (!res.ok) throw new Error(data.error || 'Failed to submit grade');
         setGradingStudents(gradingStudents.map(s => s.id === data.id ? data : s));
         setIsGradeModalOpen(false);
-        setGradingSuccess(`Grading result submitted successfully for ${data.name}!`);
+        setGlobalSuccess(`Grading result submitted successfully for ${data.name}!`);
         reloadAllAppData();
       })
       .catch(err => {
@@ -7878,7 +7878,7 @@ function App() {
         if (!res.ok) throw new Error(data.error || 'Failed to update grading info');
         setGradingStudents(gradingStudents.map(s => s.id === data.id ? data : s));
         setIsEditGradingModalOpen(false);
-        setGradingSuccess(`Grading details updated successfully for ${data.name}!`);
+        setGlobalSuccess(`Grading details updated successfully for ${data.name}!`);
         reloadAllAppData();
       })
       .catch(err => {
@@ -9026,12 +9026,10 @@ function App() {
         setLoggedInUser(cleanUsername);
       }
 
-      setCredentialModalSuccess('Credentials updated successfully!');
-      setTimeout(() => {
-        setIsCredentialModalOpen(false);
-        setEditingCredential(null);
-        setCredentialModalSuccess('');
-      }, 1000);
+      setIsCredentialModalOpen(false);
+      setEditingCredential(null);
+      setCredentialModalSuccess('');
+      setGlobalSuccess('Credentials updated successfully!');
     } catch (err) {
       setCredentialModalError(err.message);
     }
