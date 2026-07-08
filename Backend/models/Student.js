@@ -37,7 +37,8 @@ const studentSchema = new mongoose.Schema({
       createdAt: { type: Date, default: Date.now }
     }],
     default: []
-  }
+  },
+  isPriority: { type: Boolean, default: false }
 }, { timestamps: true });
 
 studentSchema.index({ branch: 1, status: 1 });
