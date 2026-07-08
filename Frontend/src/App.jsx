@@ -207,6 +207,15 @@ function App() {
   };
 
   const [appMode, setAppMode] = useState(() => {
+    // Handle path-based routing (e.g. /developer/login) by redirecting to hash routing
+    if (window.location.pathname !== '/' && window.location.pathname !== '/index.html') {
+      const cleanPath = window.location.pathname;
+      if (cleanPath.startsWith('/developer') || cleanPath === '/superadmin' || cleanPath === '/login' || cleanPath === '/admin') {
+        window.location.replace('/#' + cleanPath + window.location.search);
+        return 'website';
+      }
+    }
+
     const hash = window.location.hash;
     const hasSession = getSessionUser();
 
