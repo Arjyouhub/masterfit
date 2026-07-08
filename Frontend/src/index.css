@@ -3725,6 +3725,14 @@ body::-webkit-scrollbar {
     align-items: center !important;
   }
 
+  /* Make non-icon action buttons inside Actions stretch to fill space on mobile */
+  .responsive-table-cards td[data-label="Actions"] > div button:not(.btn-icon) {
+    flex: 1 !important;
+    text-align: center !important;
+    justify-content: center !important;
+    white-space: nowrap !important;
+  }
+
   /* Format Collection Progress cells to span full width on mobile cards and stack label on top */
   .responsive-table-cards td[data-label="Collection Progress"] {
     padding-left: 12px !important;
