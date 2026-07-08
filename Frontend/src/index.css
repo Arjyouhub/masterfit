@@ -3681,6 +3681,28 @@ body::-webkit-scrollbar {
     box-shadow: none !important;
   }
 
+  /* Format Actions cell to span full width on mobile cards and stack label on top */
+  .responsive-table-cards td[data-label="Actions"] {
+    padding-left: 12px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    min-height: auto !important;
+    gap: 8px !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+  }
+
+  .responsive-table-cards td[data-label="Actions"]:before {
+    position: static !important;
+    display: block !important;
+    width: 100% !important;
+    margin-bottom: 6px !important;
+    font-size: 0.9rem !important;
+    color: var(--color-text-muted) !important;
+    font-weight: 600 !important;
+  }
+
   /* Prevent the circular settings/edit button from stretching on mobile */
   .responsive-table-cards td[data-label="Actions"] button.btn-icon {
     width: 32px !important;
