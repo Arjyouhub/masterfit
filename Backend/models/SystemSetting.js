@@ -16,7 +16,12 @@ const systemSettingSchema = new mongoose.Schema({
   startingBillingMonth: { type: String, default: '' }, // e.g. "2026-01"
   lockPerformancePage: { type: Boolean, default: false },
   lockBranchBatchMappingPage: { type: Boolean, default: false },
-  lockFeesPage: { type: Boolean, default: false }
+  lockFeesPage: { type: Boolean, default: false },
+  lockDashboardPage: { type: Boolean, default: false },
+  lockAttendancePage: { type: Boolean, default: false },
+  lockRemindersPage: { type: Boolean, default: false },
+  lockGradingPage: { type: Boolean, default: false },
+  allowBranchAdminChangeBelt: { type: Boolean, default: false }
 }, { timestamps: true });
 
 export default mongoose.model('SystemSetting', systemSettingSchema);

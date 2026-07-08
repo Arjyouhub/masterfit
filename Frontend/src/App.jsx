@@ -347,6 +347,10 @@ function App() {
   const [lockPerformancePage, setLockPerformancePage] = useState(false);
   const [lockBranchBatchMappingPage, setLockBranchBatchMappingPage] = useState(false);
   const [lockFeesPage, setLockFeesPage] = useState(false);
+  const [lockDashboardPage, setLockDashboardPage] = useState(false);
+  const [lockAttendancePage, setLockAttendancePage] = useState(false);
+  const [lockRemindersPage, setLockRemindersPage] = useState(false);
+  const [lockGradingPage, setLockGradingPage] = useState(false);
   const [unseenResolvedReports, setUnseenResolvedReports] = useState([]);
   const [activeUpdateNotification, setActiveUpdateNotification] = useState(null);
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
@@ -358,7 +362,39 @@ function App() {
   const [editingClass, setEditingClass] = useState(null);
   const [classForm, setClassForm] = useState({ className: '', branch: '', batch: '', trainer: '', startTime: '', endTime: '', subject: '' });
   const [classFormDays, setClassFormDays] = useState({ Mon: false, Tue: false, Wed: false, Thu: false, Fri: false, Sat: false, Sun: false });
+
+  // Grading Management Module States
+  const [gradingStudents, setGradingStudents] = useState([]);
+  const [loadingGrading, setLoadingGrading] = useState(false);
+  const [gradingFilterBranch, setGradingFilterBranch] = useState('All');
+  const [gradingFilterBatch, setGradingFilterBatch] = useState('All');
+  const [gradingFilterBelt, setGradingFilterBelt] = useState('All');
+  const [gradingFilterEligibility, setGradingFilterEligibility] = useState('All');
+  const [gradingFilterResult, setGradingFilterResult] = useState('All');
+  const [gradingFilterStartDate, setGradingFilterStartDate] = useState('');
+  const [gradingFilterEndDate, setGradingFilterEndDate] = useState('');
+  const [allowBranchAdminChangeBelt, setAllowBranchAdminChangeBelt] = useState(false);
+  const [gradingActionLoading, setGradingActionLoading] = useState(false);
+  const [gradingError, setGradingError] = useState('');
+  const [gradingSuccess, setGradingSuccess] = useState('');
+
+  // Modals for Grading
+  const [isGradeModalOpen, setIsGradeModalOpen] = useState(false);
+  const [selectedGradeStudent, setSelectedGradeStudent] = useState(null);
+  const [gradeResult, setGradeResult] = useState('Pass');
+  const [gradeDate, setGradeDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [selectedHistoryStudent, setSelectedHistoryStudent] = useState(null);
+
+  const [isEditGradingModalOpen, setIsEditGradingModalOpen] = useState(false);
+  const [selectedEditGradingStudent, setSelectedEditGradingStudent] = useState(null);
+  const [editGradingForm, setEditGradingForm] = useState({ joinDate: '', lastGradingDate: '', belt: '' });
   const [classFormSlotType, setClassFormSlotType] = useState('Morning');
+
+  // Financial Performance / Profit Filters States
+  const [perfFilterBranch, setPerfFilterBranch] = useState('All');
+  const [perfFilterBatch, setPerfFilterBatch] = useState('All');
 
   const handleOpenAddClass = () => {
     setClassForm({
@@ -1171,9 +1207,36 @@ function App() {
       .then(data => {
         if (data) {
           setStartingBillingMonth(data.startingBillingMonth || '');
+          setAllowBranchAdminChangeBelt(!!data.allowBranchAdminChangeBelt);
         }
       })
       .catch(err => console.error('Error fetching system settings:', err));
+
+    const activeRole = getCookieValue('umai_session_role') || userRole;
+    if (activeRole === 'superadmin' || activeRole === 'developer' || activeRole === 'branchadmin') {
+      fetchGradingStudents();
+    }
+  };
+
+  const fetchGradingStudents = () => {
+    setLoadingGrading(true);
+    setGradingError('');
+    const activeRole = getCookieValue('umai_session_role') || userRole;
+    const branchParam = (activeRole === 'superadmin' || activeRole === 'developer') ? (gradingFilterBranch || 'All') : 'All';
+    
+    fetch(`${API_BASE_URL}/grading/students?branch=${encodeURIComponent(branchParam)}`)
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch student grading details.');
+        return res.json();
+      })
+      .then(data => {
+        setGradingStudents(sortStudentsAlphabetically(data));
+      })
+      .catch(err => {
+        console.error('Error fetching grading students:', err);
+        setGradingError(err.message);
+      })
+      .finally(() => setLoadingGrading(false));
   };
 
   const handleCreateAdmin = (e) => {
@@ -1375,6 +1438,17 @@ function App() {
       })
       .catch(err => console.error('Error fetching students:', err));
   }, [branchFilter, batchFilter, loggedInUser]);
+
+  // Fetch grading students dynamically when branch filter changes or grading view is opened
+  useEffect(() => {
+    const token = getSessionToken();
+    if (!token) return;
+    
+    const activeRole = getCookieValue('umai_session_role') || userRole;
+    if (currentView === 'grading' && (activeRole === 'superadmin' || activeRole === 'developer' || activeRole === 'branchadmin')) {
+      fetchGradingStudents();
+    }
+  }, [gradingFilterBranch, currentView, loggedInUser]);
 
   // Dynamic batch loading for Login Page
   useEffect(() => {
@@ -2610,6 +2684,10 @@ function App() {
           setLockPerformancePage(!!data.lockPerformancePage);
           setLockBranchBatchMappingPage(!!data.lockBranchBatchMappingPage);
           setLockFeesPage(!!data.lockFeesPage);
+          setLockDashboardPage(!!data.lockDashboardPage);
+          setLockAttendancePage(!!data.lockAttendancePage);
+          setLockRemindersPage(!!data.lockRemindersPage);
+          setLockGradingPage(!!data.lockGradingPage);
 
           // Check if current user is affected by maintenance
           let isBlocked = false;
@@ -5813,11 +5891,56 @@ function App() {
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
                   <input
                     type="checkbox"
+                    checked={!!devSettings.lockDashboardPage}
+                    onChange={(e) => setDevSettings({ ...devSettings, lockDashboardPage: e.target.checked })}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Lock Dashboard Page
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!devSettings.lockAttendancePage}
+                    onChange={(e) => setDevSettings({ ...devSettings, lockAttendancePage: e.target.checked })}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Lock Attendance Page
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!devSettings.lockFeesPage}
+                    onChange={(e) => setDevSettings({ ...devSettings, lockFeesPage: e.target.checked })}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Lock Fees Page
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!devSettings.lockRemindersPage}
+                    onChange={(e) => setDevSettings({ ...devSettings, lockRemindersPage: e.target.checked })}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Lock Reminders Page
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
+                  <input
+                    type="checkbox"
                     checked={!!devSettings.lockPerformancePage}
                     onChange={(e) => setDevSettings({ ...devSettings, lockPerformancePage: e.target.checked })}
                     style={{ cursor: 'pointer' }}
                   />
                   Lock Student Performance Page
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!devSettings.lockGradingPage}
+                    onChange={(e) => setDevSettings({ ...devSettings, lockGradingPage: e.target.checked })}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Lock Grading Page
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
                   <input
@@ -5831,19 +5954,14 @@ function App() {
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
                   <input
                     type="checkbox"
-                    checked={!!devSettings.lockFeesPage}
-                    onChange={(e) => setDevSettings({ ...devSettings, lockFeesPage: e.target.checked })}
+                    checked={!!devSettings.allowBranchAdminChangeBelt}
+                    onChange={(e) => setDevSettings({ ...devSettings, allowBranchAdminChangeBelt: e.target.checked })}
                     style={{ cursor: 'pointer' }}
                   />
-                  Lock Fees Page
+                  Allow Branch Admin to manually change Current Belt
                 </label>
               </div>
             </div>
-
-
-
-
-
 
 
             {/* Session Timeout */}
@@ -7651,82 +7769,1049 @@ function App() {
     );
   };
 
-  const renderPerformance = () => (
-    <div className="performance-view">
-      <div className="panel" style={{ marginBottom: '2rem' }}>
-        <div className="panel-header">
-          <h3 className="panel-title">Academy Performance</h3>
-        </div>
-        <div className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-icon-wrapper"><Award className="stat-icon" /></div>
-            <div className="stat-details">
-              <h3>Next Grading Event</h3>
-              <p className="stat-value text-blue" style={{ color: '#FFD700' }}>June 15</p>
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon-wrapper"><Activity className="stat-icon" /></div>
-            <div className="stat-details">
-              <h3>Avg Academy Attendance</h3>
-              <p className="stat-value" style={{ color: '#4CAF50' }}>88%</p>
-            </div>
-          </div>
-        </div>
-      </div>
+  // Grading Module Actions and Handlers
+  const getNextBelt = (currentBelt) => {
+    const beltList = ['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'];
+    const index = beltList.findIndex(b => b.toLowerCase() === String(currentBelt || '').toLowerCase().trim());
+    if (index === -1 || index === beltList.length - 1) return 'None';
+    return beltList[index + 1];
+  };
 
-      <div className="panel">
-        <div className="panel-header">
-          <h3 className="panel-title">Student Tracking</h3>
+  const getFilteredGradingStudents = () => {
+    return gradingStudents.filter(student => {
+      const matchesSearch = student.name.toLowerCase().includes(searchQuery.toLowerCase().trim());
+      
+      let matchesBatch = true;
+      if (gradingFilterBatch !== 'All') {
+        matchesBatch = (student.batch || '').toLowerCase() === gradingFilterBatch.toLowerCase();
+      }
+
+      let matchesBelt = true;
+      if (gradingFilterBelt !== 'All') {
+        matchesBelt = (student.belt || '').toLowerCase() === gradingFilterBelt.toLowerCase();
+      }
+
+      let matchesEligibility = true;
+      if (gradingFilterEligibility !== 'All') {
+        matchesEligibility = student.eligibilityStatus === gradingFilterEligibility;
+      }
+
+      let matchesResult = true;
+      if (gradingFilterResult !== 'All') {
+        if (gradingFilterResult === 'No History') {
+          matchesResult = !student.lastGradingResult || student.lastGradingResult === 'N/A';
+        } else {
+          matchesResult = student.lastGradingResult === gradingFilterResult;
+        }
+      }
+
+      let matchesDateRange = true;
+      if (gradingFilterStartDate) {
+        if (!student.lastGradingDate || student.lastGradingDate === 'N/A' || student.lastGradingDate < gradingFilterStartDate) {
+          matchesDateRange = false;
+        }
+      }
+      if (gradingFilterEndDate) {
+        if (!student.lastGradingDate || student.lastGradingDate === 'N/A' || student.lastGradingDate > gradingFilterEndDate) {
+          matchesDateRange = false;
+        }
+      }
+
+      return matchesSearch && matchesBatch && matchesBelt && matchesEligibility && matchesResult && matchesDateRange;
+    });
+  };
+
+  const handleSubmitGrade = (e) => {
+    e.preventDefault();
+    if (!selectedGradeStudent) return;
+    setGradingActionLoading(true);
+    setGradingError('');
+    setGradingSuccess('');
+
+    fetch(`${API_BASE_URL}/students/${selectedGradeStudent.id}/grade`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ result: gradeResult, gradingDate: gradeDate })
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to submit grade');
+        setGradingStudents(gradingStudents.map(s => s.id === data.id ? data : s));
+        setIsGradeModalOpen(false);
+        setGradingSuccess(`Grading result submitted successfully for ${data.name}!`);
+        reloadAllAppData();
+      })
+      .catch(err => {
+        console.error(err);
+        setGradingError(err.message);
+      })
+      .finally(() => setGradingActionLoading(false));
+  };
+
+  const handleSubmitEditGrading = (e) => {
+    e.preventDefault();
+    if (!selectedEditGradingStudent) return;
+    setGradingActionLoading(true);
+    setGradingError('');
+    setGradingSuccess('');
+
+    fetch(`${API_BASE_URL}/students/${selectedEditGradingStudent.id}/grading-info`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(editGradingForm)
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to update grading info');
+        setGradingStudents(gradingStudents.map(s => s.id === data.id ? data : s));
+        setIsEditGradingModalOpen(false);
+        setGradingSuccess(`Grading details updated successfully for ${data.name}!`);
+        reloadAllAppData();
+      })
+      .catch(err => {
+        console.error(err);
+        setGradingError(err.message);
+      })
+      .finally(() => setGradingActionLoading(false));
+  };
+
+  const renderGrading = () => {
+    const isSuper = isAdminUser(loggedInUser);
+    const filtered = getFilteredGradingStudents();
+
+    // Stats calculations
+    const totalCount = filtered.length;
+    const eligibleCount = filtered.filter(s => s.eligibilityStatus === 'Eligible').length;
+    const passedCount = filtered.filter(s => s.lastGradingResult === 'Pass').length;
+    const failedCount = filtered.filter(s => s.lastGradingResult === 'Fail').length;
+
+    const beltCounts = { White: 0, Yellow: 0, Orange: 0, Green: 0, Blue: 0, Brown: 0, Black: 0 };
+    filtered.forEach(s => {
+      const b = s.belt || 'White';
+      const normalized = b.charAt(0).toUpperCase() + b.slice(1).toLowerCase();
+      if (beltCounts[normalized] !== undefined) {
+        beltCounts[normalized]++;
+      }
+    });
+
+    return (
+      <div className="grading-view">
+        {gradingError && <div style={{ color: '#E50914', marginBottom: '1.5rem', background: 'rgba(229, 9, 20, 0.1)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(229, 9, 20, 0.3)', fontWeight: 500 }}>{gradingError}</div>}
+        {gradingSuccess && <div style={{ color: '#4CAF50', marginBottom: '1.5rem', background: 'rgba(76, 175, 80, 0.1)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(76, 175, 80, 0.3)', fontWeight: 500 }}>{gradingSuccess}</div>}
+
+        {/* Dashboard Stats Cards */}
+        <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: '2rem' }}>
+          <div className="stat-card glow-card-blue">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(54, 162, 235, 0.1)' }}><Users className="stat-icon" style={{ color: '#36A2EB' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Total Students</h3>
+              <p className="stat-value" style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>{totalCount}</p>
+            </div>
+          </div>
+          <div className="stat-card glow-card-green">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(76, 175, 80, 0.1)' }}><CheckCircle className="stat-icon" style={{ color: '#4CAF50' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Eligible for Test</h3>
+              <p className="stat-value" style={{ color: '#4CAF50', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>{eligibleCount}</p>
+            </div>
+          </div>
+          <div className="stat-card glow-card-blue">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(54, 162, 235, 0.1)' }}><Award className="stat-icon" style={{ color: '#36A2EB' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Passed Tests</h3>
+              <p className="stat-value" style={{ color: '#36A2EB', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>{passedCount}</p>
+            </div>
+          </div>
+          <div className="stat-card glow-card-red">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(229, 9, 20, 0.1)' }}><XCircle className="stat-icon" style={{ color: '#ff453a' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Failed Tests</h3>
+              <p className="stat-value" style={{ color: '#ff453a', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>{failedCount}</p>
+            </div>
+          </div>
         </div>
-        <div className="table-responsive">
-          <table className="data-table responsive-table-cards">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Belt Level</th>
-                <th>Batch</th>
-                <th>Skill Score</th>
-                <th>Progress to Next Belt</th>
-                <th>Contact / Operations</th>
-              </tr>
-            </thead>
-            <tbody>
-              {searchedStudents.map(student => (
-                <tr key={student.id}>
-                  <td data-label="Name" onClick={() => handleSelectStudent(student)} style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}>{student.studentName || student.name}</td>
-                  <td data-label="Belt Level"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
-                  <td data-label="Batch"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>{getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}</span></td>
-                  <td data-label="Skill Score"><span style={{ fontWeight: 'bold', color: student.performanceScore > 80 ? '#4CAF50' : '#FF9800' }}>{student.performanceScore}/100</span></td>
-                  <td data-label="Progress to Next Belt" style={{ width: '30%' }}>
-                    <div className="progress-container">
-                      <div className="progress-bar" style={{ width: `${student.performanceScore}%` }}></div>
-                    </div>
-                  </td>
-                  <td data-label="Contact / Operations">
-                    <div className="actions-flex-container">
-                      <a href={`tel:${student.phone}`} className="btn-icon" style={{ color: '#2196F3' }} title="Call Student">
-                        <Phone size={18} />
-                      </a>
-                      <a href={`https://wa.me/${student.phone}`} target="_blank" rel="noreferrer" className="btn-icon" style={{ color: '#25D366' }} title="WhatsApp Student">
-                        <MessageCircle size={18} />
-                      </a>
-                      <a href={`sms:${student.phone}`} className="btn-icon" style={{ color: '#FF9800' }} title="SMS Message Student">
-                        <MessageSquare size={18} />
-                      </a>
-                      <button className="btn-icon" onClick={() => handleDeleteStudent(student.id)} style={{ color: '#F44336' }} title="Delete">
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-                  </td>
+
+        {/* Belt Distribution Bar */}
+        <div className="panel" style={{ marginBottom: '2rem', background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+          <h3 className="panel-title" style={{ marginBottom: '1.25rem', fontSize: '0.85rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Belt Level Distribution</h3>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+            {Object.entries(beltCounts).map(([beltName, count]) => (
+              <div key={beltName} style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255, 255, 255, 0.02)', padding: '6px 14px', borderRadius: '20px', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                <span className={`badge ${getBeltColorClass(beltName)}`} style={{ padding: '3px 8px', fontSize: '0.7rem', borderRadius: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{beltName}</span>
+                <strong style={{ fontSize: '0.85rem', color: '#fff', fontFamily: 'Outfit, sans-serif' }}>{count}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Filters Panel */}
+        <div className="filters-wrapper-card">
+          <div className="panel-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
+            <h3 className="panel-title" style={{ fontSize: '0.9rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Grading Filters</h3>
+          </div>
+          <div className="grid-filters-layout">
+            {isSuper && (
+              <div className="form-group">
+                <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Branch</label>
+                <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterBranch} onChange={(e) => setGradingFilterBranch(e.target.value)}>
+                  <option value="All">All Branches</option>
+                  {branches.map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="form-group">
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Batch</label>
+              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterBatch} onChange={(e) => setGradingFilterBatch(e.target.value)}>
+                <option value="All">All Batches</option>
+                {getFilteredBatchOptions(isSuper ? gradingFilterBranch : undefined).map(opt => (
+                  <option key={opt.id} value={opt.id}>{opt.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Belt Level</label>
+              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterBelt} onChange={(e) => setGradingFilterBelt(e.target.value)}>
+                <option value="All">All Belts</option>
+                {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Eligibility</label>
+              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterEligibility} onChange={(e) => setGradingFilterEligibility(e.target.value)}>
+                <option value="All">All Eligibility</option>
+                <option value="Eligible">Eligible</option>
+                <option value="Not Eligible">Not Eligible</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Last Result</label>
+              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterResult} onChange={(e) => setGradingFilterResult(e.target.value)}>
+                <option value="All">All Results</option>
+                <option value="Pass">Pass</option>
+                <option value="Fail">Fail</option>
+                <option value="No History">No History / N/A</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Grading Date Range</label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input type="date" className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', flex: 1 }} value={gradingFilterStartDate} onChange={(e) => setGradingFilterStartDate(e.target.value)} placeholder="Start" />
+                <input type="date" className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', flex: 1 }} value={gradingFilterEndDate} onChange={(e) => setGradingFilterEndDate(e.target.value)} placeholder="End" />
+              </div>
+            </div>
+          </div>
+          
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', alignItems: 'center', marginTop: '1.25rem', flexWrap: 'wrap' }}>
+            <button className="btn-secondary" style={{ padding: '6px 16px', fontSize: '0.85rem', height: '38px', borderRadius: '8px' }} onClick={() => {
+              setGradingFilterBranch('All');
+              setGradingFilterBatch('All');
+              setGradingFilterBelt('All');
+              setGradingFilterEligibility('All');
+              setGradingFilterResult('All');
+              setGradingFilterStartDate('');
+              setGradingFilterEndDate('');
+              setSearchQuery('');
+            }}>Reset Filters</button>
+            <div style={{ position: 'relative', width: '220px' }}>
+              <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+              <input
+                type="text"
+                placeholder="Search students..."
+                className="form-control"
+                style={{ paddingLeft: '36px', height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Student Table */}
+        <div className="panel" style={{ background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+          <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: 'none', paddingBottom: 0 }}>
+            <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Students List ({filtered.length})</h3>
+          </div>
+          
+          {loadingGrading ? (
+            <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--color-text-muted)' }}>Loading student details...</div>
+          ) : filtered.length > 0 ? (
+            <div className="premium-table-container">
+              <table className="premium-table">
+                <thead>
+                  <tr>
+                    <th>Student Name</th>
+                    <th>Branch</th>
+                    <th>Batch</th>
+                    <th>Current Belt</th>
+                    <th>Next Belt</th>
+                    <th>Join Date</th>
+                    <th>Last Grading</th>
+                    <th>Next Eligible</th>
+                    <th>Eligibility</th>
+                    <th>Result</th>
+                    <th style={{ textAlign: 'center' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(student => (
+                    <tr key={student.id}>
+                      <td style={{ fontWeight: 600, color: '#fff' }}>
+                        {student.name}
+                      </td>
+                      <td>{student.branch}</td>
+                      <td>{getBatchNameFromCode(student.batch, student.branch)}</td>
+                      <td>
+                        <span className={`badge ${getBeltColorClass(student.belt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem', borderRadius: '4px' }}>{student.belt}</span>
+                      </td>
+                      <td>
+                        {student.nextBelt !== 'None' ? (
+                          <span className={`badge ${getBeltColorClass(student.nextBelt)}`} style={{ opacity: 0.85, padding: '3px 8px', fontSize: '0.75rem', borderRadius: '4px' }}>{student.nextBelt}</span>
+                        ) : (
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>None (Max)</span>
+                        )}
+                      </td>
+                      <td>{student.joinDate}</td>
+                      <td>{student.lastGradingDate || 'N/A'}</td>
+                      <td>{student.nextEligibleGradingDate || 'N/A'}</td>
+                      <td>
+                        <span className={student.eligibilityStatus === 'Eligible' ? 'badge-outline-green' : 'badge-outline-red'}>
+                          {student.eligibilityStatus}
+                        </span>
+                      </td>
+                      <td>
+                        {student.lastGradingResult === 'Pass' ? (
+                          <span className="badge-outline-green">Pass</span>
+                        ) : student.lastGradingResult === 'Fail' ? (
+                          <span className="badge-outline-red">Fail</span>
+                        ) : (
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>N/A</span>
+                        )}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', alignItems: 'center' }}>
+                          <button className="btn-secondary action-btn-pill" onClick={() => {
+                            setSelectedHistoryStudent(student);
+                            setIsHistoryModalOpen(true);
+                          }}>History</button>
+                          
+                          <button className="btn-primary action-btn-pill" style={{ background: 'var(--color-accent-primary)' }} onClick={() => {
+                            setSelectedGradeStudent(student);
+                            setGradeResult('Pass');
+                            setGradeDate(new Date().toISOString().split('T')[0]);
+                            setIsGradeModalOpen(true);
+                          }}>Grade</button>
+
+                          <button className="btn-icon" style={{ color: '#2196F3', background: 'rgba(33, 150, 243, 0.1)', border: '1px solid rgba(33, 150, 243, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => {
+                            setSelectedEditGradingStudent(student);
+                            setEditGradingForm({
+                              joinDate: student.joinDate,
+                              lastGradingDate: student.lastGradingDate || 'N/A',
+                              belt: student.belt
+                            });
+                            setIsEditGradingModalOpen(true);
+                          }}><Settings size={12} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--color-text-muted)' }}>No student matching the current filters.</div>
+          )}
+        </div>
+
+        {/* Modal: View Grading History */}
+        {isHistoryModalOpen && selectedHistoryStudent && (
+          <div className="modal-overlay" style={{ zIndex: 1000 }}>
+            <div className="modal-content" style={{ maxWidth: '650px', background: 'var(--color-bg-surface)', padding: '1.5rem', borderRadius: '8px' }}>
+              <div className="panel-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="panel-title">Grading History: {selectedHistoryStudent.name}</h3>
+                <button className="btn-icon" onClick={() => {
+                  setIsHistoryModalOpen(false);
+                  setSelectedHistoryStudent(null);
+                }} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}><X size={20} /></button>
+              </div>
+
+              <div style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '1rem', marginBottom: '1rem', display: 'flex', gap: '15px', fontSize: '0.9rem', color: 'var(--color-text-main)' }}>
+                <div>Branch: <strong>{selectedHistoryStudent.branch}</strong></div>
+                <div>Batch: <strong>{selectedHistoryStudent.batch}</strong></div>
+                <div>Current Belt: <span className={`badge ${getBeltColorClass(selectedHistoryStudent.belt)}`}>{selectedHistoryStudent.belt}</span></div>
+              </div>
+
+              {selectedHistoryStudent.gradingHistory && selectedHistoryStudent.gradingHistory.length > 0 ? (
+                <div className="table-responsive" style={{ maxHeight: '350px', overflowY: 'auto' }}>
+                  <table className="attendance-table" style={{ fontSize: '0.85rem' }}>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Belt Before</th>
+                        <th>Result</th>
+                        <th>Belt After</th>
+                        <th>Updated By</th>
+                        <th>Attempted At</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...selectedHistoryStudent.gradingHistory].reverse().map((attempt, index) => (
+                        <tr key={index}>
+                          <td data-label="Date">{attempt.gradingDate}</td>
+                          <td data-label="Belt Before">
+                            <span className={`badge ${getBeltColorClass(attempt.beltBefore)}`} style={{ transform: 'scale(0.85)' }}>{attempt.beltBefore}</span>
+                          </td>
+                          <td data-label="Result">
+                            {attempt.result === 'Pass' ? (
+                              <span className="badge badge-green" style={{ background: 'rgba(76, 175, 80, 0.15)', color: '#4CAF50', border: '1px solid rgba(76, 175, 80, 0.3)', padding: '2px 6px', fontSize: '0.75rem' }}>Pass</span>
+                            ) : (
+                              <span className="badge badge-red" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#ff453a', border: '1px solid rgba(229, 9, 20, 0.3)', padding: '2px 6px', fontSize: '0.75rem' }}>Fail</span>
+                            )}
+                          </td>
+                          <td data-label="Belt After">
+                            <span className={`badge ${getBeltColorClass(attempt.beltAfter)}`} style={{ transform: 'scale(0.85)' }}>{attempt.beltAfter}</span>
+                          </td>
+                          <td data-label="Updated By">{attempt.updatedBy}</td>
+                          <td data-label="Attempted At" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                            {new Date(attempt.createdAt || attempt.date).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No grading attempts recorded. Tracking starts from now.</div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+                <button className="btn-secondary" onClick={() => {
+                  setIsHistoryModalOpen(false);
+                  setSelectedHistoryStudent(null);
+                }}>Close</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Conduct Grade Test */}
+        {isGradeModalOpen && selectedGradeStudent && (
+          <div className="modal-overlay" style={{ zIndex: 1000 }}>
+            <div className="modal-content" style={{ maxWidth: '500px', background: 'var(--color-bg-surface)', padding: '1.5rem', borderRadius: '8px' }}>
+              <div className="panel-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="panel-title">Conduct Grading Test</h3>
+                <button className="btn-icon" onClick={() => {
+                  setIsGradeModalOpen(false);
+                  setSelectedGradeStudent(null);
+                }} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}><X size={20} /></button>
+              </div>
+
+              <form onSubmit={handleSubmitGrade}>
+                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.04)', marginBottom: '1.5rem', fontSize: '0.9rem', color: 'var(--color-text-main)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span>Student:</span> <strong style={{ color: '#fff' }}>{selectedGradeStudent.name}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span>Current Belt Level:</span> <span className={`badge ${getBeltColorClass(selectedGradeStudent.belt)}`}>{selectedGradeStudent.belt}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Target Promotion Belt:</span> 
+                    {selectedGradeStudent.nextBelt !== 'None' ? (
+                      <span className={`badge ${getBeltColorClass(selectedGradeStudent.nextBelt)}`}>{selectedGradeStudent.nextBelt}</span>
+                    ) : (
+                      <strong style={{ color: 'var(--color-text-muted)' }}>Max Level Reached</strong>
+                    )}
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                  <label>Grading Date</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={gradeDate}
+                    onChange={(e) => setGradeDate(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                  <label>Test Result</label>
+                  <select
+                    className="form-control"
+                    value={gradeResult}
+                    onChange={(e) => setGradeResult(e.target.value)}
+                    required
+                  >
+                    <option value="Pass">Pass (Promote to next belt level)</option>
+                    <option value="Fail">Fail (Keep current belt level)</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                  <button type="button" className="btn-secondary" onClick={() => {
+                    setIsGradeModalOpen(false);
+                    setSelectedGradeStudent(null);
+                  }}>Cancel</button>
+                  <button type="submit" className="btn-primary" disabled={gradingActionLoading} style={{ background: 'var(--color-accent-primary)' }}>
+                    {gradingActionLoading ? 'Submitting...' : 'Save Result'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Edit Grading Info Override */}
+        {isEditGradingModalOpen && selectedEditGradingStudent && (
+          <div className="modal-overlay" style={{ zIndex: 1000 }}>
+            <div className="modal-content" style={{ maxWidth: '500px', background: 'var(--color-bg-surface)', padding: '1.5rem', borderRadius: '8px' }}>
+              <div className="panel-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="panel-title">Edit Student Grading Info</h3>
+                <button className="btn-icon" onClick={() => {
+                  setIsEditGradingModalOpen(false);
+                  setSelectedEditGradingStudent(null);
+                }} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}><X size={20} /></button>
+              </div>
+
+              <form onSubmit={handleSubmitEditGrading}>
+                <div style={{ marginBottom: '1.25rem', fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+                  Student: <strong style={{ color: '#fff' }}>{selectedEditGradingStudent.name}</strong> (ID: {selectedEditGradingStudent.id})
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                  <label>Join Date</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={editGradingForm.joinDate}
+                    onChange={(e) => setEditGradingForm({ ...editGradingForm, joinDate: e.target.value })}
+                    required
+                    disabled={!isSuper && !allowBranchAdminChangeBelt}
+                  />
+                  {!isSuper && !allowBranchAdminChangeBelt && (
+                    <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Requires Super Admin permission to edit.</span>
+                  )}
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                  <label>Last Grading Date</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={editGradingForm.lastGradingDate}
+                    onChange={(e) => setEditGradingForm({ ...editGradingForm, lastGradingDate: e.target.value })}
+                    placeholder="YYYY-MM-DD or N/A"
+                    required
+                  />
+                  <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Enter N/A if student has not taken a grading test yet. Recalculates eligibility date.</span>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                  <label>Current Belt level</label>
+                  <select
+                    className="form-control"
+                    value={editGradingForm.belt}
+                    onChange={(e) => setEditGradingForm({ ...editGradingForm, belt: e.target.value })}
+                    required
+                    disabled={!isSuper && !allowBranchAdminChangeBelt}
+                  >
+                    {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                  {!isSuper && !allowBranchAdminChangeBelt && (
+                    <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Requires Super Admin permission to edit.</span>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                  <button type="button" className="btn-secondary" onClick={() => {
+                    setIsEditGradingModalOpen(false);
+                    setSelectedEditGradingStudent(null);
+                  }}>Cancel</button>
+                  <button type="submit" className="btn-primary" disabled={gradingActionLoading}>
+                    {gradingActionLoading ? 'Saving...' : 'Save Override'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderPerformance = () => {
+    // Helper to calculate financial metrics for a student
+    const getStudentFeeStats = (student) => {
+      const rateAdmission = student.customAdmissionRate !== undefined && student.customAdmissionRate !== null
+        ? student.customAdmissionRate
+        : admissionFeeRate;
+      const admissionCoupon = resolveCouponCode(student.appliedAdmissionCoupon);
+      let admissionDiscountAmount = 0;
+      if (admissionCoupon) {
+        if (admissionCoupon.type === 'percentage') {
+          admissionDiscountAmount = Math.round(rateAdmission * admissionCoupon.value / 100);
+        } else {
+          admissionDiscountAmount = admissionCoupon.value;
+        }
+      }
+      const finalAdmissionRate = Math.max(0, rateAdmission - admissionDiscountAmount);
+
+      let collectedAdmission = 0;
+      let pendingAdmission = 0;
+
+      if (student.admissionPaid) {
+        collectedAdmission = finalAdmissionRate;
+      } else {
+        pendingAdmission = finalAdmissionRate;
+      }
+
+      // Monthly fees
+      const currentMonthStr = getLocalMonthString(); // YYYY-MM
+      let joinMonthStr = student.joinDate ? student.joinDate.slice(0, 7) : currentMonthStr;
+
+      if (startingBillingMonth && startingBillingMonth > joinMonthStr) {
+        joinMonthStr = startingBillingMonth;
+      }
+
+      const rateToUse = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
+        ? student.customMonthlyRate
+        : monthlyFeeRate;
+      const discountAmount = getStudentDiscount(student, rateToUse);
+      const finalRate = Math.max(0, rateToUse - discountAmount);
+
+      let collectedMonthly = 0;
+      let pendingMonthly = 0;
+      let paidCount = 0;
+      let pendingCount = 0;
+
+      let [joinYear, joinMonth] = joinMonthStr.split('-').map(Number);
+      let [currYear, currMonth] = currentMonthStr.split('-').map(Number);
+
+      if (joinYear && joinMonth && currYear && currMonth) {
+        let tempYear = joinYear;
+        let tempMonth = joinMonth;
+
+        while (tempYear < currYear || (tempYear === currYear && tempMonth <= currMonth)) {
+          const monthStr = `${tempYear}-${String(tempMonth).padStart(2, '0')}`;
+          const isPaid = student.paidMonths && student.paidMonths[monthStr];
+
+          if (isPaid) {
+            collectedMonthly += finalRate;
+            paidCount++;
+          } else {
+            pendingMonthly += finalRate;
+            pendingCount++;
+          }
+
+          tempMonth++;
+          if (tempMonth > 12) {
+            tempMonth = 1;
+            tempYear++;
+          }
+        }
+      }
+
+      return {
+        collectedAdmission,
+        pendingAdmission,
+        collectedMonthly,
+        pendingMonthly,
+        totalCollected: collectedAdmission + collectedMonthly,
+        totalPending: pendingAdmission + pendingMonthly,
+        expected: collectedAdmission + collectedMonthly + pendingAdmission + pendingMonthly,
+        paidCount,
+        pendingCount
+      };
+    };
+
+    // Filter students based on Performance tab branch/batch and search input
+    const getFilteredStudentsForPerf = (branchVal, batchVal, searchVal) => {
+      return students.filter(s => {
+        if (s.status === 'Inactive' || s.status === 'SoftDeleted') return false;
+
+        // 1. Branch filter
+        let matchesBranch = true;
+        if (branchVal !== 'All') {
+          matchesBranch = s.branch && s.branch.toLowerCase().trim() === branchVal.toLowerCase().trim();
+        }
+
+        // 2. Batch filter
+        let matchesBatch = true;
+        if (batchVal !== 'All') {
+          const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchVal.toLowerCase());
+          if (selectedBatchObj) {
+            const studentBatchLower = (s.batch || '').toLowerCase().trim();
+            const targetIdLower = selectedBatchObj.id.toLowerCase().trim();
+            const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
+            if (studentBatchLower === targetIdLower || studentBatchLower === targetNameLower) {
+              matchesBatch = true;
+            } else if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
+              matchesBatch = false;
+            } else {
+              matchesBatch = schedulesMatch(s.schedule, selectedBatchObj.schedule);
+            }
+          } else {
+            matchesBatch = false;
+          }
+        }
+
+        // 3. Search query
+        let matchesSearch = true;
+        if (searchVal) {
+          matchesSearch = s.name && s.name.toLowerCase().includes(searchVal.toLowerCase().trim());
+        }
+
+        return matchesBranch && matchesBatch && matchesSearch;
+      });
+    };
+
+    const activeRole = getCookieValue('umai_session_role') || userRole;
+    const isSuper = activeRole === 'superadmin' || activeRole === 'developer';
+    const activeBranch = isSuper ? perfFilterBranch : userBranch;
+    const activeBatch = perfFilterBatch;
+
+    const filtered = getFilteredStudentsForPerf(activeBranch, activeBatch, searchQuery);
+
+    // Calculate overall stats for filtered students
+    let overallCollected = 0;
+    let overallPending = 0;
+    let overallExpected = 0;
+
+    filtered.forEach(s => {
+      const stats = getStudentFeeStats(s);
+      overallCollected += stats.totalCollected;
+      overallPending += stats.totalPending;
+      overallExpected += stats.expected;
+    });
+
+    const overallCollectionRate = overallExpected > 0 ? Math.round((overallCollected / overallExpected) * 100) : 0;
+
+    // Calculate Branch-wise summary (only if superadmin and viewing 'All')
+    const branchSummaries = [];
+    if (isSuper && activeBranch === 'All') {
+      branches.forEach(bName => {
+        const branchStudents = getFilteredStudentsForPerf(bName, 'All', '');
+        let bCollected = 0;
+        let bPending = 0;
+        let bExpected = 0;
+        branchStudents.forEach(s => {
+          const stats = getStudentFeeStats(s);
+          bCollected += stats.totalCollected;
+          bPending += stats.totalPending;
+          bExpected += stats.expected;
+        });
+        branchSummaries.push({
+          name: bName,
+          studentsCount: branchStudents.length,
+          collected: bCollected,
+          pending: bPending,
+          expected: bExpected,
+          rate: bExpected > 0 ? Math.round((bCollected / bExpected) * 100) : 0
+        });
+      });
+    }
+
+    // Calculate Batch-wise summary
+    const batchSummaries = [];
+    const filteredBatchOpts = getFilteredBatchOptions(isSuper ? activeBranch : undefined);
+    filteredBatchOpts.forEach(batchOpt => {
+      const batchStudents = getFilteredStudentsForPerf(activeBranch, batchOpt.id, '');
+      let batCollected = 0;
+      let batPending = 0;
+      let batExpected = 0;
+      batchStudents.forEach(s => {
+        const stats = getStudentFeeStats(s);
+        batCollected += stats.totalCollected;
+        batPending += stats.totalPending;
+        batExpected += stats.expected;
+      });
+      batchSummaries.push({
+        id: batchOpt.id,
+        name: batchOpt.name,
+        studentsCount: batchStudents.length,
+        collected: batCollected,
+        pending: batPending,
+        expected: batExpected,
+        rate: batExpected > 0 ? Math.round((batCollected / batExpected) * 100) : 0
+      });
+    });
+
+    return (
+      <div className="performance-view">
+        {/* Dashboard Financial Stats Cards */}
+        <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: '2rem' }}>
+          <div className="stat-card glow-card-green">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(76, 175, 80, 0.1)' }}><Wallet className="stat-icon" style={{ color: '#4CAF50' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Collected Profit (Revenue)</h3>
+              <p className="stat-value" style={{ color: '#4CAF50', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>₹{overallCollected.toLocaleString()}</p>
+            </div>
+          </div>
+          <div className="stat-card glow-card-red">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(229, 9, 20, 0.1)' }}><AlertTriangle className="stat-icon" style={{ color: '#ff453a' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Pending Fees</h3>
+              <p className="stat-value" style={{ color: '#ff453a', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>₹{overallPending.toLocaleString()}</p>
+            </div>
+          </div>
+          <div className="stat-card glow-card-blue">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(54, 162, 235, 0.1)' }}><Activity className="stat-icon" style={{ color: '#36A2EB' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Expected Gross Revenue</h3>
+              <p className="stat-value" style={{ color: '#36A2EB', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>₹{overallExpected.toLocaleString()}</p>
+            </div>
+          </div>
+          <div className="stat-card glow-card-yellow">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 199, 0, 0.1)' }}><TrendingUp className="stat-icon" style={{ color: '#ffc700' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Collection Rate</h3>
+              <p className="stat-value" style={{ color: '#ffc700', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>{overallCollectionRate}%</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Filters Panel */}
+        <div className="filters-wrapper-card">
+          <div className="panel-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
+            <h3 className="panel-title" style={{ fontSize: '0.9rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Performance Filters</h3>
+          </div>
+          <div className="grid-filters-layout" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+            {isSuper ? (
+              <div className="form-group">
+                <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Branch</label>
+                <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={perfFilterBranch} onChange={(e) => {
+                  setPerfFilterBranch(e.target.value);
+                  setPerfFilterBatch('All');
+                }}>
+                  <option value="All">All Branches</option>
+                  {branches.map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="form-group">
+                <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Branch</label>
+                <input type="text" className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={userBranch} disabled />
+              </div>
+            )}
+            <div className="form-group">
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Batch</label>
+              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={perfFilterBatch} onChange={(e) => setPerfFilterBatch(e.target.value)}>
+                <option value="All">All Batches</option>
+                {getFilteredBatchOptions(isSuper ? perfFilterBranch : undefined).map(opt => (
+                  <option key={opt.id} value={opt.id}>{opt.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+                <button className="btn-secondary" style={{ padding: '6px 16px', fontSize: '0.85rem', height: '38px', borderRadius: '8px', flex: 1 }} onClick={() => {
+                  if (isSuper) setPerfFilterBranch('All');
+                  setPerfFilterBatch('All');
+                  setSearchQuery('');
+                }}>Reset Filters</button>
+                <div style={{ position: 'relative', flex: 1.5 }}>
+                  <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+                  <input
+                    type="text"
+                    placeholder="Search students..."
+                    className="form-control"
+                    style={{ paddingLeft: '36px', height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Branch-wise summary report (Super Admin and viewing 'All' branches only) */}
+        {isSuper && activeBranch === 'All' && (
+          <div className="panel" style={{ marginBottom: '2rem', background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+            <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: 'none', paddingBottom: 0 }}>
+              <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Branch-wise Profit Summary</h3>
+            </div>
+            <div className="premium-table-container">
+              <table className="premium-table">
+                <thead>
+                  <tr>
+                    <th>Branch Name</th>
+                    <th>Students Count</th>
+                    <th>Fee Collected (Profit)</th>
+                    <th>Pending Fees</th>
+                    <th>Expected Revenue</th>
+                    <th>Collection Progress</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {branchSummaries.map(bSummary => (
+                    <tr key={bSummary.name}>
+                      <td style={{ fontWeight: 600, color: '#fff' }}>{bSummary.name}</td>
+                      <td>{bSummary.studentsCount}</td>
+                      <td style={{ color: '#4CAF50', fontWeight: 600 }}>₹{bSummary.collected.toLocaleString()}</td>
+                      <td style={{ color: '#ff453a' }}>₹{bSummary.pending.toLocaleString()}</td>
+                      <td>₹{bSummary.expected.toLocaleString()}</td>
+                      <td style={{ width: '25%' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div className="progress-container" style={{ flex: 1, height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px' }}>
+                            <div className="progress-bar" style={{ width: `${bSummary.rate}%`, background: '#4CAF50', height: '100%', borderRadius: '4px' }}></div>
+                          </div>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', minWidth: '35px' }}>{bSummary.rate}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Batch-wise summary report */}
+        <div className="panel" style={{ marginBottom: '2rem', background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+          <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: 'none', paddingBottom: 0 }}>
+            <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Batch-wise Profit Summary ({batchSummaries.length} Batches)</h3>
+          </div>
+          <div className="premium-table-container">
+            <table className="premium-table">
+              <thead>
+                <tr>
+                  <th>Batch Name</th>
+                  <th>Students Count</th>
+                  <th>Fee Collected (Profit)</th>
+                  <th>Pending Fees</th>
+                  <th>Expected Revenue</th>
+                  <th>Collection Progress</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {batchSummaries.map(batSummary => (
+                  <tr key={batSummary.id}>
+                    <td style={{ fontWeight: 600, color: '#fff' }}>{batSummary.name}</td>
+                    <td>{batSummary.studentsCount}</td>
+                    <td style={{ color: '#4CAF50', fontWeight: 600 }}>₹{batSummary.collected.toLocaleString()}</td>
+                    <td style={{ color: '#ff453a' }}>₹{batSummary.pending.toLocaleString()}</td>
+                    <td>₹{batSummary.expected.toLocaleString()}</td>
+                    <td style={{ width: '25%' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div className="progress-container" style={{ flex: 1, height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px' }}>
+                          <div className="progress-bar" style={{ width: `${batSummary.rate}%`, background: '#36A2EB', height: '100%', borderRadius: '4px' }}></div>
+                        </div>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', minWidth: '35px' }}>{batSummary.rate}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Student-wise detailed table */}
+        <div className="panel" style={{ background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+          <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: 'none', paddingBottom: 0 }}>
+            <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Detailed Student Profit Breakdown ({filtered.length} Students)</h3>
+          </div>
+          {filtered.length > 0 ? (
+            <div className="premium-table-container">
+              <table className="premium-table">
+                <thead>
+                  <tr>
+                    <th>Student Name</th>
+                    <th>Batch</th>
+                    <th>Admission Fee</th>
+                    <th>Monthly Fees</th>
+                    <th>Total Paid (Profit)</th>
+                    <th>Total Pending</th>
+                    <th>Collection Progress</th>
+                    <th style={{ textAlign: 'center' }}>Contact Outreach</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(student => {
+                    const stats = getStudentFeeStats(student);
+                    const rate = stats.expected > 0 ? Math.round((stats.totalCollected / stats.expected) * 100) : 0;
+                    return (
+                      <tr key={student.id}>
+                        <td>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectStudent(student)}
+                            style={{ 
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              fontWeight: 600,
+                              color: 'var(--color-primary)',
+                              cursor: 'pointer',
+                              textDecoration: 'underline',
+                              fontFamily: 'inherit',
+                              fontSize: 'inherit',
+                              textAlign: 'left'
+                            }}
+                          >
+                            {student.studentName || student.name}
+                          </button>
+                        </td>
+                        <td>
+                          <span className="badge" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--color-text-light)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                            {getBatchNameFromSchedule(student.schedule, student.branch)}
+                          </span>
+                        </td>
+                        <td>
+                          {student.admissionPaid ? (
+                            <span className="badge-outline-green">Paid</span>
+                          ) : (
+                            <span className="badge-outline-red">Pending (₹{stats.pendingAdmission})</span>
+                          )}
+                        </td>
+                        <td style={{ fontSize: '0.825rem' }}>
+                          <span style={{ color: '#4CAF50', fontWeight: 600 }}>{stats.paidCount} Paid</span> • <span style={{ color: '#ff453a', fontWeight: 600 }}>{stats.pendingCount} Pending</span>
+                        </td>
+                        <td style={{ fontWeight: 600, color: '#4CAF50' }}>₹{stats.totalCollected.toLocaleString()}</td>
+                        <td style={{ fontWeight: 600, color: stats.totalPending > 0 ? '#ff453a' : 'var(--color-text-muted)' }}>₹{stats.totalPending.toLocaleString()}</td>
+                        <td style={{ width: '15%' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div className="progress-container" style={{ flex: 1, height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px' }}>
+                              <div className="progress-bar" style={{ width: `${rate}%`, background: 'var(--color-primary)', height: '100%', borderRadius: '4px' }}></div>
+                            </div>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>{rate}%</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', alignItems: 'center' }}>
+                            <a href={`tel:${student.phone}`} style={{ color: '#2196F3', background: 'rgba(33, 150, 243, 0.1)', border: '1px solid rgba(33, 150, 243, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="Call Student">
+                              <Phone size={13} />
+                            </a>
+                            <a href={`https://wa.me/${student.phone}`} target="_blank" rel="noreferrer" style={{ color: '#25D366', background: 'rgba(37, 211, 102, 0.1)', border: '1px solid rgba(37, 211, 102, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="WhatsApp Student">
+                              <MessageCircle size={13} />
+                            </a>
+                            <a href={`sms:${student.phone}`} style={{ color: '#FF9800', background: 'rgba(255, 152, 0, 0.1)', border: '1px solid rgba(255, 152, 0, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="SMS Message Student">
+                              <MessageSquare size={13} />
+                            </a>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--color-text-muted)' }}>No student matching the current filters.</div>
+          )}
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderReminders = () => {
     const currentSystemMonth = new Date().toISOString().slice(0, 7);
@@ -10109,6 +11194,27 @@ function App() {
         });
     };
 
+    const handleToggleAllowBranchAdminChangeBelt = (val) => {
+      setSettingsError('');
+      setSettingsSuccess('');
+      fetch(`${API_BASE_URL}/system-settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowBranchAdminChangeBelt: val })
+      })
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to update system setting');
+          return res.json();
+        })
+        .then(data => {
+          setAllowBranchAdminChangeBelt(!!data.allowBranchAdminChangeBelt);
+          setSettingsSuccess('Grading system settings updated successfully!');
+        })
+        .catch(err => {
+          setSettingsError('Error updating setting: ' + err.message);
+        });
+    };
+
     return (
       <div className="settings-view" style={{ maxWidth: '800px', margin: '0 auto' }}>
         {settingsError && <div style={{ color: '#E50914', marginBottom: '1.5rem', background: 'rgba(229, 9, 20, 0.1)', padding: '1rem', borderRadius: '4px', border: '1px solid rgba(229, 9, 20, 0.3)', fontWeight: 500 }}>{settingsError}</div>}
@@ -10116,8 +11222,26 @@ function App() {
 
         {isSuper && (
           <>
-
-
+            {/* Grading System Settings */}
+            <div className="panel" style={{ marginBottom: '2rem' }}>
+              <div className="panel-header" style={{ marginBottom: '1rem' }}>
+                <h3 className="panel-title">Grading System Settings</h3>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', color: 'var(--color-text-main)', fontSize: '0.95rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={allowBranchAdminChangeBelt}
+                    onChange={(e) => handleToggleAllowBranchAdminChangeBelt(e.target.checked)}
+                    style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                  />
+                  <span>Allow Branch Admins to manually change student Current Belt level and Join Date</span>
+                </label>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                  By default, Branch Admins can only change a student's belt level by conducting grading tests (marking Pass). When this option is enabled, Branch Admins can also manually override the Current Belt level and Join Date inside the Student Grading Edit form.
+                </p>
+              </div>
+            </div>
 
             {/* Admin Accounts Settings */}
             <div className="panel" style={{ marginBottom: '2rem' }}>
@@ -11416,9 +12540,16 @@ function App() {
           <a className={`nav-item ${currentView === 'reminders' ? 'active' : ''}`} onClick={() => setCurrentView('reminders')}>
             <Bell className="nav-icon" /> <span>Reminders</span>
           </a>
-          <a className={`nav-item ${currentView === 'performance' ? 'active' : ''}`} onClick={() => setCurrentView('performance')}>
-            <TrendingUp className="nav-icon" /> <span>Performance</span>
-          </a>
+          {(userRole === 'superadmin' || userRole === 'developer' || userRole === 'branchadmin') && (
+            <a className={`nav-item ${currentView === 'performance' ? 'active' : ''}`} onClick={() => setCurrentView('performance')}>
+              <TrendingUp className="nav-icon" /> <span>Performance</span>
+            </a>
+          )}
+          {(userRole === 'superadmin' || userRole === 'developer' || userRole === 'branchadmin') && (
+            <a className={`nav-item ${currentView === 'grading' ? 'active' : ''}`} onClick={() => { setCurrentView('grading'); fetchGradingStudents(); }}>
+              <Award className="nav-icon" /> <span>Grading</span>
+            </a>
+          )}
           <div style={{ flex: 1 }}></div>
           {(isAdminUser(loggedInUser) || isBranchAdmin(loggedInUser)) && (
             <a className={`nav-item ${currentView === 'credentials-list' ? 'active' : ''}`} onClick={() => setCurrentView('credentials-list')}>
@@ -11481,6 +12612,7 @@ function App() {
                 {currentView === 'performance' && 'Student Performance'}
                 {currentView === 'settings' && 'Account Settings'}
                 {currentView === 'credentials-list' && 'Branch & Batch Mapping'}
+                {currentView === 'grading' && 'Student Belt Grading'}
               </h1>
             </div>
 
@@ -11489,71 +12621,73 @@ function App() {
             </div>
           </div>
 
-          <div className="header-actions">
-            {/* Branch Filter Selector */}
-            <div style={{ position: 'relative' }}>
-              <select
-                className="form-control"
-                style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '135px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
-                value={branchFilter}
-                onChange={(e) => setBranchFilter(e.target.value)}
-                disabled={!isAdminUser(loggedInUser)}
-              >
-                {isAdminUser(loggedInUser) ? (
-                  <>
-                    {branches.map(b => (
-                      <option key={b} value={b}>{b}</option>
-                    ))}
-                    <option value="All">All Branches</option>
-                  </>
-                ) : (
-                  <option value={branchFilter}>{branchFilter}</option>
-                )}
-              </select>
-            </div>
-
-            {/* Batch Filter Selector */}
-            <div style={{ position: 'relative' }}>
-              <select
-                className="form-control"
-                style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '135px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
-                value={batchFilter}
-                onChange={(e) => setBatchFilter(e.target.value)}
-                disabled={isBatchAdminUser(loggedInUser)}
-              >
-                <option value="All">All Batches</option>
-                {getFilteredBatchOptions().map(opt => (
-                  <option key={opt.id} value={opt.id}>{opt.name}</option>
-                ))}
-              </select>
-            </div>
-            {/* Status Filter Selector */}
-            {(currentView === 'dashboard' || currentView === 'performance') && (
+          {!(currentView === 'grading' || currentView === 'settings' || currentView === 'credentials-list' || currentView === 'performance') && (
+            <div className="header-actions">
+              {/* Branch Filter Selector */}
               <div style={{ position: 'relative' }}>
                 <select
                   className="form-control"
-                  style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '120px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
+                  style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '135px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
+                  value={branchFilter}
+                  onChange={(e) => setBranchFilter(e.target.value)}
+                  disabled={!isAdminUser(loggedInUser)}
                 >
-                  <option value="Active">Active Only</option>
-                  <option value="Inactive">Inactive Only</option>
-                  <option value="All">All Students</option>
+                  {isAdminUser(loggedInUser) ? (
+                    <>
+                      {branches.map(b => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                      <option value="All">All Branches</option>
+                    </>
+                  ) : (
+                    <option value={branchFilter}>{branchFilter}</option>
+                  )}
                 </select>
               </div>
-            )}
-            <div style={{ position: 'relative' }}>
-              <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
-              <input
-                type="text"
-                placeholder="Search students..."
-                className="form-control"
-                style={{ paddingLeft: '32px', width: '180px', height: '38px', paddingTop: 0, paddingBottom: 0, fontSize: '0.85rem' }}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
+
+              {/* Batch Filter Selector */}
+              <div style={{ position: 'relative' }}>
+                <select
+                  className="form-control"
+                  style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '135px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
+                  value={batchFilter}
+                  onChange={(e) => setBatchFilter(e.target.value)}
+                  disabled={isBatchAdminUser(loggedInUser)}
+                >
+                  <option value="All">All Batches</option>
+                  {getFilteredBatchOptions().map(opt => (
+                    <option key={opt.id} value={opt.id}>{opt.name}</option>
+                  ))}
+                </select>
+              </div>
+              {/* Status Filter Selector */}
+              {(currentView === 'dashboard' || currentView === 'performance') && (
+                <div style={{ position: 'relative' }}>
+                  <select
+                    className="form-control"
+                    style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '120px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                  >
+                    <option value="Active">Active Only</option>
+                    <option value="Inactive">Inactive Only</option>
+                    <option value="All">All Students</option>
+                  </select>
+                </div>
+              )}
+              <div style={{ position: 'relative' }}>
+                <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+                <input
+                  type="text"
+                  placeholder="Search students..."
+                  className="form-control"
+                  style={{ paddingLeft: '32px', width: '180px', height: '38px', paddingTop: 0, paddingBottom: 0, fontSize: '0.85rem' }}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="header-profile-section" style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexShrink: 0 }}>
             {/* Notification Bell Dropdown */}
@@ -11723,7 +12857,8 @@ function App() {
 
         <div className="content-area">
           {currentView === 'dashboard' && (
-            <>
+            lockDashboardPage && userRole !== 'developer' ? renderSectionMaintenance('Dashboard') : (
+              <>
               <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', marginBottom: '2rem' }}>
                 <div className="stat-card">
                   <div className="stat-icon-wrapper"><Users className="stat-icon" /></div>
@@ -11954,15 +13089,25 @@ function App() {
                 )}
               </div>
             </>
-          )}
+          ))}
 
-          {currentView === 'attendance' && renderAttendance()}
+          {currentView === 'attendance' && (lockAttendancePage && userRole !== 'developer' ? renderSectionMaintenance('Attendance Tracking') : renderAttendance())}
           {currentView === 'fees' && (lockFeesPage && userRole !== 'developer' ? renderSectionMaintenance('Fees Portal') : renderFees())}
-          {currentView === 'student-fees' && renderStudentFees()}
-          {currentView === 'reminders' && renderReminders()}
-          {currentView === 'performance' && (lockPerformancePage && userRole !== 'developer' ? renderSectionMaintenance('Performance Portal') : renderPerformance())}
+          {currentView === 'student-fees' && (lockFeesPage && userRole !== 'developer' ? renderSectionMaintenance('Fees Portal') : renderStudentFees())}
+          {currentView === 'reminders' && (lockRemindersPage && userRole !== 'developer' ? renderSectionMaintenance('Alerts & Reminders') : renderReminders())}
+          {currentView === 'performance' && (
+            (userRole === 'trainer' || userRole === 'coordinator') ? (
+              <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
+                <h3 className="panel-title" style={{ color: '#E50914' }}>Access Denied</h3>
+                <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Trainers do not have permission to view financial performance details.</p>
+              </div>
+            ) : (
+              lockPerformancePage && userRole !== 'developer' ? renderSectionMaintenance('Performance Portal') : renderPerformance()
+            )
+          )}
           {currentView === 'settings' && renderSettings()}
           {currentView === 'credentials-list' && (lockBranchBatchMappingPage && userRole !== 'developer' ? renderSectionMaintenance('Branch & Batch Mapping') : renderCredentialsList())}
+          {currentView === 'grading' && (lockGradingPage && userRole !== 'developer' ? renderSectionMaintenance('Student Belt Grading') : renderGrading())}
         </div>
       </main>
 

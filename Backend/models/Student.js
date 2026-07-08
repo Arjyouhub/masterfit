@@ -23,7 +23,21 @@ const studentSchema = new mongoose.Schema({
   appliedAdmissionCoupon: { type: String, default: '' }, // applied admission coupon code
   discountPercentage: { type: Number, default: 0 }, // discount percentage
   couponType: { type: String, default: 'percentage' }, // 'percentage' or 'amount'
-  couponValue: { type: Number, default: 0 } // discount value (percentage or flat amount)
+  couponValue: { type: Number, default: 0 }, // discount value (percentage or flat amount)
+  lastGradingDate: { type: String, default: 'N/A' },
+  nextEligibleGradingDate: { type: String, default: '' },
+  lastGradingResult: { type: String, default: 'N/A' },
+  gradingHistory: {
+    type: [{
+      gradingDate: { type: String, required: true },
+      beltBefore: { type: String, required: true },
+      result: { type: String, required: true, enum: ['Pass', 'Fail'] },
+      beltAfter: { type: String, required: true },
+      updatedBy: { type: String, required: true },
+      createdAt: { type: Date, default: Date.now }
+    }],
+    default: []
+  }
 }, { timestamps: true });
 
 studentSchema.index({ branch: 1, status: 1 });
