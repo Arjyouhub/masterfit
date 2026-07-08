@@ -3672,3 +3672,12 @@ body::-webkit-scrollbar {
   padding-top: 0 !important;
   padding-bottom: 0 !important;
 }
+
+@media (max-width: 768px) {
+  .premium-table-container {
+    border: none !important;
+    background: transparent !important;
+    overflow-x: visible !important;
+    box-shadow: none !important;
+  }
+}

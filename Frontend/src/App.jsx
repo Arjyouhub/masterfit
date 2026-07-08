@@ -8040,7 +8040,7 @@ function App() {
             <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--color-text-muted)' }}>Loading student details...</div>
           ) : filtered.length > 0 ? (
             <div className="premium-table-container">
-              <table className="premium-table">
+              <table className="premium-table responsive-table-cards">
                 <thead>
                   <tr>
                     <th>Student Name</th>
@@ -8059,30 +8059,30 @@ function App() {
                 <tbody>
                   {filtered.map(student => (
                     <tr key={student.id}>
-                      <td style={{ fontWeight: 600, color: '#fff' }}>
+                      <td style={{ fontWeight: 600, color: '#fff' }} data-label="Student Name">
                         {student.name}
                       </td>
-                      <td>{student.branch}</td>
-                      <td>{getBatchNameFromCode(student.batch, student.branch)}</td>
-                      <td>
+                      <td data-label="Branch">{student.branch}</td>
+                      <td data-label="Batch">{getBatchNameFromCode(student.batch, student.branch)}</td>
+                      <td data-label="Current Belt">
                         <span className={`badge ${getBeltColorClass(student.belt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem', borderRadius: '4px' }}>{student.belt}</span>
                       </td>
-                      <td>
+                      <td data-label="Next Belt">
                         {student.nextBelt !== 'None' ? (
                           <span className={`badge ${getBeltColorClass(student.nextBelt)}`} style={{ opacity: 0.85, padding: '3px 8px', fontSize: '0.75rem', borderRadius: '4px' }}>{student.nextBelt}</span>
                         ) : (
                           <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>None (Max)</span>
                         )}
                       </td>
-                      <td>{student.joinDate}</td>
-                      <td>{student.lastGradingDate || 'N/A'}</td>
-                      <td>{student.nextEligibleGradingDate || 'N/A'}</td>
-                      <td>
+                      <td data-label="Join Date">{student.joinDate}</td>
+                      <td data-label="Last Grading">{student.lastGradingDate || 'N/A'}</td>
+                      <td data-label="Next Eligible">{student.nextEligibleGradingDate || 'N/A'}</td>
+                      <td data-label="Eligibility">
                         <span className={student.eligibilityStatus === 'Eligible' ? 'badge-outline-green' : 'badge-outline-red'}>
                           {student.eligibilityStatus}
                         </span>
                       </td>
-                      <td>
+                      <td data-label="Result">
                         {student.lastGradingResult === 'Pass' ? (
                           <span className="badge-outline-green">Pass</span>
                         ) : student.lastGradingResult === 'Fail' ? (
@@ -8091,7 +8091,7 @@ function App() {
                           <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>N/A</span>
                         )}
                       </td>
-                      <td>
+                      <td data-label="Actions">
                         <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', alignItems: 'center' }}>
                           <button className="btn-secondary action-btn-pill" onClick={() => {
                             setSelectedHistoryStudent(student);
@@ -8640,7 +8640,7 @@ function App() {
               <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Branch-wise Profit Summary</h3>
             </div>
             <div className="premium-table-container">
-              <table className="premium-table">
+              <table className="premium-table responsive-table-cards">
                 <thead>
                   <tr>
                     <th>Branch Name</th>
@@ -8654,12 +8654,12 @@ function App() {
                 <tbody>
                   {branchSummaries.map(bSummary => (
                     <tr key={bSummary.name}>
-                      <td style={{ fontWeight: 600, color: '#fff' }}>{bSummary.name}</td>
-                      <td>{bSummary.studentsCount}</td>
-                      <td style={{ color: '#4CAF50', fontWeight: 600 }}>₹{bSummary.collected.toLocaleString()}</td>
-                      <td style={{ color: '#ff453a' }}>₹{bSummary.pending.toLocaleString()}</td>
-                      <td>₹{bSummary.expected.toLocaleString()}</td>
-                      <td style={{ width: '25%' }}>
+                      <td style={{ fontWeight: 600, color: '#fff' }} data-label="Branch Name">{bSummary.name}</td>
+                      <td data-label="Students Count">{bSummary.studentsCount}</td>
+                      <td style={{ color: '#4CAF50', fontWeight: 600 }} data-label="Fee Collected (Profit)">₹{bSummary.collected.toLocaleString()}</td>
+                      <td style={{ color: '#ff453a' }} data-label="Pending Fees">₹{bSummary.pending.toLocaleString()}</td>
+                      <td data-label="Expected Revenue">₹{bSummary.expected.toLocaleString()}</td>
+                      <td style={{ width: '25%' }} data-label="Collection Progress">
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <div className="progress-container" style={{ flex: 1, height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px' }}>
                             <div className="progress-bar" style={{ width: `${bSummary.rate}%`, background: '#4CAF50', height: '100%', borderRadius: '4px' }}></div>
@@ -8681,7 +8681,7 @@ function App() {
             <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Batch-wise Profit Summary ({batchSummaries.length} Batches)</h3>
           </div>
           <div className="premium-table-container">
-            <table className="premium-table">
+            <table className="premium-table responsive-table-cards">
               <thead>
                 <tr>
                   <th>Batch Name</th>
@@ -8695,12 +8695,12 @@ function App() {
               <tbody>
                 {batchSummaries.map(batSummary => (
                   <tr key={batSummary.id}>
-                    <td style={{ fontWeight: 600, color: '#fff' }}>{batSummary.name}</td>
-                    <td>{batSummary.studentsCount}</td>
-                    <td style={{ color: '#4CAF50', fontWeight: 600 }}>₹{batSummary.collected.toLocaleString()}</td>
-                    <td style={{ color: '#ff453a' }}>₹{batSummary.pending.toLocaleString()}</td>
-                    <td>₹{batSummary.expected.toLocaleString()}</td>
-                    <td style={{ width: '25%' }}>
+                    <td style={{ fontWeight: 600, color: '#fff' }} data-label="Batch Name">{batSummary.name}</td>
+                    <td data-label="Students Count">{batSummary.studentsCount}</td>
+                    <td style={{ color: '#4CAF50', fontWeight: 600 }} data-label="Fee Collected (Profit)">₹{batSummary.collected.toLocaleString()}</td>
+                    <td style={{ color: '#ff453a' }} data-label="Pending Fees">₹{batSummary.pending.toLocaleString()}</td>
+                    <td data-label="Expected Revenue">₹{batSummary.expected.toLocaleString()}</td>
+                    <td style={{ width: '25%' }} data-label="Collection Progress">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <div className="progress-container" style={{ flex: 1, height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px' }}>
                           <div className="progress-bar" style={{ width: `${batSummary.rate}%`, background: '#36A2EB', height: '100%', borderRadius: '4px' }}></div>
@@ -8722,7 +8722,7 @@ function App() {
           </div>
           {filtered.length > 0 ? (
             <div className="premium-table-container">
-              <table className="premium-table">
+              <table className="premium-table responsive-table-cards">
                 <thead>
                   <tr>
                     <th>Student Name</th>
@@ -8741,7 +8741,7 @@ function App() {
                     const rate = stats.expected > 0 ? Math.round((stats.totalCollected / stats.expected) * 100) : 0;
                     return (
                       <tr key={student.id}>
-                        <td>
+                        <td data-label="Student Name">
                           <button
                             type="button"
                             onClick={() => handleSelectStudent(student)}
@@ -8761,24 +8761,24 @@ function App() {
                             {student.studentName || student.name}
                           </button>
                         </td>
-                        <td>
+                        <td data-label="Batch">
                           <span className="badge" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--color-text-light)', border: '1px solid rgba(255,255,255,0.06)' }}>
                             {getBatchNameFromSchedule(student.schedule, student.branch)}
                           </span>
                         </td>
-                        <td>
+                        <td data-label="Admission Fee">
                           {student.admissionPaid ? (
                             <span className="badge-outline-green">Paid</span>
                           ) : (
                             <span className="badge-outline-red">Pending (₹{stats.pendingAdmission})</span>
                           )}
                         </td>
-                        <td style={{ fontSize: '0.825rem' }}>
+                        <td data-label="Monthly Fees" style={{ fontSize: '0.825rem' }}>
                           <span style={{ color: '#4CAF50', fontWeight: 600 }}>{stats.paidCount} Paid</span> • <span style={{ color: '#ff453a', fontWeight: 600 }}>{stats.pendingCount} Pending</span>
                         </td>
-                        <td style={{ fontWeight: 600, color: '#4CAF50' }}>₹{stats.totalCollected.toLocaleString()}</td>
-                        <td style={{ fontWeight: 600, color: stats.totalPending > 0 ? '#ff453a' : 'var(--color-text-muted)' }}>₹{stats.totalPending.toLocaleString()}</td>
-                        <td style={{ width: '15%' }}>
+                        <td style={{ fontWeight: 600, color: '#4CAF50' }} data-label="Total Paid (Profit)">₹{stats.totalCollected.toLocaleString()}</td>
+                        <td style={{ fontWeight: 600, color: stats.totalPending > 0 ? '#ff453a' : 'var(--color-text-muted)' }} data-label="Total Pending">₹{stats.totalPending.toLocaleString()}</td>
+                        <td style={{ width: '15%' }} data-label="Collection Progress">
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <div className="progress-container" style={{ flex: 1, height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px' }}>
                               <div className="progress-bar" style={{ width: `${rate}%`, background: 'var(--color-primary)', height: '100%', borderRadius: '4px' }}></div>
@@ -8786,7 +8786,7 @@ function App() {
                             <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>{rate}%</span>
                           </div>
                         </td>
-                        <td>
+                        <td data-label="Contact Outreach">
                           <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', alignItems: 'center' }}>
                             <a href={`tel:${student.phone}`} style={{ color: '#2196F3', background: 'rgba(33, 150, 243, 0.1)', border: '1px solid rgba(33, 150, 243, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="Call Student">
                               <Phone size={13} />
