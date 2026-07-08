@@ -1410,6 +1410,7 @@ select option {
   }
 
   .responsive-table-cards td {
+    width: 100% !important;
     border: none !important;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
     position: relative;
