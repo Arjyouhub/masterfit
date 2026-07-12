@@ -13,6 +13,8 @@ const studentSchema = new mongoose.Schema({
   schedule: { type: String, required: true, default: 'Mon-Thu' },
   branch: { type: String, required: true, default: 'Kuttiady' },
   photo: { type: String, default: null }, // base64 representation of student photo
+  trainer: { type: String, default: '' },
+  art: { type: String, default: '' },
   status: { type: String, required: true, default: 'Active' },
   admissionPaid: { type: mongoose.Schema.Types.Mixed, default: false }, // false or Year-Month string
   paidMonths: { type: Map, of: Boolean, default: {} }, // YYYY-MM -> true

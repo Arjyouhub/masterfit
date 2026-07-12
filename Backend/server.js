@@ -1327,6 +1327,18 @@ app.delete('/api/branches/:id', authenticateSession, authorizeRoles('superadmin'
   }
 });
 
+app.get('/api/public/trainers', async (req, res) => {
+  try {
+    const trainers = await User.find({ 
+      role: { $in: ['trainer', 'coordinator'] }, 
+      status: 'Active' 
+    }).select('username fullName branch').lean();
+    res.json(trainers);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- Batches CRUD ---
 app.get('/api/public/batches', async (req, res) => {
   try {
