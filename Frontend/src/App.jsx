@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, CheckCircle, XCircle, MessageCircle, MessageSquare,
   Search, Phone, Trash2, ArrowRight, Activity, MapPin, TrendingUp, Award, Menu,
   Shield, Lock, Unlock, FileDown, FileUp, Database, Terminal, Cpu, HardDrive, Key, History,
-  Eye, EyeOff
+  Eye, EyeOff, Star
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import './index.css';
@@ -13,7 +13,6 @@ import './index.css';
 const DEFAULT_BRANCHES = [];
 
 const DEFAULT_BATCH_OPTIONS = [];
-const ART_OPTIONS = ['Karate', 'Kung Fu', 'Taekwondo', 'Kickboxing', 'Kalaripayattu', 'Muay Thai', 'Yoga', 'MMA'];
 
 
 const getCookieValue = (name) => {
@@ -34,6 +33,11 @@ const getSessionToken = () => {
 const sortStudentsAlphabetically = (arr) => {
   if (!Array.isArray(arr)) return [];
   return [...arr].sort((a, b) => {
+    const pA = a && a.isPriority ? 1 : 0;
+    const pB = b && b.isPriority ? 1 : 0;
+    if (pA !== pB) {
+      return pB - pA; // priority first
+    }
     const nameA = String(a && a.name || '').trim().toLowerCase();
     const nameB = String(b && b.name || '').trim().toLowerCase();
     return nameA.localeCompare(nameB, 'en', { sensitivity: 'base', numeric: true });
@@ -43,24 +47,24 @@ const sortStudentsAlphabetically = (arr) => {
 const formatSelectedDays = (days) => {
   const allDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const checked = allDays.filter(d => days[d]);
-  
+
   if (checked.length === 0) return '';
   if (checked.length === 7) return 'Daily';
-  
+
   const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
   const weekends = ['Sat', 'Sun'];
-  
+
   const isWeekdays = weekdays.every(d => days[d]) && !days.Sat && !days.Sun;
   if (isWeekdays) return 'Weekdays';
-  
+
   const isWeekends = weekends.every(d => days[d]) && weekdays.every(d => !days[d]);
   if (isWeekends) return 'Weekends';
-  
+
   // Detect contiguous range circular-aware
   const doubleDays = [...allDays, ...allDays];
   const checkedSet = new Set(checked);
   let bestRange = null;
-  
+
   for (let start = 0; start < 7; start++) {
     let len = 0;
     while (len < 7 && checkedSet.has(doubleDays[start + len])) {
@@ -73,16 +77,16 @@ const formatSelectedDays = (days) => {
       break;
     }
   }
-  
+
   if (bestRange) return bestRange;
-  
+
   return checked.join(', ');
 };
 
 const parseScheduleToDays = (schedule) => {
   const defaults = { Mon: false, Tue: false, Wed: false, Thu: false, Fri: false, Sat: false, Sun: false };
   if (!schedule) return defaults;
-  
+
   const cleanSched = schedule.toLowerCase().replace(/\s+/g, '');
   if (cleanSched === 'daily') {
     return { Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true };
@@ -93,10 +97,10 @@ const parseScheduleToDays = (schedule) => {
   if (cleanSched === 'weekend' || cleanSched === 'weekends') {
     return { Mon: false, Tue: false, Wed: false, Thu: false, Fri: false, Sat: true, Sun: true };
   }
-  
+
   const dayNamesShort = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
   const dayKeys = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  
+
   if (cleanSched.includes('-')) {
     const parts = cleanSched.split('-');
     if (parts.length === 2) {
@@ -114,7 +118,7 @@ const parseScheduleToDays = (schedule) => {
       }
     }
   }
-  
+
   const items = cleanSched.split(',');
   const res = { ...defaults };
   let foundAny = false;
@@ -126,7 +130,7 @@ const parseScheduleToDays = (schedule) => {
       foundAny = true;
     }
   }
-  
+
   if (foundAny) return res;
   return defaults;
 };
@@ -173,6 +177,8 @@ window.fetch = function (url, options = {}) {
 };
 
 
+const ART_OPTIONS = ['Karate', 'Kickboxing', 'Kung Fu', 'MMA', 'Muay Thai', 'Taekwondo', 'Yoga', 'Kalaripayattu'];
+
 function App() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -203,6 +209,15 @@ function App() {
   };
 
   const [appMode, setAppMode] = useState(() => {
+    // Handle path-based routing (e.g. /developer/login) by redirecting to hash routing
+    if (window.location.pathname !== '/' && window.location.pathname !== '/index.html') {
+      const cleanPath = window.location.pathname;
+      if (cleanPath.startsWith('/developer') || cleanPath === '/superadmin' || cleanPath === '/login' || cleanPath === '/admin') {
+        window.location.replace('/#' + cleanPath + window.location.search);
+        return 'website';
+      }
+    }
+
     const hash = window.location.hash;
     const hasSession = getSessionUser();
 
@@ -348,6 +363,10 @@ function App() {
   const [lockPerformancePage, setLockPerformancePage] = useState(false);
   const [lockBranchBatchMappingPage, setLockBranchBatchMappingPage] = useState(false);
   const [lockFeesPage, setLockFeesPage] = useState(false);
+  const [lockDashboardPage, setLockDashboardPage] = useState(false);
+  const [lockAttendancePage, setLockAttendancePage] = useState(false);
+  const [lockRemindersPage, setLockRemindersPage] = useState(false);
+  const [lockGradingPage, setLockGradingPage] = useState(false);
   const [unseenResolvedReports, setUnseenResolvedReports] = useState([]);
   const [activeUpdateNotification, setActiveUpdateNotification] = useState(null);
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
@@ -359,7 +378,39 @@ function App() {
   const [editingClass, setEditingClass] = useState(null);
   const [classForm, setClassForm] = useState({ className: '', branch: '', batch: '', trainer: '', startTime: '', endTime: '', subject: '' });
   const [classFormDays, setClassFormDays] = useState({ Mon: false, Tue: false, Wed: false, Thu: false, Fri: false, Sat: false, Sun: false });
+
+  // Grading Management Module States
+  const [gradingStudents, setGradingStudents] = useState([]);
+  const [loadingGrading, setLoadingGrading] = useState(false);
+  const [gradingFilterBranch, setGradingFilterBranch] = useState('All');
+  const [gradingFilterBatch, setGradingFilterBatch] = useState('All');
+  const [gradingFilterBelt, setGradingFilterBelt] = useState('All');
+  const [gradingFilterEligibility, setGradingFilterEligibility] = useState('All');
+  const [gradingFilterResult, setGradingFilterResult] = useState('All');
+  const [gradingFilterStartDate, setGradingFilterStartDate] = useState('');
+  const [gradingFilterEndDate, setGradingFilterEndDate] = useState('');
+  const [allowBranchAdminChangeBelt, setAllowBranchAdminChangeBelt] = useState(false);
+  const [gradingActionLoading, setGradingActionLoading] = useState(false);
+  const [gradingError, setGradingError] = useState('');
+  const [gradingSuccess, setGradingSuccess] = useState('');
+
+  // Modals for Grading
+  const [isGradeModalOpen, setIsGradeModalOpen] = useState(false);
+  const [selectedGradeStudent, setSelectedGradeStudent] = useState(null);
+  const [gradeResult, setGradeResult] = useState('Pass');
+  const [gradeDate, setGradeDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [selectedHistoryStudent, setSelectedHistoryStudent] = useState(null);
+
+  const [isEditGradingModalOpen, setIsEditGradingModalOpen] = useState(false);
+  const [selectedEditGradingStudent, setSelectedEditGradingStudent] = useState(null);
+  const [editGradingForm, setEditGradingForm] = useState({ joinDate: '', lastGradingDate: '', belt: '' });
   const [classFormSlotType, setClassFormSlotType] = useState('Morning');
+
+  // Financial Performance / Profit Filters States
+  const [perfFilterBranch, setPerfFilterBranch] = useState('All');
+  const [perfFilterBatch, setPerfFilterBatch] = useState('All');
 
   const handleOpenAddClass = () => {
     setClassForm({
@@ -450,7 +501,7 @@ function App() {
   const handleCancelClass = (cls) => {
     const reason = prompt("Enter cancellation reason (optional):");
     if (reason === null) return; // User cancelled prompt
-    
+
     fetch(`${API_BASE_URL}/classes/${cls._id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -915,7 +966,7 @@ function App() {
     if (!schedule) return '';
     const cleanBranch = String(studentBranch || '').toLowerCase().trim();
     if (cleanBranch) {
-      const opt = batchOptions.find(b => 
+      const opt = batchOptions.find(b =>
         b.schedule.toLowerCase() === schedule.toLowerCase() &&
         (b.branch && b.branch.toLowerCase().trim() === cleanBranch)
       );
@@ -930,7 +981,7 @@ function App() {
     const cleanCode = batchCode.toLowerCase().trim();
     const cleanBranch = String(branchName || '').toLowerCase().trim();
     if (cleanBranch) {
-      const opt = batchOptions.find(b => 
+      const opt = batchOptions.find(b =>
         (String(b.id).toLowerCase() === cleanCode || String(b.code || '').toLowerCase() === cleanCode) &&
         (b.branch && b.branch.toLowerCase().trim() === cleanBranch)
       );
@@ -1000,20 +1051,15 @@ function App() {
   const [editingStudentData, setEditingStudentData] = useState(null);
 
   // Persistent State
-  const [students, setStudents] = useState([]);
   const [trainersList, setTrainersList] = useState([]);
+  const [students, setStudents] = useState([]);
 
   const [attendanceRecords, setAttendanceRecords] = useState({});
 
   const reloadAllAppData = () => {
-    fetch(`${API_BASE_URL}/public/trainers`)
-      .then(res => res.ok ? res.json() : [])
-      .then(data => setTrainersList(data || []))
-      .catch(err => console.error('Error fetching trainers:', err));
-
     const token = getSessionToken();
     if (!token) {
-      // Not logged in: only fetch public branches for the login page
+      // Not logged in: fetch public branches and public batches for the login page
       fetch(`${API_BASE_URL}/public/branches`)
         .then(res => res.ok ? res.json() : [])
         .then(data => {
@@ -1026,7 +1072,34 @@ function App() {
           setBranches(sortBranchesAlphabetically(uniqueBranches));
         })
         .catch(err => console.error('Error fetching public branches:', err));
-        
+
+      fetch(`${API_BASE_URL}/public/batches`)
+        .then(res => res.ok ? res.json() : [])
+        .then(data => {
+          const uniqueBatches = [
+            ...DEFAULT_BATCH_OPTIONS.map(b => ({ ...b, branch: 'all' })),
+            ...(data || []).map(b => ({
+              id: b.code || b.id || b._id,
+              name: b.name,
+              schedule: b.schedule,
+              branch: b.branch,
+              startTime: b.startTime || '09:00',
+              endTime: b.endTime || '10:30',
+              slotType: b.slotType || 'Morning',
+              status: b.status || 'Active',
+              _id: b._id,
+              trainer: b.trainer || ''
+            }))
+          ];
+          setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
+        })
+        .catch(err => console.error('Error fetching public batches:', err));
+
+      fetch(`${API_BASE_URL}/public/trainers`)
+        .then(res => res.ok ? res.json() : [])
+        .then(data => setTrainersList(data || []))
+        .catch(err => console.error('Error fetching public trainers:', err));
+
       return;
     }
 
@@ -1105,13 +1178,19 @@ function App() {
             endTime: b.endTime || '10:30',
             slotType: b.slotType || 'Morning',
             status: b.status || 'Active',
-            trainer: b.trainer || '',
-            _id: b._id
+            _id: b._id,
+            trainer: b.trainer || ''
           }))
         ];
         setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
       })
       .catch(err => console.error('Error fetching batches:', err));
+
+    // Fetch Trainers
+    fetch(`${API_BASE_URL}/public/trainers`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setTrainersList(data || []))
+      .catch(err => console.error('Error fetching trainers:', err));
 
     // 3.3 Fetch Scheduled Classes
     const todayStr = new Date().toLocaleDateString('en-CA');
@@ -1158,9 +1237,36 @@ function App() {
       .then(data => {
         if (data) {
           setStartingBillingMonth(data.startingBillingMonth || '');
+          setAllowBranchAdminChangeBelt(!!data.allowBranchAdminChangeBelt);
         }
       })
       .catch(err => console.error('Error fetching system settings:', err));
+
+    const activeRole = getCookieValue('umai_session_role') || userRole;
+    if (activeRole === 'superadmin' || activeRole === 'developer' || activeRole === 'branchadmin') {
+      fetchGradingStudents();
+    }
+  };
+
+  const fetchGradingStudents = () => {
+    setLoadingGrading(true);
+    setGradingError('');
+    const activeRole = getCookieValue('umai_session_role') || userRole;
+    const branchParam = (activeRole === 'superadmin' || activeRole === 'developer') ? (gradingFilterBranch || 'All') : 'All';
+
+    fetch(`${API_BASE_URL}/grading/students?branch=${encodeURIComponent(branchParam)}`)
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch student grading details.');
+        return res.json();
+      })
+      .then(data => {
+        setGradingStudents(sortStudentsAlphabetically(data));
+      })
+      .catch(err => {
+        console.error('Error fetching grading students:', err);
+        setGradingError(err.message);
+      })
+      .finally(() => setLoadingGrading(false));
   };
 
   const handleCreateAdmin = (e) => {
@@ -1330,11 +1436,11 @@ function App() {
   useEffect(() => {
     const token = getSessionToken();
     if (!token) return; // Only if logged in
-    
+
     setLoadingStats(true);
     const branchParam = branchFilter ? encodeURIComponent(branchFilter) : '';
     const batchParam = batchFilter ? encodeURIComponent(batchFilter) : '';
-    
+
     fetch(`${API_BASE_URL}/dashboard/stats?branch=${branchParam}&batch=${batchParam}`)
       .then(res => res.ok ? res.json() : null)
       .then(data => {
@@ -1363,6 +1469,17 @@ function App() {
       .catch(err => console.error('Error fetching students:', err));
   }, [branchFilter, batchFilter, loggedInUser]);
 
+  // Fetch grading students dynamically when branch filter changes or grading view is opened
+  useEffect(() => {
+    const token = getSessionToken();
+    if (!token) return;
+
+    const activeRole = getCookieValue('umai_session_role') || userRole;
+    if (currentView === 'grading' && (activeRole === 'superadmin' || activeRole === 'developer' || activeRole === 'branchadmin')) {
+      fetchGradingStudents();
+    }
+  }, [gradingFilterBranch, currentView, loggedInUser]);
+
   // Dynamic batch loading for Login Page
   useEffect(() => {
     const token = getSessionToken();
@@ -1379,7 +1496,7 @@ function App() {
           setCustomBatches(data || []);
           const uniqueBatches = [
             ...DEFAULT_BATCH_OPTIONS.map(b => ({ ...b, branch: 'all' })),
-            ...(data || []).map(b => ({ id: b.code, name: b.name, schedule: b.schedule, branch: b.branch, branchId: b.branchId, branchName: b.branchName, status: b.status || 'Active', trainer: b.trainer || '' }))
+            ...(data || []).map(b => ({ id: b.code, name: b.name, schedule: b.schedule, branch: b.branch, branchId: b.branchId, branchName: b.branchName, status: b.status || 'Active' }))
           ];
           setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
         })
@@ -1396,7 +1513,7 @@ function App() {
   useEffect(() => {
     const token = getSessionToken();
     if (token) return; // Only when logged out
-    
+
     if (branches.length > 0) {
       const matched = branches.find(b => b.toLowerCase() === selectedBranchLogin.toLowerCase());
       if (matched) {
@@ -2597,6 +2714,10 @@ function App() {
           setLockPerformancePage(!!data.lockPerformancePage);
           setLockBranchBatchMappingPage(!!data.lockBranchBatchMappingPage);
           setLockFeesPage(!!data.lockFeesPage);
+          setLockDashboardPage(!!data.lockDashboardPage);
+          setLockAttendancePage(!!data.lockAttendancePage);
+          setLockRemindersPage(!!data.lockRemindersPage);
+          setLockGradingPage(!!data.lockGradingPage);
 
           // Check if current user is affected by maintenance
           let isBlocked = false;
@@ -2608,11 +2729,11 @@ function App() {
               const isAd = userRole === 'superadmin';
               const isBr = userRole === 'branchadmin';
               const isTr = userRole === 'trainer' || userRole === 'coordinator';
-              
+
               if (mode === 'admin' && isAd) isBlocked = true;
               if (mode === 'branch' && isBr) isBlocked = true;
               if (mode === 'batch' && isTr) isBlocked = true;
-              
+
               if (mode === 'branch-batch' && (isBr || isTr)) isBlocked = true;
               if (mode === 'batch-admin' && (isTr || isAd)) isBlocked = true;
               if (mode === 'admin-branch' && (isAd || isBr)) isBlocked = true;
@@ -3025,12 +3146,12 @@ function App() {
 
     const id = 'batch_' + Date.now();
     const status = newBatchForm.status || 'Active';
-    const newBatchObj = { 
-      id, 
-      name, 
-      schedule, 
-      branch: newBatchForm.branch, 
-      startTime: newBatchForm.startTime || '09:00', 
+    const newBatchObj = {
+      id,
+      name,
+      schedule,
+      branch: newBatchForm.branch,
+      startTime: newBatchForm.startTime || '09:00',
       endTime: newBatchForm.endTime || '10:30',
       slotType: newBatchForm.slotType || 'Morning',
       status
@@ -3226,15 +3347,15 @@ function App() {
 
     const updateDBPromise = matchedBatchObj && matchedBatchObj._id
       ? fetch(`${API_BASE_URL}/batches/${matchedBatchObj._id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: nameClean, schedule: scheduleClean, startTime: startTimeClean, endTime: endTimeClean, slotType: slotTypeClean, status: statusClean })
-        }).then(res => {
-          if (!res.ok) {
-            return res.json().then(data => { throw new Error(data.error || 'Failed to update batch details in database') });
-          }
-          return res.json();
-        })
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nameClean, schedule: scheduleClean, startTime: startTimeClean, endTime: endTimeClean, slotType: slotTypeClean, status: statusClean })
+      }).then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to update batch details in database') });
+        }
+        return res.json();
+      })
       : Promise.resolve();
 
     const updateCredsPromise = fetch(`${API_BASE_URL}/credentials`, {
@@ -3253,7 +3374,7 @@ function App() {
     Promise.all([updateDBPromise, updateCredsPromise])
       .then(([dbData, credsData]) => {
         setCustomBatches(credsData.customBatches || []);
-        
+
         const uniqueBatches = [
           ...DEFAULT_BATCH_OPTIONS.map(b => ({ ...b, branch: 'all' })),
           ...(credsData.customBatches || []).map(b => ({ id: b.code || b.id || b._id, name: b.name, schedule: b.schedule, branch: b.branch, slotType: b.slotType || 'Morning', status: b.status || 'Active' }))
@@ -3605,7 +3726,7 @@ function App() {
 
   // Form State
   const [newStudent, setNewStudent] = useState({
-    name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: '', photo: null, trainer: '', art: ''
+    name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: '', photo: null, isPriority: false, trainer: '', art: ''
   });
 
   // Unified dynamic batch loading by branchId for creation & edit modals/forms
@@ -3914,7 +4035,7 @@ function App() {
       .then(savedStudent => {
         setStudents(prev => sortStudentsAlphabetically([...prev, savedStudent]));
         setIsAddModalOpen(false);
-        setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: defaultBranch === 'All' ? (branches[0] || 'Kuttiady') : defaultBranch, photo: null, trainer: '', art: '' });
+        setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: defaultBranch === 'All' ? (branches[0] || 'Kuttiady') : defaultBranch, photo: null, isPriority: false, trainer: '', art: '' });
 
         setGlobalSuccess("Student added successfully.");
         reloadAllAppData();
@@ -5190,7 +5311,7 @@ function App() {
     // Dynamic calculations against 512 MB limits
     const rssPercent = Math.min(100, Math.max(0, Math.round((rssVal / 512) * 100)));
     const heapPercent = heapTotalVal > 0 ? Math.min(100, Math.max(0, Math.round((heapUsedVal / heapTotalVal) * 100))) : 0;
-    
+
     const containerTotalMem = 512;
     const containerFreeMem = Math.max(0, containerTotalMem - rssVal);
     const containerUsedPercent = Math.min(100, Math.max(0, Math.round((rssVal / containerTotalMem) * 100)));
@@ -5756,7 +5877,7 @@ function App() {
                     devSettings.maintenanceMode === 'none' ? '#30d158' :
                       devSettings.maintenanceMode === 'all' ? '#ff453a' : '#ff9f0a',
                   border: `1px solid ${devSettings.maintenanceMode === 'none' ? 'rgba(48, 209, 88, 0.3)' :
-                      devSettings.maintenanceMode === 'all' ? 'rgba(255, 69, 58, 0.3)' : 'rgba(255, 159, 10, 0.3)'
+                    devSettings.maintenanceMode === 'all' ? 'rgba(255, 69, 58, 0.3)' : 'rgba(255, 159, 10, 0.3)'
                     }`,
                   transition: 'all 0.3s ease'
                 }}>
@@ -5800,11 +5921,56 @@ function App() {
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
                   <input
                     type="checkbox"
+                    checked={!!devSettings.lockDashboardPage}
+                    onChange={(e) => setDevSettings({ ...devSettings, lockDashboardPage: e.target.checked })}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Lock Dashboard Page
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!devSettings.lockAttendancePage}
+                    onChange={(e) => setDevSettings({ ...devSettings, lockAttendancePage: e.target.checked })}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Lock Attendance Page
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!devSettings.lockFeesPage}
+                    onChange={(e) => setDevSettings({ ...devSettings, lockFeesPage: e.target.checked })}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Lock Fees Page
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!devSettings.lockRemindersPage}
+                    onChange={(e) => setDevSettings({ ...devSettings, lockRemindersPage: e.target.checked })}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Lock Reminders Page
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
+                  <input
+                    type="checkbox"
                     checked={!!devSettings.lockPerformancePage}
                     onChange={(e) => setDevSettings({ ...devSettings, lockPerformancePage: e.target.checked })}
                     style={{ cursor: 'pointer' }}
                   />
                   Lock Student Performance Page
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!devSettings.lockGradingPage}
+                    onChange={(e) => setDevSettings({ ...devSettings, lockGradingPage: e.target.checked })}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Lock Grading Page
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
                   <input
@@ -5818,19 +5984,14 @@ function App() {
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
                   <input
                     type="checkbox"
-                    checked={!!devSettings.lockFeesPage}
-                    onChange={(e) => setDevSettings({ ...devSettings, lockFeesPage: e.target.checked })}
+                    checked={!!devSettings.allowBranchAdminChangeBelt}
+                    onChange={(e) => setDevSettings({ ...devSettings, allowBranchAdminChangeBelt: e.target.checked })}
                     style={{ cursor: 'pointer' }}
                   />
-                  Lock Fees Page
+                  Allow Branch Admin to manually change Present Grad
                 </label>
               </div>
             </div>
-
-
-
-
-
 
 
             {/* Session Timeout */}
@@ -6043,10 +6204,10 @@ function App() {
                 <tbody>
                   {lockedUsers.map(u => {
                     const isTempLocked = u.lockUntil && new Date(u.lockUntil) > new Date();
-                    const lockStatusText = u.isLocked 
-                      ? "Permanently Locked" 
+                    const lockStatusText = u.isLocked
+                      ? "Permanently Locked"
                       : (isTempLocked ? `Temporarily Blocked` : "Active");
-                    
+
                     return (
                       <tr key={u._id}>
                         <td style={{ fontWeight: 600, color: '#fff' }}>{u.username}</td>
@@ -6830,8 +6991,8 @@ function App() {
                     {searchedStudents.filter(s => {
                       const isInactive = (s.status || 'Active') === 'Inactive';
                       if (isInactive) return false;
-                      const matchBatch = attendanceBatchFilter === 'All' || 
-                        s.batch === attendanceBatchFilter || 
+                      const matchBatch = attendanceBatchFilter === 'All' ||
+                        s.batch === attendanceBatchFilter ||
                         (() => {
                           const batchObj = batchOptions.find(b => b.id.toLowerCase() === (s.batch || '').toLowerCase());
                           return batchObj && batchObj.slotType && batchObj.slotType.toLowerCase() === attendanceBatchFilter.toLowerCase();
@@ -6856,10 +7017,15 @@ function App() {
                         <tr key={student.id}>
                           <td
                             data-label="Student"
-                            style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}
+                            style={{ fontWeight: 700, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}
                             onClick={() => handleSelectStudent(student)}
                           >
-                            {student.studentName || student.name}
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              {student.studentName || student.name}
+                              {student.isPriority && (
+                                <Star size={14} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
+                              )}
+                            </span>
                           </td>
                           <td data-label="Batch Info"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}</span></td>
                           <td data-label="Status">
@@ -6924,8 +7090,8 @@ function App() {
     const baseFeeStudents = searchedStudents.filter(s => (s.status || 'Active') !== 'Inactive');
 
     const filteredFeeStudents = baseFeeStudents.filter(s => {
-      const matchBatch = feeBatchFilter === 'All' || 
-        s.batch === feeBatchFilter || 
+      const matchBatch = feeBatchFilter === 'All' ||
+        s.batch === feeBatchFilter ||
         (() => {
           const batchObj = batchOptions.find(b => b.id.toLowerCase() === (s.batch || '').toLowerCase());
           return batchObj && batchObj.slotType && batchObj.slotType.toLowerCase() === feeBatchFilter.toLowerCase();
@@ -7145,10 +7311,13 @@ function App() {
                         <td data-label="Student">
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <div
-                              style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}
+                              style={{ fontWeight: 700, color: '#E50914', cursor: 'pointer', textDecoration: 'underline', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                               onClick={() => handleSelectStudent(student)}
                             >
                               {student.studentName || student.name}
+                              {student.isPriority && (
+                                <Star size={14} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
+                              )}
                             </div>
                             <button
                               onClick={() => {
@@ -7638,82 +7807,1063 @@ function App() {
     );
   };
 
-  const renderPerformance = () => (
-    <div className="performance-view">
-      <div className="panel" style={{ marginBottom: '2rem' }}>
-        <div className="panel-header">
-          <h3 className="panel-title">Academy Performance</h3>
-        </div>
-        <div className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-icon-wrapper"><Award className="stat-icon" /></div>
-            <div className="stat-details">
-              <h3>Next Grading Event</h3>
-              <p className="stat-value text-blue" style={{ color: '#FFD700' }}>June 15</p>
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon-wrapper"><Activity className="stat-icon" /></div>
-            <div className="stat-details">
-              <h3>Avg Academy Attendance</h3>
-              <p className="stat-value" style={{ color: '#4CAF50' }}>88%</p>
-            </div>
-          </div>
-        </div>
-      </div>
+  // Grading Module Actions and Handlers
+  const getNextBelt = (currentBelt) => {
+    const beltList = ['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'];
+    const index = beltList.findIndex(b => b.toLowerCase() === String(currentBelt || '').toLowerCase().trim());
+    if (index === -1 || index === beltList.length - 1) return 'None';
+    return beltList[index + 1];
+  };
 
-      <div className="panel">
-        <div className="panel-header">
-          <h3 className="panel-title">Student Tracking</h3>
+  const getFilteredGradingStudents = () => {
+    return gradingStudents.filter(student => {
+      const matchesSearch = student.name.toLowerCase().includes(searchQuery.toLowerCase().trim());
+
+      let matchesBatch = true;
+      if (gradingFilterBatch !== 'All') {
+        matchesBatch = (student.batch || '').toLowerCase() === gradingFilterBatch.toLowerCase();
+      }
+
+      let matchesBelt = true;
+      if (gradingFilterBelt !== 'All') {
+        matchesBelt = (student.belt || '').toLowerCase() === gradingFilterBelt.toLowerCase();
+      }
+
+      let matchesEligibility = true;
+      if (gradingFilterEligibility !== 'All') {
+        matchesEligibility = student.eligibilityStatus === gradingFilterEligibility;
+      }
+
+      let matchesResult = true;
+      if (gradingFilterResult !== 'All') {
+        if (gradingFilterResult === 'No History') {
+          matchesResult = !student.lastGradingResult || student.lastGradingResult === 'N/A';
+        } else {
+          matchesResult = student.lastGradingResult === gradingFilterResult;
+        }
+      }
+
+      let matchesDateRange = true;
+      if (gradingFilterStartDate) {
+        if (!student.lastGradingDate || student.lastGradingDate === 'N/A' || student.lastGradingDate < gradingFilterStartDate) {
+          matchesDateRange = false;
+        }
+      }
+      if (gradingFilterEndDate) {
+        if (!student.lastGradingDate || student.lastGradingDate === 'N/A' || student.lastGradingDate > gradingFilterEndDate) {
+          matchesDateRange = false;
+        }
+      }
+
+      return matchesSearch && matchesBatch && matchesBelt && matchesEligibility && matchesResult && matchesDateRange;
+    });
+  };
+
+  const handleSubmitGrade = (e) => {
+    e.preventDefault();
+    if (!selectedGradeStudent) return;
+    setGradingActionLoading(true);
+    setGradingError('');
+    setGradingSuccess('');
+
+    fetch(`${API_BASE_URL}/students/${selectedGradeStudent.id}/grade`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ result: gradeResult, gradingDate: gradeDate })
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to submit grade');
+        setGradingStudents(gradingStudents.map(s => s.id === data.id ? data : s));
+        setIsGradeModalOpen(false);
+        setGlobalSuccess(`Grading result submitted successfully for ${data.name}!`);
+        reloadAllAppData();
+      })
+      .catch(err => {
+        console.error(err);
+        setGradingError(err.message);
+      })
+      .finally(() => setGradingActionLoading(false));
+  };
+
+  const handleSubmitEditGrading = (e) => {
+    e.preventDefault();
+    if (!selectedEditGradingStudent) return;
+    setGradingActionLoading(true);
+    setGradingError('');
+    setGradingSuccess('');
+
+    fetch(`${API_BASE_URL}/students/${selectedEditGradingStudent.id}/grading-info`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(editGradingForm)
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to update grading info');
+        setGradingStudents(gradingStudents.map(s => s.id === data.id ? data : s));
+        setIsEditGradingModalOpen(false);
+        setGlobalSuccess(`Grading details updated successfully for ${data.name}!`);
+        reloadAllAppData();
+      })
+      .catch(err => {
+        console.error(err);
+        setGradingError(err.message);
+      })
+      .finally(() => setGradingActionLoading(false));
+  };
+
+  const renderGrading = () => {
+    const isSuper = isAdminUser(loggedInUser);
+    const filtered = getFilteredGradingStudents();
+
+    // Stats calculations
+    const totalCount = filtered.length;
+    const eligibleCount = filtered.filter(s => s.eligibilityStatus === 'Eligible').length;
+    const passedCount = filtered.filter(s => s.lastGradingResult === 'Pass').length;
+    const failedCount = filtered.filter(s => s.lastGradingResult === 'Fail').length;
+
+    const beltCounts = { White: 0, Yellow: 0, Orange: 0, Green: 0, Blue: 0, Brown: 0, Black: 0 };
+    filtered.forEach(s => {
+      const b = s.belt || 'White';
+      const normalized = b.charAt(0).toUpperCase() + b.slice(1).toLowerCase();
+      if (beltCounts[normalized] !== undefined) {
+        beltCounts[normalized]++;
+      }
+    });
+
+    return (
+      <div className="grading-view">
+        {gradingError && <div style={{ color: '#E50914', marginBottom: '1.5rem', background: 'rgba(229, 9, 20, 0.1)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(229, 9, 20, 0.3)', fontWeight: 500 }}>{gradingError}</div>}
+        {gradingSuccess && <div style={{ color: '#4CAF50', marginBottom: '1.5rem', background: 'rgba(76, 175, 80, 0.1)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(76, 175, 80, 0.3)', fontWeight: 500 }}>{gradingSuccess}</div>}
+
+        {/* Dashboard Stats Cards */}
+        <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: '2rem' }}>
+          <div className="stat-card glow-card-blue">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(54, 162, 235, 0.1)' }}><Users className="stat-icon" style={{ color: '#36A2EB' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Total Students</h3>
+              <p className="stat-value" style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>{totalCount}</p>
+            </div>
+          </div>
+          <div className="stat-card glow-card-green">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(76, 175, 80, 0.1)' }}><CheckCircle className="stat-icon" style={{ color: '#4CAF50' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Eligible for Test</h3>
+              <p className="stat-value" style={{ color: '#4CAF50', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>{eligibleCount}</p>
+            </div>
+          </div>
+          <div className="stat-card glow-card-blue">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(54, 162, 235, 0.1)' }}><Award className="stat-icon" style={{ color: '#36A2EB' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Passed Tests</h3>
+              <p className="stat-value" style={{ color: '#36A2EB', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>{passedCount}</p>
+            </div>
+          </div>
+          <div className="stat-card glow-card-red">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(229, 9, 20, 0.1)' }}><XCircle className="stat-icon" style={{ color: '#ff453a' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Failed Tests</h3>
+              <p className="stat-value" style={{ color: '#ff453a', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>{failedCount}</p>
+            </div>
+          </div>
         </div>
-        <div className="table-responsive">
-          <table className="data-table responsive-table-cards">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Present Grad</th>
-                <th>Batch</th>
-                <th>Skill Score</th>
-                <th>Progress to Next Belt</th>
-                <th>Contact / Operations</th>
-              </tr>
-            </thead>
-            <tbody>
-              {searchedStudents.map(student => (
-                <tr key={student.id}>
-                  <td data-label="Name" onClick={() => handleSelectStudent(student)} style={{ fontWeight: 500, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}>{student.studentName || student.name}</td>
-                  <td data-label="Present Grad"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
-                  <td data-label="Batch"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)' }}>{getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}</span></td>
-                  <td data-label="Skill Score"><span style={{ fontWeight: 'bold', color: student.performanceScore > 80 ? '#4CAF50' : '#FF9800' }}>{student.performanceScore}/100</span></td>
-                  <td data-label="Progress to Next Belt" style={{ width: '30%' }}>
-                    <div className="progress-container">
-                      <div className="progress-bar" style={{ width: `${student.performanceScore}%` }}></div>
-                    </div>
-                  </td>
-                  <td data-label="Contact / Operations">
-                    <div className="actions-flex-container">
-                      <a href={`tel:${student.phone}`} className="btn-icon" style={{ color: '#2196F3' }} title="Call Student">
-                        <Phone size={18} />
-                      </a>
-                      <a href={`https://wa.me/${student.phone}`} target="_blank" rel="noreferrer" className="btn-icon" style={{ color: '#25D366' }} title="WhatsApp Student">
-                        <MessageCircle size={18} />
-                      </a>
-                      <a href={`sms:${student.phone}`} className="btn-icon" style={{ color: '#FF9800' }} title="SMS Message Student">
-                        <MessageSquare size={18} />
-                      </a>
-                      <button className="btn-icon" onClick={() => handleDeleteStudent(student.id)} style={{ color: '#F44336' }} title="Delete">
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-                  </td>
+
+        {/* Belt Distribution Bar */}
+        <div className="panel" style={{ marginBottom: '2rem', background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+          <h3 className="panel-title" style={{ marginBottom: '1.25rem', fontSize: '0.85rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Present Grad Distribution</h3>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+            {Object.entries(beltCounts).map(([beltName, count]) => (
+              <div key={beltName} style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255, 255, 255, 0.02)', padding: '6px 14px', borderRadius: '20px', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                <span className={`badge ${getBeltColorClass(beltName)}`} style={{ padding: '3px 8px', fontSize: '0.7rem', borderRadius: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{beltName}</span>
+                <strong style={{ fontSize: '0.85rem', color: '#fff', fontFamily: 'Outfit, sans-serif' }}>{count}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Filters Panel */}
+        <div className="filters-wrapper-card">
+          <div className="panel-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
+            <h3 className="panel-title" style={{ fontSize: '0.9rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Grading Filters</h3>
+          </div>
+          <div className="grid-filters-layout">
+            {isSuper && (
+              <div className="form-group">
+                <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Branch</label>
+                <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterBranch} onChange={(e) => setGradingFilterBranch(e.target.value)}>
+                  <option value="All">All Branches</option>
+                  {branches.map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="form-group">
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Batch</label>
+              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterBatch} onChange={(e) => setGradingFilterBatch(e.target.value)}>
+                <option value="All">All Batches</option>
+                {getFilteredBatchOptions(isSuper ? gradingFilterBranch : undefined).map(opt => (
+                  <option key={opt.id} value={opt.id}>{opt.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Present Grad</label>
+              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterBelt} onChange={(e) => setGradingFilterBelt(e.target.value)}>
+                <option value="All">All Belts</option>
+                {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Eligibility</label>
+              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterEligibility} onChange={(e) => setGradingFilterEligibility(e.target.value)}>
+                <option value="All">All Eligibility</option>
+                <option value="Eligible">Eligible</option>
+                <option value="Not Eligible">Not Eligible</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Last Result</label>
+              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterResult} onChange={(e) => setGradingFilterResult(e.target.value)}>
+                <option value="All">All Results</option>
+                <option value="Pass">Pass</option>
+                <option value="Fail">Fail</option>
+                <option value="No History">No History / N/A</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Grading Date Range</label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input type="date" className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', flex: 1 }} value={gradingFilterStartDate} onChange={(e) => setGradingFilterStartDate(e.target.value)} placeholder="Start" />
+                <input type="date" className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', flex: 1 }} value={gradingFilterEndDate} onChange={(e) => setGradingFilterEndDate(e.target.value)} placeholder="End" />
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', alignItems: 'center', marginTop: '1.25rem', flexWrap: 'wrap' }}>
+            <button className="btn-secondary" style={{ padding: '6px 16px', fontSize: '0.85rem', height: '38px', borderRadius: '8px' }} onClick={() => {
+              setGradingFilterBranch('All');
+              setGradingFilterBatch('All');
+              setGradingFilterBelt('All');
+              setGradingFilterEligibility('All');
+              setGradingFilterResult('All');
+              setGradingFilterStartDate('');
+              setGradingFilterEndDate('');
+              setSearchQuery('');
+            }}>Reset Filters</button>
+            <div style={{ position: 'relative', width: '220px' }}>
+              <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+              <input
+                type="text"
+                placeholder="Search students..."
+                className="form-control"
+                style={{ paddingLeft: '36px', height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Student Table */}
+        <div className="panel" style={{ background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+          <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: 'none', paddingBottom: 0 }}>
+            <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Students List ({filtered.length})</h3>
+          </div>
+
+          {loadingGrading ? (
+            <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--color-text-muted)' }}>Loading student details...</div>
+          ) : filtered.length > 0 ? (
+            <div className="premium-table-container">
+              <table className="premium-table responsive-table-cards">
+                <thead>
+                  <tr>
+                    <th>Student Name</th>
+                    <th>Branch</th>
+                    <th>Batch</th>
+                    <th>Present Grad</th>
+                    <th>Next Belt</th>
+                    <th>Join Date</th>
+                    <th>Last Grading</th>
+                    <th>Next Eligible</th>
+                    <th>Eligibility</th>
+                    <th>Result</th>
+                    <th style={{ textAlign: 'center' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(student => (
+                    <tr key={student.id}>
+                      <td style={{ fontWeight: 700, color: '#fff' }} data-label="Student Name">
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          {student.name}
+                          {student.isPriority && (
+                            <Star size={14} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
+                          )}
+                        </span>
+                      </td>
+                      <td data-label="Branch">{student.branch}</td>
+                      <td data-label="Batch">{getBatchNameFromCode(student.batch, student.branch)}</td>
+                      <td data-label="Present Grad">
+                        <span className={`badge ${getBeltColorClass(student.belt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem', borderRadius: '4px' }}>{student.belt}</span>
+                      </td>
+                      <td data-label="Next Belt">
+                        {student.nextBelt !== 'None' ? (
+                          <span className={`badge ${getBeltColorClass(student.nextBelt)}`} style={{ opacity: 0.85, padding: '3px 8px', fontSize: '0.75rem', borderRadius: '4px' }}>{student.nextBelt}</span>
+                        ) : (
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>None (Max)</span>
+                        )}
+                      </td>
+                      <td data-label="Join Date">{student.joinDate}</td>
+                      <td data-label="Last Grading">{student.lastGradingDate || 'N/A'}</td>
+                      <td data-label="Next Eligible">{student.nextEligibleGradingDate || 'N/A'}</td>
+                      <td data-label="Eligibility">
+                        <span className={student.eligibilityStatus === 'Eligible' ? 'badge-outline-green' : 'badge-outline-red'}>
+                          {student.eligibilityStatus}
+                        </span>
+                      </td>
+                      <td data-label="Result">
+                        {student.lastGradingResult === 'Pass' ? (
+                          <span className="badge-outline-green">Pass</span>
+                        ) : student.lastGradingResult === 'Fail' ? (
+                          <span className="badge-outline-red">Fail</span>
+                        ) : (
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>N/A</span>
+                        )}
+                      </td>
+                      <td data-label="Actions">
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', alignItems: 'center' }}>
+                          <button className="btn-secondary action-btn-pill" onClick={() => {
+                            setSelectedHistoryStudent(student);
+                            setIsHistoryModalOpen(true);
+                          }}>History</button>
+
+                          <button className="btn-primary action-btn-pill" style={{ background: 'var(--color-accent-primary)' }} onClick={() => {
+                            setSelectedGradeStudent(student);
+                            setGradeResult('Pass');
+                            setGradeDate(new Date().toISOString().split('T')[0]);
+                            setIsGradeModalOpen(true);
+                          }}>Grade</button>
+
+                          <button className="btn-icon" style={{ color: '#2196F3', background: 'rgba(33, 150, 243, 0.1)', border: '1px solid rgba(33, 150, 243, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => {
+                            setSelectedEditGradingStudent(student);
+                            setEditGradingForm({
+                              joinDate: student.joinDate,
+                              lastGradingDate: student.lastGradingDate || 'N/A',
+                              belt: student.belt
+                            });
+                            setIsEditGradingModalOpen(true);
+                          }}><Settings size={12} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--color-text-muted)' }}>No student matching the current filters.</div>
+          )}
+        </div>
+
+        {/* Modal: View Grading History */}
+        {isHistoryModalOpen && selectedHistoryStudent && (
+          <div className="modal-overlay" style={{ zIndex: 1000 }}>
+            <div className="modal-content" style={{ maxWidth: '650px', background: 'var(--color-bg-surface)', padding: '1.5rem', borderRadius: '8px' }}>
+              <div className="panel-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="panel-title">Grading History: {selectedHistoryStudent.name}</h3>
+                <button className="btn-icon" onClick={() => {
+                  setIsHistoryModalOpen(false);
+                  setSelectedHistoryStudent(null);
+                }} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}><X size={20} /></button>
+              </div>
+
+              <div style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '1rem', marginBottom: '1rem', display: 'flex', gap: '15px', fontSize: '0.9rem', color: 'var(--color-text-main)' }}>
+                <div>Branch: <strong>{selectedHistoryStudent.branch}</strong></div>
+                <div>Batch: <strong>{selectedHistoryStudent.batch}</strong></div>
+                <div>Present Grad: <span className={`badge ${getBeltColorClass(selectedHistoryStudent.belt)}`}>{selectedHistoryStudent.belt}</span></div>
+              </div>
+
+              {selectedHistoryStudent.gradingHistory && selectedHistoryStudent.gradingHistory.length > 0 ? (
+                <div className="table-responsive" style={{ maxHeight: '350px', overflowY: 'auto' }}>
+                  <table className="attendance-table" style={{ fontSize: '0.85rem' }}>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Belt Before</th>
+                        <th>Result</th>
+                        <th>Belt After</th>
+                        <th>Updated By</th>
+                        <th>Attempted At</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...selectedHistoryStudent.gradingHistory].reverse().map((attempt, index) => (
+                        <tr key={index}>
+                          <td data-label="Date">{attempt.gradingDate}</td>
+                          <td data-label="Belt Before">
+                            <span className={`badge ${getBeltColorClass(attempt.beltBefore)}`} style={{ transform: 'scale(0.85)' }}>{attempt.beltBefore}</span>
+                          </td>
+                          <td data-label="Result">
+                            {attempt.result === 'Pass' ? (
+                              <span className="badge badge-green" style={{ background: 'rgba(76, 175, 80, 0.15)', color: '#4CAF50', border: '1px solid rgba(76, 175, 80, 0.3)', padding: '2px 6px', fontSize: '0.75rem' }}>Pass</span>
+                            ) : (
+                              <span className="badge badge-red" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#ff453a', border: '1px solid rgba(229, 9, 20, 0.3)', padding: '2px 6px', fontSize: '0.75rem' }}>Fail</span>
+                            )}
+                          </td>
+                          <td data-label="Belt After">
+                            <span className={`badge ${getBeltColorClass(attempt.beltAfter)}`} style={{ transform: 'scale(0.85)' }}>{attempt.beltAfter}</span>
+                          </td>
+                          <td data-label="Updated By">{attempt.updatedBy}</td>
+                          <td data-label="Attempted At" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                            {new Date(attempt.createdAt || attempt.date).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No grading attempts recorded. Tracking starts from now.</div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+                <button className="btn-secondary" onClick={() => {
+                  setIsHistoryModalOpen(false);
+                  setSelectedHistoryStudent(null);
+                }}>Close</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Conduct Grade Test */}
+        {isGradeModalOpen && selectedGradeStudent && (
+          <div className="modal-overlay" style={{ zIndex: 1000 }}>
+            <div className="modal-content" style={{ maxWidth: '500px', background: 'var(--color-bg-surface)', padding: '1.5rem', borderRadius: '8px' }}>
+              <div className="panel-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="panel-title">Conduct Grading Test</h3>
+                <button className="btn-icon" onClick={() => {
+                  setIsGradeModalOpen(false);
+                  setSelectedGradeStudent(null);
+                }} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}><X size={20} /></button>
+              </div>
+
+              <form onSubmit={handleSubmitGrade}>
+                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.04)', marginBottom: '1.5rem', fontSize: '0.9rem', color: 'var(--color-text-main)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span>Student:</span> <strong style={{ color: '#fff' }}>{selectedGradeStudent.name}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span>Join Date:</span> <strong style={{ color: '#fff' }}>{selectedGradeStudent.joinDate || 'N/A'}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span>Present Grad:</span> <span className={`badge ${getBeltColorClass(selectedGradeStudent.belt)}`}>{selectedGradeStudent.belt}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Target Promotion Belt:</span>
+                    {selectedGradeStudent.nextBelt !== 'None' ? (
+                      <span className={`badge ${getBeltColorClass(selectedGradeStudent.nextBelt)}`}>{selectedGradeStudent.nextBelt}</span>
+                    ) : (
+                      <strong style={{ color: 'var(--color-text-muted)' }}>Max Level Reached</strong>
+                    )}
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                  <label>Grading Date</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={gradeDate}
+                    onChange={(e) => setGradeDate(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                  <label>Test Result</label>
+                  <select
+                    className="form-control"
+                    value={gradeResult}
+                    onChange={(e) => setGradeResult(e.target.value)}
+                    required
+                  >
+                    <option value="Pass">Pass (Promote to next grade level)</option>
+                    <option value="Fail">Fail (Keep current grade level)</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                  <button type="button" className="btn-secondary" onClick={() => {
+                    setIsGradeModalOpen(false);
+                    setSelectedGradeStudent(null);
+                  }}>Cancel</button>
+                  <button type="submit" className="btn-primary" disabled={gradingActionLoading} style={{ background: 'var(--color-accent-primary)' }}>
+                    {gradingActionLoading ? 'Submitting...' : 'Save Result'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Edit Grading Info Override */}
+        {isEditGradingModalOpen && selectedEditGradingStudent && (
+          <div className="modal-overlay" style={{ zIndex: 1000 }}>
+            <div className="modal-content" style={{ maxWidth: '500px', background: 'var(--color-bg-surface)', padding: '1.5rem', borderRadius: '8px' }}>
+              <div className="panel-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="panel-title">Edit Student Grading Info</h3>
+                <button className="btn-icon" onClick={() => {
+                  setIsEditGradingModalOpen(false);
+                  setSelectedEditGradingStudent(null);
+                }} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}><X size={20} /></button>
+              </div>
+
+              <form onSubmit={handleSubmitEditGrading}>
+                <div style={{ marginBottom: '1.25rem', fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+                  Student: <strong style={{ color: '#fff' }}>{selectedEditGradingStudent.name}</strong> (ID: {selectedEditGradingStudent.id})
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                  <label>Join Date</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={editGradingForm.joinDate}
+                    onChange={(e) => setEditGradingForm({ ...editGradingForm, joinDate: e.target.value })}
+                    required
+                    disabled={!isSuper && !allowBranchAdminChangeBelt}
+                  />
+                  {!isSuper && !allowBranchAdminChangeBelt && (
+                    <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Requires Super Admin permission to edit.</span>
+                  )}
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                  <label>Last Grading Date</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={editGradingForm.lastGradingDate}
+                    onChange={(e) => setEditGradingForm({ ...editGradingForm, lastGradingDate: e.target.value })}
+                    placeholder="YYYY-MM-DD or N/A"
+                    required
+                  />
+                  <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Enter N/A if student has not taken a grading test yet. Recalculates eligibility date.</span>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                  <label>Present Grad</label>
+                  <select
+                    className="form-control"
+                    value={editGradingForm.belt}
+                    onChange={(e) => setEditGradingForm({ ...editGradingForm, belt: e.target.value })}
+                    required
+                    disabled={!isSuper && !allowBranchAdminChangeBelt}
+                  >
+                    {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                  {!isSuper && !allowBranchAdminChangeBelt && (
+                    <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Requires Super Admin permission to edit.</span>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                  <button type="button" className="btn-secondary" onClick={() => {
+                    setIsEditGradingModalOpen(false);
+                    setSelectedEditGradingStudent(null);
+                  }}>Cancel</button>
+                  <button type="submit" className="btn-primary" disabled={gradingActionLoading}>
+                    {gradingActionLoading ? 'Saving...' : 'Save Override'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderPerformance = () => {
+    // Helper to calculate financial metrics for a student
+    const getStudentFeeStats = (student) => {
+      const rateAdmission = student.customAdmissionRate !== undefined && student.customAdmissionRate !== null
+        ? student.customAdmissionRate
+        : admissionFeeRate;
+      const admissionCoupon = resolveCouponCode(student.appliedAdmissionCoupon);
+      let admissionDiscountAmount = 0;
+      if (admissionCoupon) {
+        if (admissionCoupon.type === 'percentage') {
+          admissionDiscountAmount = Math.round(rateAdmission * admissionCoupon.value / 100);
+        } else {
+          admissionDiscountAmount = admissionCoupon.value;
+        }
+      }
+      const finalAdmissionRate = Math.max(0, rateAdmission - admissionDiscountAmount);
+
+      let collectedAdmission = 0;
+      let pendingAdmission = 0;
+
+      if (student.admissionPaid) {
+        collectedAdmission = finalAdmissionRate;
+      } else {
+        pendingAdmission = finalAdmissionRate;
+      }
+
+      // Monthly fees
+      const currentMonthStr = getLocalMonthString(); // YYYY-MM
+      let joinMonthStr = student.joinDate ? student.joinDate.slice(0, 7) : currentMonthStr;
+
+      if (startingBillingMonth && startingBillingMonth > joinMonthStr) {
+        joinMonthStr = startingBillingMonth;
+      }
+
+      const rateToUse = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
+        ? student.customMonthlyRate
+        : monthlyFeeRate;
+      const discountAmount = getStudentDiscount(student, rateToUse);
+      const finalRate = Math.max(0, rateToUse - discountAmount);
+
+      let collectedMonthly = 0;
+      let pendingMonthly = 0;
+      let paidCount = 0;
+      let pendingCount = 0;
+
+      let [joinYear, joinMonth] = joinMonthStr.split('-').map(Number);
+      let [currYear, currMonth] = currentMonthStr.split('-').map(Number);
+
+      if (joinYear && joinMonth && currYear && currMonth) {
+        let tempYear = joinYear;
+        let tempMonth = joinMonth;
+
+        while (tempYear < currYear || (tempYear === currYear && tempMonth <= currMonth)) {
+          const monthStr = `${tempYear}-${String(tempMonth).padStart(2, '0')}`;
+          const isPaid = student.paidMonths && student.paidMonths[monthStr];
+
+          if (isPaid) {
+            collectedMonthly += finalRate;
+            paidCount++;
+          } else {
+            pendingMonthly += finalRate;
+            pendingCount++;
+          }
+
+          tempMonth++;
+          if (tempMonth > 12) {
+            tempMonth = 1;
+            tempYear++;
+          }
+        }
+      }
+
+      return {
+        collectedAdmission,
+        pendingAdmission,
+        collectedMonthly,
+        pendingMonthly,
+        totalCollected: collectedAdmission + collectedMonthly,
+        totalPending: pendingAdmission + pendingMonthly,
+        expected: collectedAdmission + collectedMonthly + pendingAdmission + pendingMonthly,
+        paidCount,
+        pendingCount
+      };
+    };
+
+    // Filter students based on Performance tab branch/batch and search input
+    const getFilteredStudentsForPerf = (branchVal, batchVal, searchVal) => {
+      return students.filter(s => {
+        if (s.status === 'Inactive' || s.status === 'SoftDeleted') return false;
+
+        // 1. Branch filter
+        let matchesBranch = true;
+        if (branchVal !== 'All') {
+          matchesBranch = s.branch && s.branch.toLowerCase().trim() === branchVal.toLowerCase().trim();
+        }
+
+        // 2. Batch filter
+        let matchesBatch = true;
+        if (batchVal !== 'All') {
+          const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchVal.toLowerCase());
+          if (selectedBatchObj) {
+            const studentBatchLower = (s.batch || '').toLowerCase().trim();
+            const targetIdLower = selectedBatchObj.id.toLowerCase().trim();
+            const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
+            if (studentBatchLower === targetIdLower || studentBatchLower === targetNameLower) {
+              matchesBatch = true;
+            } else if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
+              matchesBatch = false;
+            } else {
+              matchesBatch = schedulesMatch(s.schedule, selectedBatchObj.schedule);
+            }
+          } else {
+            matchesBatch = false;
+          }
+        }
+
+        // 3. Search query
+        let matchesSearch = true;
+        if (searchVal) {
+          matchesSearch = s.name && s.name.toLowerCase().includes(searchVal.toLowerCase().trim());
+        }
+
+        return matchesBranch && matchesBatch && matchesSearch;
+      });
+    };
+
+    const activeRole = getCookieValue('umai_session_role') || userRole;
+    const isSuper = activeRole === 'superadmin' || activeRole === 'developer';
+    const activeBranch = isSuper ? perfFilterBranch : userBranch;
+    const activeBatch = perfFilterBatch;
+
+    const filtered = getFilteredStudentsForPerf(activeBranch, activeBatch, searchQuery);
+
+    // Calculate overall stats for filtered students
+    let overallCollected = 0;
+    let overallPending = 0;
+    let overallExpected = 0;
+
+    filtered.forEach(s => {
+      const stats = getStudentFeeStats(s);
+      overallCollected += stats.totalCollected;
+      overallPending += stats.totalPending;
+      overallExpected += stats.expected;
+    });
+
+    const overallCollectionRate = overallExpected > 0 ? Math.round((overallCollected / overallExpected) * 100) : 0;
+
+    // Calculate Branch-wise summary (only if superadmin and viewing 'All')
+    const branchSummaries = [];
+    if (isSuper && activeBranch === 'All') {
+      branches.forEach(bName => {
+        const branchStudents = getFilteredStudentsForPerf(bName, 'All', '');
+        let bCollected = 0;
+        let bPending = 0;
+        let bExpected = 0;
+        branchStudents.forEach(s => {
+          const stats = getStudentFeeStats(s);
+          bCollected += stats.totalCollected;
+          bPending += stats.totalPending;
+          bExpected += stats.expected;
+        });
+        branchSummaries.push({
+          name: bName,
+          studentsCount: branchStudents.length,
+          collected: bCollected,
+          pending: bPending,
+          expected: bExpected,
+          rate: bExpected > 0 ? Math.round((bCollected / bExpected) * 100) : 0
+        });
+      });
+    }
+
+    // Calculate Batch-wise summary
+    const batchSummaries = [];
+    const filteredBatchOpts = getFilteredBatchOptions(isSuper ? activeBranch : undefined);
+    filteredBatchOpts.forEach(batchOpt => {
+      const batchStudents = getFilteredStudentsForPerf(activeBranch, batchOpt.id, '');
+      let batCollected = 0;
+      let batPending = 0;
+      let batExpected = 0;
+      batchStudents.forEach(s => {
+        const stats = getStudentFeeStats(s);
+        batCollected += stats.totalCollected;
+        batPending += stats.totalPending;
+        batExpected += stats.expected;
+      });
+      batchSummaries.push({
+        id: batchOpt.id,
+        name: batchOpt.name,
+        studentsCount: batchStudents.length,
+        collected: batCollected,
+        pending: batPending,
+        expected: batExpected,
+        rate: batExpected > 0 ? Math.round((batCollected / batExpected) * 100) : 0
+      });
+    });
+
+    return (
+      <div className="performance-view">
+        {/* Dashboard Financial Stats Cards */}
+        <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: '2rem' }}>
+          <div className="stat-card glow-card-green">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(76, 175, 80, 0.1)' }}><Wallet className="stat-icon" style={{ color: '#4CAF50' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Collected Profit (Revenue)</h3>
+              <p className="stat-value" style={{ color: '#4CAF50', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>₹{overallCollected.toLocaleString()}</p>
+            </div>
+          </div>
+          <div className="stat-card glow-card-red">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(229, 9, 20, 0.1)' }}><AlertTriangle className="stat-icon" style={{ color: '#ff453a' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Pending Fees</h3>
+              <p className="stat-value" style={{ color: '#ff453a', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>₹{overallPending.toLocaleString()}</p>
+            </div>
+          </div>
+          <div className="stat-card glow-card-blue">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(54, 162, 235, 0.1)' }}><Activity className="stat-icon" style={{ color: '#36A2EB' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Expected Gross Revenue</h3>
+              <p className="stat-value" style={{ color: '#36A2EB', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>₹{overallExpected.toLocaleString()}</p>
+            </div>
+          </div>
+          <div className="stat-card glow-card-yellow">
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 199, 0, 0.1)' }}><TrendingUp className="stat-icon" style={{ color: '#ffc700' }} /></div>
+            <div className="stat-details">
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Collection Rate</h3>
+              <p className="stat-value" style={{ color: '#ffc700', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>{overallCollectionRate}%</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Filters Panel */}
+        <div className="filters-wrapper-card">
+          <div className="panel-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
+            <h3 className="panel-title" style={{ fontSize: '0.9rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Performance Filters</h3>
+          </div>
+          <div className="grid-filters-layout" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+            {isSuper ? (
+              <div className="form-group">
+                <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Branch</label>
+                <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={perfFilterBranch} onChange={(e) => {
+                  setPerfFilterBranch(e.target.value);
+                  setPerfFilterBatch('All');
+                }}>
+                  <option value="All">All Branches</option>
+                  {branches.map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="form-group">
+                <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Branch</label>
+                <input type="text" className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={userBranch} disabled />
+              </div>
+            )}
+            <div className="form-group">
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Batch</label>
+              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={perfFilterBatch} onChange={(e) => setPerfFilterBatch(e.target.value)}>
+                <option value="All">All Batches</option>
+                {getFilteredBatchOptions(isSuper ? perfFilterBranch : undefined).map(opt => (
+                  <option key={opt.id} value={opt.id}>{opt.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+                <button className="btn-secondary" style={{ padding: '6px 16px', fontSize: '0.85rem', height: '38px', borderRadius: '8px', flex: 1 }} onClick={() => {
+                  if (isSuper) setPerfFilterBranch('All');
+                  setPerfFilterBatch('All');
+                  setSearchQuery('');
+                }}>Reset Filters</button>
+                <div style={{ position: 'relative', flex: 1.5 }}>
+                  <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+                  <input
+                    type="text"
+                    placeholder="Search students..."
+                    className="form-control"
+                    style={{ paddingLeft: '36px', height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Branch-wise summary report (Super Admin and viewing 'All' branches only) */}
+        {isSuper && activeBranch === 'All' && (
+          <div className="panel" style={{ marginBottom: '2rem', background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+            <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: 'none', paddingBottom: 0 }}>
+              <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Branch-wise Profit Summary</h3>
+            </div>
+            <div className="premium-table-container">
+              <table className="premium-table responsive-table-cards">
+                <thead>
+                  <tr>
+                    <th>Branch Name</th>
+                    <th>Students Count</th>
+                    <th>Fee Collected (Profit)</th>
+                    <th>Pending Fees</th>
+                    <th>Expected Revenue</th>
+                    <th>Collection Progress</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {branchSummaries.map(bSummary => (
+                    <tr key={bSummary.name}>
+                      <td style={{ fontWeight: 600, color: '#fff' }} data-label="Branch Name">{bSummary.name}</td>
+                      <td data-label="Students Count">{bSummary.studentsCount}</td>
+                      <td style={{ color: '#4CAF50', fontWeight: 600 }} data-label="Fee Collected (Profit)">₹{bSummary.collected.toLocaleString()}</td>
+                      <td style={{ color: '#ff453a' }} data-label="Pending Fees">₹{bSummary.pending.toLocaleString()}</td>
+                      <td data-label="Expected Revenue">₹{bSummary.expected.toLocaleString()}</td>
+                      <td style={{ width: '25%' }} data-label="Collection Progress">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div className="progress-container" style={{ flex: 1, height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px' }}>
+                            <div className="progress-bar" style={{ width: `${bSummary.rate}%`, background: '#4CAF50', height: '100%', borderRadius: '4px' }}></div>
+                          </div>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', minWidth: '35px' }}>{bSummary.rate}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Batch-wise summary report */}
+        <div className="panel" style={{ marginBottom: '2rem', background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+          <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: 'none', paddingBottom: 0 }}>
+            <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Batch-wise Profit Summary ({batchSummaries.length} Batches)</h3>
+          </div>
+          <div className="premium-table-container">
+            <table className="premium-table responsive-table-cards">
+              <thead>
+                <tr>
+                  <th>Batch Name</th>
+                  <th>Students Count</th>
+                  <th>Fee Collected (Profit)</th>
+                  <th>Pending Fees</th>
+                  <th>Expected Revenue</th>
+                  <th>Collection Progress</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {batchSummaries.map(batSummary => (
+                  <tr key={batSummary.id}>
+                    <td style={{ fontWeight: 600, color: '#fff' }} data-label="Batch Name">{batSummary.name}</td>
+                    <td data-label="Students Count">{batSummary.studentsCount}</td>
+                    <td style={{ color: '#4CAF50', fontWeight: 600 }} data-label="Fee Collected (Profit)">₹{batSummary.collected.toLocaleString()}</td>
+                    <td style={{ color: '#ff453a' }} data-label="Pending Fees">₹{batSummary.pending.toLocaleString()}</td>
+                    <td data-label="Expected Revenue">₹{batSummary.expected.toLocaleString()}</td>
+                    <td style={{ width: '25%' }} data-label="Collection Progress">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div className="progress-container" style={{ flex: 1, height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px' }}>
+                          <div className="progress-bar" style={{ width: `${batSummary.rate}%`, background: '#36A2EB', height: '100%', borderRadius: '4px' }}></div>
+                        </div>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', minWidth: '35px' }}>{batSummary.rate}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Student-wise detailed table */}
+        <div className="panel" style={{ background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+          <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: 'none', paddingBottom: 0 }}>
+            <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Detailed Student Profit Breakdown ({filtered.length} Students)</h3>
+          </div>
+          {filtered.length > 0 ? (
+            <div className="premium-table-container">
+              <table className="premium-table responsive-table-cards">
+                <thead>
+                  <tr>
+                    <th>Student Name</th>
+                    <th>Batch</th>
+                    <th>Admission Fee</th>
+                    <th>Monthly Fees</th>
+                    <th>Total Paid (Profit)</th>
+                    <th>Total Pending</th>
+                    <th>Collection Progress</th>
+                    <th style={{ textAlign: 'center' }}>Contact Outreach</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(student => {
+                    const stats = getStudentFeeStats(student);
+                    const rate = stats.expected > 0 ? Math.round((stats.totalCollected / stats.expected) * 100) : 0;
+                    return (
+                      <tr key={student.id}>
+                        <td data-label="Student Name">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectStudent(student)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              fontWeight: 700,
+                              color: 'var(--color-primary)',
+                              cursor: 'pointer',
+                              textDecoration: 'underline',
+                              fontFamily: 'inherit',
+                              fontSize: 'inherit',
+                              textAlign: 'left',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            {student.studentName || student.name}
+                            {student.isPriority && (
+                              <Star size={14} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
+                            )}
+                          </button>
+                        </td>
+                        <td data-label="Batch">
+                          <span className="badge" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--color-text-light)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                            {getBatchNameFromSchedule(student.schedule, student.branch)}
+                          </span>
+                        </td>
+                        <td data-label="Admission Fee">
+                          {student.admissionPaid ? (
+                            <span className="badge-outline-green">Paid</span>
+                          ) : (
+                            <span className="badge-outline-red">Pending (₹{stats.pendingAdmission})</span>
+                          )}
+                        </td>
+                        <td data-label="Monthly Fees" style={{ fontSize: '0.825rem' }}>
+                          <span style={{ color: '#4CAF50', fontWeight: 600 }}>{stats.paidCount} Paid</span> • <span style={{ color: '#ff453a', fontWeight: 600 }}>{stats.pendingCount} Pending</span>
+                        </td>
+                        <td style={{ fontWeight: 600, color: '#4CAF50' }} data-label="Total Paid (Profit)">₹{stats.totalCollected.toLocaleString()}</td>
+                        <td style={{ fontWeight: 600, color: stats.totalPending > 0 ? '#ff453a' : 'var(--color-text-muted)' }} data-label="Total Pending">₹{stats.totalPending.toLocaleString()}</td>
+                        <td style={{ width: '15%' }} data-label="Collection Progress">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div className="progress-container" style={{ flex: 1, height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px' }}>
+                              <div className="progress-bar" style={{ width: `${rate}%`, background: 'var(--color-primary)', height: '100%', borderRadius: '4px' }}></div>
+                            </div>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>{rate}%</span>
+                          </div>
+                        </td>
+                        <td data-label="Contact Outreach">
+                          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', alignItems: 'center' }}>
+                            <a href={`tel:${student.phone}`} style={{ color: '#2196F3', background: 'rgba(33, 150, 243, 0.1)', border: '1px solid rgba(33, 150, 243, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="Call Student">
+                              <Phone size={13} />
+                            </a>
+                            <a href={`https://wa.me/${student.phone}`} target="_blank" rel="noreferrer" style={{ color: '#25D366', background: 'rgba(37, 211, 102, 0.1)', border: '1px solid rgba(37, 211, 102, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="WhatsApp Student">
+                              <MessageCircle size={13} />
+                            </a>
+                            <a href={`sms:${student.phone}`} style={{ color: '#FF9800', background: 'rgba(255, 152, 0, 0.1)', border: '1px solid rgba(255, 152, 0, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="SMS Message Student">
+                              <MessageSquare size={13} />
+                            </a>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--color-text-muted)' }}>No student matching the current filters.</div>
+          )}
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderReminders = () => {
     const currentSystemMonth = new Date().toISOString().slice(0, 7);
@@ -7764,7 +8914,14 @@ function App() {
 
                     return (
                       <tr key={student.id}>
-                        <td data-label="Student Name" onClick={() => handleSelectStudent(student)} style={{ cursor: 'pointer', color: '#E50914', textDecoration: 'underline' }}>{student.studentName || student.name}</td>
+                        <td data-label="Student Name" onClick={() => handleSelectStudent(student)} style={{ cursor: 'pointer', color: '#E50914', textDecoration: 'underline', fontWeight: 700 }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            {student.studentName || student.name}
+                            {student.isPriority && (
+                              <Star size={14} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
+                            )}
+                          </span>
+                        </td>
                         <td data-label="Phone">{student.phone}</td>
                         <td data-label="Due Amount">
                           <span className="badge badge-red">₹{fees.totalDue}</span>
@@ -7894,12 +9051,10 @@ function App() {
         setLoggedInUser(cleanUsername);
       }
 
-      setCredentialModalSuccess('Credentials updated successfully!');
-      setTimeout(() => {
-        setIsCredentialModalOpen(false);
-        setEditingCredential(null);
-        setCredentialModalSuccess('');
-      }, 1000);
+      setIsCredentialModalOpen(false);
+      setEditingCredential(null);
+      setCredentialModalSuccess('');
+      setGlobalSuccess('Credentials updated successfully!');
     } catch (err) {
       setCredentialModalError(err.message);
     }
@@ -8856,13 +10011,13 @@ function App() {
                   </select>
                 </div>
                 <div className="form-group">
-                   <label>Select Batch</label>
-                   <select className="form-control" value={batchForm.batch} onChange={(e) => setBatchForm({ ...batchForm, batch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
-                     {modalBatches.map(opt => (
-                       <option key={opt.code} value={opt.code}>{opt.name} ({opt.schedule})</option>
-                     ))}
-                   </select>
-                 </div>
+                  <label>Select Batch</label>
+                  <select className="form-control" value={batchForm.batch} onChange={(e) => setBatchForm({ ...batchForm, batch: e.target.value, newUsername: '', newPassword: '', confirmPassword: '' })}>
+                    {modalBatches.map(opt => (
+                      <option key={opt.code} value={opt.code}>{opt.name} ({opt.schedule})</option>
+                    ))}
+                  </select>
+                </div>
                 <div className="form-group">
                   <label>New Username (Optional)</label>
                   <input type="text" className="form-control" placeholder="Enter new username" value={batchForm.newUsername} onChange={(e) => setBatchForm({ ...batchForm, newUsername: e.target.value })} />
@@ -8978,11 +10133,11 @@ function App() {
               <tbody>
                 {getFilteredBatchOptions(isSuper ? batchesBranchFilter : undefined, false).map((b) => {
                   const isDefault = DEFAULT_BATCH_OPTIONS.some(opt => opt.id === b.id);
-                  const studentCount = students.filter(s => 
-                    s.batch === b.id || 
+                  const studentCount = students.filter(s =>
+                    s.batch === b.id ||
                     (schedulesMatch(s.schedule, b.schedule) && !(s.batch && s.batch.toLowerCase().startsWith('batch')))
                   ).length;
-                  const dispBranch = branches.find(br => br.toLowerCase() === b.branch.toLowerCase()) || 
+                  const dispBranch = branches.find(br => br.toLowerCase() === b.branch.toLowerCase()) ||
                     (b.branch ? b.branch.charAt(0).toUpperCase() + b.branch.slice(1).toLowerCase() : 'Global');
 
                   return (
@@ -9434,8 +10589,8 @@ function App() {
                       onChange={(e) => {
                         const selectedBatchVal = e.target.value;
                         const matched = modalBatches.find(b => b.code === selectedBatchVal);
-                        setNewAdminForm(prev => ({ 
-                          ...prev, 
+                        setNewAdminForm(prev => ({
+                          ...prev,
                           batch: selectedBatchVal,
                           schedule: matched ? matched.schedule : ''
                         }));
@@ -9611,8 +10766,8 @@ function App() {
                       onChange={(e) => {
                         const selectedBatchVal = e.target.value;
                         const matched = modalBatches.find(b => b.code === selectedBatchVal);
-                        setEditingAdmin(prev => ({ 
-                          ...prev, 
+                        setEditingAdmin(prev => ({
+                          ...prev,
                           batch: selectedBatchVal,
                           schedule: matched ? matched.schedule : ''
                         }));
@@ -10096,6 +11251,27 @@ function App() {
         });
     };
 
+    const handleToggleAllowBranchAdminChangeBelt = (val) => {
+      setSettingsError('');
+      setSettingsSuccess('');
+      fetch(`${API_BASE_URL}/system-settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowBranchAdminChangeBelt: val })
+      })
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to update system setting');
+          return res.json();
+        })
+        .then(data => {
+          setAllowBranchAdminChangeBelt(!!data.allowBranchAdminChangeBelt);
+          setSettingsSuccess('Grading system settings updated successfully!');
+        })
+        .catch(err => {
+          setSettingsError('Error updating setting: ' + err.message);
+        });
+    };
+
     return (
       <div className="settings-view" style={{ maxWidth: '800px', margin: '0 auto' }}>
         {settingsError && <div style={{ color: '#E50914', marginBottom: '1.5rem', background: 'rgba(229, 9, 20, 0.1)', padding: '1rem', borderRadius: '4px', border: '1px solid rgba(229, 9, 20, 0.3)', fontWeight: 500 }}>{settingsError}</div>}
@@ -10103,8 +11279,26 @@ function App() {
 
         {isSuper && (
           <>
-
-
+            {/* Grading System Settings */}
+            <div className="panel" style={{ marginBottom: '2rem' }}>
+              <div className="panel-header" style={{ marginBottom: '1rem' }}>
+                <h3 className="panel-title">Grading System Settings</h3>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', color: 'var(--color-text-main)', fontSize: '0.95rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={allowBranchAdminChangeBelt}
+                    onChange={(e) => handleToggleAllowBranchAdminChangeBelt(e.target.checked)}
+                    style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                  />
+                  <span>Allow Branch Admins to manually change student Present Grad level and Join Date</span>
+                </label>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                  By default, Branch Admins can only change a student's grade level by conducting grading tests (marking Pass). When this option is enabled, Branch Admins can also manually override the Present Grad level and Join Date inside the Student Grading Edit form.
+                </p>
+              </div>
+            </div>
 
             {/* Admin Accounts Settings */}
             <div className="panel" style={{ marginBottom: '2rem' }}>
@@ -10646,7 +11840,7 @@ function App() {
                 </button>
               </form>
               <button type="button" className="btn-secondary animate-item-7" style={{ width: '100%', justifyContent: 'center', marginTop: '0.5rem', display: 'inline-flex', alignItems: 'center', gap: '8px', height: '38px' }} disabled={isLoggingIn} onClick={() => {
-                setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: selectedBranchLogin, photo: null, trainer: '', art: '' });
+                setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: selectedBranchLogin, photo: null });
                 setIsAddModalOpen(true);
               }}>
                 <UserPlus size={16} /> Enroll New Student
@@ -11123,7 +12317,7 @@ function App() {
           navigator.userAgentData.getHighEntropyValues(['model']).then(uaData => {
             if (uaData && uaData.model) devName = uaData.model;
           });
-        } catch (err) {}
+        } catch (err) { }
       }
 
       fetch(`${API_BASE_URL}/login`, {
@@ -11179,9 +12373,9 @@ function App() {
             &lt;DEV_PORTAL&gt;
           </h2>
           <p className="animate-item-2" style={{ color: 'rgba(0, 255, 100, 0.7)', fontSize: '0.8rem', marginBottom: '1.5rem', fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase', fontFamily: 'monospace' }}>Restricted System Control</p>
-          
+
           {loginError && <div style={{ color: '#ff453a', marginBottom: '1rem', background: 'rgba(255, 69, 58, 0.1)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(255, 69, 58, 0.3)', fontSize: '0.85rem' }}>{loginError}</div>}
-          
+
           <form onSubmit={handleDevLoginSubmit}>
             <div className="form-group animate-item-3" style={{ textAlign: 'left', marginBottom: '0.85rem' }}>
               <label style={{ marginBottom: '0.25rem', fontSize: '0.85rem', color: 'rgba(0, 255, 100, 0.8)', fontFamily: 'monospace' }}>Developer Username</label>
@@ -11210,15 +12404,15 @@ function App() {
       }
       const mode = maintenanceMode;
       if (mode === 'all') return true;
-      
+
       const isAd = userRole === 'superadmin';
       const isBr = userRole === 'branchadmin';
       const isTr = userRole === 'trainer' || userRole === 'coordinator';
-      
+
       if (mode === 'admin' && isAd) return true;
       if (mode === 'branch' && isBr) return true;
       if (mode === 'batch' && isTr) return true;
-      
+
       if (mode === 'branch-batch' && (isBr || isTr)) return true;
       if (mode === 'batch-admin' && (isTr || isAd)) return true;
       if (mode === 'admin-branch' && (isAd || isBr)) return true;
@@ -11403,9 +12597,16 @@ function App() {
           <a className={`nav-item ${currentView === 'reminders' ? 'active' : ''}`} onClick={() => setCurrentView('reminders')}>
             <Bell className="nav-icon" /> <span>Reminders</span>
           </a>
-          <a className={`nav-item ${currentView === 'performance' ? 'active' : ''}`} onClick={() => setCurrentView('performance')}>
-            <TrendingUp className="nav-icon" /> <span>Performance</span>
-          </a>
+          {(userRole === 'superadmin' || userRole === 'developer' || userRole === 'branchadmin') && (
+            <a className={`nav-item ${currentView === 'performance' ? 'active' : ''}`} onClick={() => setCurrentView('performance')}>
+              <TrendingUp className="nav-icon" /> <span>Performance</span>
+            </a>
+          )}
+          {(userRole === 'superadmin' || userRole === 'developer' || userRole === 'branchadmin') && (
+            <a className={`nav-item ${currentView === 'grading' ? 'active' : ''}`} onClick={() => { setCurrentView('grading'); fetchGradingStudents(); }}>
+              <Award className="nav-icon" /> <span>Grading</span>
+            </a>
+          )}
           <div style={{ flex: 1 }}></div>
           {(isAdminUser(loggedInUser) || isBranchAdmin(loggedInUser)) && (
             <a className={`nav-item ${currentView === 'credentials-list' ? 'active' : ''}`} onClick={() => setCurrentView('credentials-list')}>
@@ -11439,7 +12640,7 @@ function App() {
           </a>
         </nav>
       </aside>
- 
+
       <main className="main-content">
         {isSystemUnderMaintenance && (
           <div className="maintenance-alert-banner-static">
@@ -11453,7 +12654,7 @@ function App() {
             <span><strong>Upcoming Maintenance Notice:</strong> Portal login will be restricted from {formatMaintenanceTime(maintenanceStart)} to {formatMaintenanceTime(maintenanceEnd)}. Please save your work beforehand.</span>
           </div>
         )}
- 
+
         <header className="header">
           <div className="header-main-row">
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -11468,6 +12669,7 @@ function App() {
                 {currentView === 'performance' && 'Student Performance'}
                 {currentView === 'settings' && 'Account Settings'}
                 {currentView === 'credentials-list' && 'Branch & Batch Mapping'}
+                {currentView === 'grading' && 'Student Belt Grading'}
               </h1>
             </div>
 
@@ -11476,71 +12678,73 @@ function App() {
             </div>
           </div>
 
-          <div className="header-actions">
-            {/* Branch Filter Selector */}
-            <div style={{ position: 'relative' }}>
-              <select
-                className="form-control"
-                style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '135px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
-                value={branchFilter}
-                onChange={(e) => setBranchFilter(e.target.value)}
-                disabled={!isAdminUser(loggedInUser)}
-              >
-                {isAdminUser(loggedInUser) ? (
-                  <>
-                    {branches.map(b => (
-                      <option key={b} value={b}>{b}</option>
-                    ))}
-                    <option value="All">All Branches</option>
-                  </>
-                ) : (
-                  <option value={branchFilter}>{branchFilter}</option>
-                )}
-              </select>
-            </div>
-
-            {/* Batch Filter Selector */}
-            <div style={{ position: 'relative' }}>
-              <select
-                className="form-control"
-                style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '135px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
-                value={batchFilter}
-                onChange={(e) => setBatchFilter(e.target.value)}
-                disabled={isBatchAdminUser(loggedInUser)}
-              >
-                <option value="All">All Batches</option>
-                {getFilteredBatchOptions().map(opt => (
-                  <option key={opt.id} value={opt.id}>{opt.name}</option>
-                ))}
-              </select>
-            </div>
-            {/* Status Filter Selector */}
-            {(currentView === 'dashboard' || currentView === 'performance') && (
+          {!(currentView === 'grading' || currentView === 'settings' || currentView === 'credentials-list' || currentView === 'performance') && (
+            <div className="header-actions">
+              {/* Branch Filter Selector */}
               <div style={{ position: 'relative' }}>
                 <select
                   className="form-control"
-                  style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '120px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
+                  style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '135px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
+                  value={branchFilter}
+                  onChange={(e) => setBranchFilter(e.target.value)}
+                  disabled={!isAdminUser(loggedInUser)}
                 >
-                  <option value="Active">Active Only</option>
-                  <option value="Inactive">Inactive Only</option>
-                  <option value="All">All Students</option>
+                  {isAdminUser(loggedInUser) ? (
+                    <>
+                      {branches.map(b => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                      <option value="All">All Branches</option>
+                    </>
+                  ) : (
+                    <option value={branchFilter}>{branchFilter}</option>
+                  )}
                 </select>
               </div>
-            )}
-            <div style={{ position: 'relative' }}>
-              <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
-              <input
-                type="text"
-                placeholder="Search students..."
-                className="form-control"
-                style={{ paddingLeft: '32px', width: '180px', height: '38px', paddingTop: 0, paddingBottom: 0, fontSize: '0.85rem' }}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
+
+              {/* Batch Filter Selector */}
+              <div style={{ position: 'relative' }}>
+                <select
+                  className="form-control"
+                  style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '135px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
+                  value={batchFilter}
+                  onChange={(e) => setBatchFilter(e.target.value)}
+                  disabled={isBatchAdminUser(loggedInUser)}
+                >
+                  <option value="All">All Batches</option>
+                  {getFilteredBatchOptions().map(opt => (
+                    <option key={opt.id} value={opt.id}>{opt.name}</option>
+                  ))}
+                </select>
+              </div>
+              {/* Status Filter Selector */}
+              {(currentView === 'dashboard' || currentView === 'performance') && (
+                <div style={{ position: 'relative' }}>
+                  <select
+                    className="form-control"
+                    style={{ padding: '0.5rem 0.75rem', paddingRight: '1.75rem', width: '120px', height: '38px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.85rem' }}
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                  >
+                    <option value="Active">Active Only</option>
+                    <option value="Inactive">Inactive Only</option>
+                    <option value="All">All Students</option>
+                  </select>
+                </div>
+              )}
+              <div style={{ position: 'relative' }}>
+                <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+                <input
+                  type="text"
+                  placeholder="Search students..."
+                  className="form-control"
+                  style={{ paddingLeft: '32px', width: '180px', height: '38px', paddingTop: 0, paddingBottom: 0, fontSize: '0.85rem' }}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="header-profile-section" style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexShrink: 0 }}>
             {/* Notification Bell Dropdown */}
@@ -11710,248 +12914,260 @@ function App() {
 
         <div className="content-area">
           {currentView === 'dashboard' && (
-            <>
-              <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', marginBottom: '2rem' }}>
-                <div className="stat-card">
-                  <div className="stat-icon-wrapper"><Users className="stat-icon" /></div>
-                  <div className="stat-details">
-                    <h3>Active Students</h3>
-                    <p className="stat-value">{metrics.totalStudents}</p>
+            lockDashboardPage && userRole !== 'developer' ? renderSectionMaintenance('Dashboard') : (
+              <>
+                <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', marginBottom: '2rem' }}>
+                  <div className="stat-card">
+                    <div className="stat-icon-wrapper"><Users className="stat-icon" /></div>
+                    <div className="stat-details">
+                      <h3>Active Students</h3>
+                      <p className="stat-value">{metrics.totalStudents}</p>
+                    </div>
                   </div>
-                </div>
-                <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setCurrentView('attendance')}>
-                  <div className="stat-icon-wrapper" style={{ background: 'rgba(76, 175, 80, 0.1)' }}><Activity className="stat-icon" style={{ color: '#4CAF50' }} /></div>
-                  <div className="stat-details">
-                    <h3>Today's Attendance</h3>
-                    <p className="stat-value" style={{ color: '#4CAF50' }}>
-                      {metrics.presentToday} P / {metrics.absentToday} A
-                    </p>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                      Attendance Rate: {metrics.attendancePercentage}%
-                    </span>
+                  <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setCurrentView('attendance')}>
+                    <div className="stat-icon-wrapper" style={{ background: 'rgba(76, 175, 80, 0.1)' }}><Activity className="stat-icon" style={{ color: '#4CAF50' }} /></div>
+                    <div className="stat-details">
+                      <h3>Today's Attendance</h3>
+                      <p className="stat-value" style={{ color: '#4CAF50' }}>
+                        {metrics.presentToday} P / {metrics.absentToday} A
+                      </p>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                        Attendance Rate: {metrics.attendancePercentage}%
+                      </span>
+                    </div>
                   </div>
-                </div>
-                <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setCurrentView('reminders')}>
-                  <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 215, 0, 0.1)' }}>
-                    <Wallet className="stat-icon" style={{ color: '#FFD700' }} />
+                  <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setCurrentView('reminders')}>
+                    <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 215, 0, 0.1)' }}>
+                      <Wallet className="stat-icon" style={{ color: '#FFD700' }} />
+                    </div>
+                    <div className="stat-details">
+                      <h3>Fee Collection</h3>
+                      <p className="stat-value" style={{ color: '#FFD700' }}>
+                        ₹{metrics.feeCollection} / ₹{metrics.pendingFees}
+                      </p>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                        Pending: ₹{metrics.pendingFees}
+                      </span>
+                    </div>
                   </div>
-                  <div className="stat-details">
-                    <h3>Fee Collection</h3>
-                    <p className="stat-value" style={{ color: '#FFD700' }}>
-                      ₹{metrics.feeCollection} / ₹{metrics.pendingFees}
-                    </p>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                      Pending: ₹{metrics.pendingFees}
-                    </span>
-                  </div>
-                </div>
-                <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => {
-                  const classesEl = document.getElementById('today-classes-panel');
-                  if (classesEl) classesEl.scrollIntoView({ behavior: 'smooth' });
-                }}>
-                  <div className="stat-icon-wrapper" style={{ background: 'rgba(156, 39, 176, 0.1)' }}>
-                    <CalendarDays className="stat-icon" style={{ color: '#9C27B0' }} />
-                  </div>
-                  <div className="stat-details">
-                    <h3>Live Classes Today</h3>
-                    <p className="stat-value" style={{ color: '#9C27B0' }}>
-                      {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length} {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length === 1 ? 'Class' : 'Classes'}
-                    </p>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px', display: 'inline-block' }}>
-                      {metrics.filteredClasses.filter(c => c.status === 'cancelled').length > 0 ? (
-                        <span style={{ color: '#ff453a', marginRight: '6px', fontWeight: 'bold' }}>{metrics.filteredClasses.filter(c => c.status === 'cancelled').length} Cancelled</span>
-                      ) : null}
-                      {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length > 0 
-                        ? `Next: ${metrics.filteredClasses.filter(c => c.status !== 'cancelled')[0].className} (${metrics.filteredClasses.filter(c => c.status !== 'cancelled')[0].startTime})` 
-                        : 'No active classes'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="panel">
-                <div className="panel-header">
-                  <h3 className="panel-title">Student Details</h3>
-                  <button className="btn-primary" onClick={() => {
-                    const defaultBranch = getLoggedInUserBranch();
-                    const initialBranch = (defaultBranch === 'All' || !defaultBranch) ? (branches[0] || 'Kuttiady') : defaultBranch;
-                    const firstBatch = getFilteredBatchOptions(initialBranch)[0];
-                    setNewStudent({
-                      name: '',
-                      age: '',
-                      dob: '',
-                      phone: '',
-                      parentPhone: '',
-                      belt: 'White',
-                      joinDate: new Date().toISOString().split('T')[0],
-                      branch: initialBranch,
-                      schedule: firstBatch ? firstBatch.schedule : 'Mon-Thu',
-                      batch: firstBatch ? firstBatch.id : 'Morning',
-                      photo: null,
-                      trainer: firstBatch ? firstBatch.trainer || '' : '',
-                      art: ''
-                    });
-                    setIsAddModalOpen(true);
+                  <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => {
+                    const classesEl = document.getElementById('today-classes-panel');
+                    if (classesEl) classesEl.scrollIntoView({ behavior: 'smooth' });
                   }}>
-                    <UserPlus size={16} /> Add Student
-                  </button>
+                    <div className="stat-icon-wrapper" style={{ background: 'rgba(156, 39, 176, 0.1)' }}>
+                      <CalendarDays className="stat-icon" style={{ color: '#9C27B0' }} />
+                    </div>
+                    <div className="stat-details">
+                      <h3>Live Classes Today</h3>
+                      <p className="stat-value" style={{ color: '#9C27B0' }}>
+                        {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length} {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length === 1 ? 'Class' : 'Classes'}
+                      </p>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px', display: 'inline-block' }}>
+                        {metrics.filteredClasses.filter(c => c.status === 'cancelled').length > 0 ? (
+                          <span style={{ color: '#ff453a', marginRight: '6px', fontWeight: 'bold' }}>{metrics.filteredClasses.filter(c => c.status === 'cancelled').length} Cancelled</span>
+                        ) : null}
+                        {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length > 0
+                          ? `Next: ${metrics.filteredClasses.filter(c => c.status !== 'cancelled')[0].className} (${metrics.filteredClasses.filter(c => c.status !== 'cancelled')[0].startTime})`
+                          : 'No active classes'}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                {searchedStudents.length > 0 ? (
-                  <div className="table-responsive">
-                    <table className="data-table responsive-table-cards">
-                      <thead>
-                        <tr>
-                          <th>Name</th>
-                          <th>Batch Schedule</th>
-                          <th>Belt Level</th>
-                          <th>Phone</th>
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {searchedStudents.map(student => (
-                          <tr key={student.id}>
-                            <td data-label="Name">
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={() => handleSelectStudent(student)}>
-                                {student.photo ? (
-                                  <img src={student.photo} alt="" style={{ width: '30px', height: '40px', borderRadius: '4px', objectFit: 'cover' }} />
-                                ) : (
-                                  <div style={{ width: '30px', height: '40px', borderRadius: '4px', background: 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem', color: 'white', textDecoration: 'none' }}>
-                                    {(student.studentName || student.name).charAt(0)}
-                                  </div>
-                                )}
-                                <span style={{
-                                  fontWeight: 500,
-                                  color: student.status === 'Inactive' ? 'var(--color-text-muted)' : '#E50914',
-                                  textDecoration: 'underline'
-                                }}>
-                                  {student.studentName || student.name}
-                                </span>
-                                {student.status === 'Inactive' && (
-                                  <span className="badge" style={{ background: 'rgba(244, 67, 54, 0.15)', color: '#F44336', border: '1px solid rgba(244, 67, 54, 0.3)', marginLeft: '8px' }}>
-                                    Inactive
+
+                <div className="panel">
+                  <div className="panel-header">
+                    <h3 className="panel-title">Student Details</h3>
+                    <button className="btn-primary" onClick={() => {
+                      const defaultBranch = getLoggedInUserBranch();
+                      const initialBranch = (defaultBranch === 'All' || !defaultBranch) ? (branches[0] || 'Kuttiady') : defaultBranch;
+                      const firstBatch = getFilteredBatchOptions(initialBranch)[0];
+                      setNewStudent({
+                        name: '',
+                        age: '',
+                        dob: '',
+                        phone: '',
+                        parentPhone: '',
+                        belt: 'White',
+                        joinDate: new Date().toISOString().split('T')[0],
+                        branch: initialBranch,
+                        schedule: firstBatch ? firstBatch.schedule : 'Mon-Thu',
+                        batch: firstBatch ? firstBatch.id : 'Morning',
+                        photo: null
+                      });
+                      setIsAddModalOpen(true);
+                    }}>
+                      <UserPlus size={16} /> Add Student
+                    </button>
+                  </div>
+                  {searchedStudents.length > 0 ? (
+                    <div className="table-responsive">
+                      <table className="data-table responsive-table-cards">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Batch Schedule</th>
+                            <th>Present Grad</th>
+                            <th>Phone</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {searchedStudents.map(student => (
+                            <tr key={student.id}>
+                              <td data-label="Name">
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={() => handleSelectStudent(student)}>
+                                  {student.photo ? (
+                                    <img src={student.photo} alt="" style={{ width: '30px', height: '40px', borderRadius: '4px', objectFit: 'cover' }} />
+                                  ) : (
+                                    <div style={{ width: '30px', height: '40px', borderRadius: '4px', background: 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem', color: 'white', textDecoration: 'none' }}>
+                                      {(student.studentName || student.name).charAt(0)}
+                                    </div>
+                                  )}
+                                  <span style={{
+                                    fontWeight: 700,
+                                    color: student.status === 'Inactive' ? 'var(--color-text-muted)' : '#E50914',
+                                    textDecoration: 'underline'
+                                  }}>
+                                    {student.studentName || student.name}
                                   </span>
-                                )}
-                              </div>
-                            </td>
-                            <td data-label="Batch Schedule">
-                              <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', marginRight: '8px' }}>{student.branch}</span>
-                              <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}</span>
-                            </td>
-                            <td data-label="Present Grad"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
-                            <td data-label="Phone" style={{ color: 'var(--color-text-muted)' }}>{student.phone}</td>
-                            <td data-label="Actions">
-                              <div className="actions-flex-container">
-                                <button className="btn-icon" onClick={() => handleDeleteStudent(student.id)} style={{ color: '#F44336' }} title="Delete">
-                                  <Trash2 size={18} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>No students found.</div>
-                )}
-              </div>
-
-              {/* Scheduled Classes Panel */}
-              <div id="today-classes-panel" className="panel" style={{ marginTop: '2rem' }}>
-                <div className="panel-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <CalendarDays size={20} color="var(--color-primary)" /> Today's Scheduled Classes
-                  </h3>
-                  <button className="btn-primary btn-small" onClick={handleOpenAddClass}>
-                    + Schedule Class
-                  </button>
-                </div>
-                {metrics.filteredClasses.length > 0 ? (
-                  <div className="table-responsive">
-                    <table className="data-table responsive-table-cards">
-                      <thead>
-                        <tr>
-                          <th>Class Name</th>
-                          <th>Branch / Batch / Slot</th>
-                          <th>Trainer</th>
-                          <th>Status</th>
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {metrics.filteredClasses.map(cls => (
-                          <tr key={cls._id}>
-                            <td data-label="Class Name" style={{ fontWeight: 600, color: 'white' }}>
-                              {cls.className}
-                              {cls.subject && <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 400 }}>Subj: {cls.subject}</span>}
-                            </td>
-                            <td data-label="Branch / Batch / Slot">
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
-                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                                  <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)' }}>{cls.branch}</span>
-                                  <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromCode(cls.batch, cls.branch)}</span>
+                                  {student.isPriority && (
+                                    <Star size={14} fill="#FFD700" color="#FFD700" style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
+                                  )}
+                                  {student.status === 'Inactive' && (
+                                    <span className="badge" style={{ background: 'rgba(244, 67, 54, 0.15)', color: '#F44336', border: '1px solid rgba(244, 67, 54, 0.3)', marginLeft: '8px' }}>
+                                      Inactive
+                                    </span>
+                                  )}
                                 </div>
-                                {(cls.schedule || cls.slotType) && (
-                                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                                    {cls.schedule && <span className="badge" style={{ background: 'rgba(54, 162, 235, 0.15)', color: '#36A2EB', border: '1px solid rgba(54, 162, 235, 0.2)', fontSize: '0.75rem' }}>{cls.schedule}</span>}
-                                    {cls.slotType && <span className="badge" style={{ background: 'rgba(75, 192, 192, 0.15)', color: '#4BC0C0', border: '1px solid rgba(75, 192, 192, 0.2)', fontSize: '0.75rem' }}>{cls.slotType}</span>}
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                            <td data-label="Trainer" style={{ color: 'var(--color-text-muted)' }}>
-                              {cls.trainer}
-                            </td>
-                            <td data-label="Status">
-                              {cls.status === 'cancelled' ? (
-                                <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#ff453a', border: '1px solid rgba(229, 9, 20, 0.3)' }} title={cls.cancellationReason}>
-                                  Cancelled {cls.cancellationReason ? `(${cls.cancellationReason})` : ''}
-                                </span>
-                              ) : (
-                                <span className="badge badge-green">Scheduled</span>
-                              )}
-                            </td>
-                            <td data-label="Actions">
-                              <div className="actions-flex-container">
-                                <button className="btn-icon" onClick={() => handleOpenEditClass(cls)} style={{ color: '#2196F3' }} title="Edit Details">
-                                  <Settings size={16} />
-                                </button>
-                                {cls.status === 'cancelled' ? (
-                                  <button className="btn-icon" onClick={() => handleRestoreClass(cls)} style={{ color: '#30d158' }} title="Restore Class">
-                                    <CheckCircle size={16} />
+                              </td>
+                              <td data-label="Batch Schedule">
+                                <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', marginRight: '8px' }}>{student.branch}</span>
+                                <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}</span>
+                              </td>
+                              <td data-label="Present Grad"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
+                              <td data-label="Phone" style={{ color: 'var(--color-text-muted)' }}>{student.phone}</td>
+                              <td data-label="Actions">
+                                <div className="actions-flex-container">
+                                  <button className="btn-icon" onClick={() => handleDeleteStudent(student.id)} style={{ color: '#F44336' }} title="Delete">
+                                    <Trash2 size={18} />
                                   </button>
-                                ) : (
-                                  <button className="btn-icon" onClick={() => handleCancelClass(cls)} style={{ color: '#ff453a' }} title="Cancel Class">
-                                    <XCircle size={16} />
-                                  </button>
-                                )}
-                                {!cls.isVirtual && (
-                                  <button className="btn-icon" onClick={() => handleDeleteClass(cls._id)} style={{ color: '#F44336' }} title="Delete">
-                                    <Trash2 size={16} />
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No classes scheduled for today.</div>
-                )}
-              </div>
-            </>
-          )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>No students found.</div>
+                  )}
+                </div>
 
-          {currentView === 'attendance' && renderAttendance()}
+                {/* Scheduled Classes Panel */}
+                <div id="today-classes-panel" className="panel" style={{ marginTop: '2rem' }}>
+                  <div className="panel-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <CalendarDays size={20} color="var(--color-primary)" /> Today's Scheduled Classes
+                    </h3>
+                    <button className="btn-primary btn-small" onClick={handleOpenAddClass}>
+                      + Schedule Class
+                    </button>
+                  </div>
+                  {metrics.filteredClasses.length > 0 ? (
+                    <div className="table-responsive">
+                      <table className="data-table responsive-table-cards">
+                        <thead>
+                          <tr>
+                            <th>Class Name</th>
+                            <th>Branch / Batch / Slot</th>
+                            <th>Trainer</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {metrics.filteredClasses.map(cls => (
+                            <tr key={cls._id}>
+                              <td data-label="Class Name" style={{ fontWeight: 600, color: 'white' }}>
+                                {cls.className}
+                                {cls.subject && <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 400 }}>Subj: {cls.subject}</span>}
+                              </td>
+                              <td data-label="Branch / Batch / Slot">
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                    <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)' }}>{cls.branch}</span>
+                                    <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromCode(cls.batch, cls.branch)}</span>
+                                  </div>
+                                  {(cls.schedule || cls.slotType) && (
+                                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                      {cls.schedule && <span className="badge" style={{ background: 'rgba(54, 162, 235, 0.15)', color: '#36A2EB', border: '1px solid rgba(54, 162, 235, 0.2)', fontSize: '0.75rem' }}>{cls.schedule}</span>}
+                                      {cls.slotType && <span className="badge" style={{ background: 'rgba(75, 192, 192, 0.15)', color: '#4BC0C0', border: '1px solid rgba(75, 192, 192, 0.2)', fontSize: '0.75rem' }}>{cls.slotType}</span>}
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                              <td data-label="Trainer" style={{ color: 'var(--color-text-muted)' }}>
+                                {cls.trainer}
+                              </td>
+                              <td data-label="Status">
+                                {cls.status === 'cancelled' ? (
+                                  <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#ff453a', border: '1px solid rgba(229, 9, 20, 0.3)' }} title={cls.cancellationReason}>
+                                    Cancelled {cls.cancellationReason ? `(${cls.cancellationReason})` : ''}
+                                  </span>
+                                ) : (
+                                  <span className="badge badge-green">Scheduled</span>
+                                )}
+                              </td>
+                              <td data-label="Actions">
+                                <div className="actions-flex-container">
+                                  <button className="btn-icon" onClick={() => handleOpenEditClass(cls)} style={{ color: '#2196F3' }} title="Edit Details">
+                                    <Settings size={16} />
+                                  </button>
+                                  {cls.status === 'cancelled' ? (
+                                    <button className="btn-icon" onClick={() => handleRestoreClass(cls)} style={{ color: '#30d158' }} title="Restore Class">
+                                      <CheckCircle size={16} />
+                                    </button>
+                                  ) : (
+                                    <button className="btn-icon" onClick={() => handleCancelClass(cls)} style={{ color: '#ff453a' }} title="Cancel Class">
+                                      <XCircle size={16} />
+                                    </button>
+                                  )}
+                                  {!cls.isVirtual && (
+                                    <button className="btn-icon" onClick={() => handleDeleteClass(cls._id)} style={{ color: '#F44336' }} title="Delete">
+                                      <Trash2 size={16} />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No classes scheduled for today.</div>
+                  )}
+                </div>
+              </>
+            ))}
+
+          {currentView === 'attendance' && (lockAttendancePage && userRole !== 'developer' ? renderSectionMaintenance('Attendance Tracking') : renderAttendance())}
           {currentView === 'fees' && (lockFeesPage && userRole !== 'developer' ? renderSectionMaintenance('Fees Portal') : renderFees())}
-          {currentView === 'student-fees' && renderStudentFees()}
-          {currentView === 'reminders' && renderReminders()}
-          {currentView === 'performance' && (lockPerformancePage && userRole !== 'developer' ? renderSectionMaintenance('Performance Portal') : renderPerformance())}
+          {currentView === 'student-fees' && (lockFeesPage && userRole !== 'developer' ? renderSectionMaintenance('Fees Portal') : renderStudentFees())}
+          {currentView === 'reminders' && (lockRemindersPage && userRole !== 'developer' ? renderSectionMaintenance('Alerts & Reminders') : renderReminders())}
+          {currentView === 'performance' && (
+            (userRole === 'trainer' || userRole === 'coordinator') ? (
+              <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
+                <h3 className="panel-title" style={{ color: '#E50914' }}>Access Denied</h3>
+                <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Trainers do not have permission to view financial performance details.</p>
+              </div>
+            ) : (
+              lockPerformancePage && userRole !== 'developer' ? renderSectionMaintenance('Performance Portal') : renderPerformance()
+            )
+          )}
           {currentView === 'settings' && renderSettings()}
           {currentView === 'credentials-list' && (lockBranchBatchMappingPage && userRole !== 'developer' ? renderSectionMaintenance('Branch & Batch Mapping') : renderCredentialsList())}
+          {currentView === 'grading' && (lockGradingPage && userRole !== 'developer' ? renderSectionMaintenance('Student Belt Grading') : renderGrading())}
         </div>
       </main>
 
@@ -11969,45 +13185,45 @@ function App() {
             </div>
 
             {isEditingStudent ? (
-               <form onSubmit={(e) => {
-                 e.preventDefault();
+              <form onSubmit={(e) => {
+                e.preventDefault();
 
-                 const phoneClean = editingStudentData.phone.trim();
-                 if (!/^\d{10}$/.test(phoneClean)) {
-                   setGlobalError("Mobile number must be exactly 10 digits.");
-                   return;
-                 }
+                const phoneClean = editingStudentData.phone.trim();
+                if (!/^\d{10}$/.test(phoneClean)) {
+                  setGlobalError("Mobile number must be exactly 10 digits.");
+                  return;
+                }
 
-                 const updatedStudent = { ...editingStudentData, phone: phoneClean };
-                 setStudents(sortStudentsAlphabetically(students.map(s => s.id === updatedStudent.id ? updatedStudent : s)));
-                 setSelectedStudent(updatedStudent);
-                 setIsEditingStudent(false);
+                const updatedStudent = { ...editingStudentData, phone: phoneClean };
+                setStudents(sortStudentsAlphabetically(students.map(s => s.id === updatedStudent.id ? updatedStudent : s)));
+                setSelectedStudent(updatedStudent);
+                setIsEditingStudent(false);
 
-                 fetch(`${API_BASE_URL}/students/${updatedStudent.id}`, {
-                   method: 'PUT',
-                   headers: { 'Content-Type': 'application/json' },
-                   body: JSON.stringify(updatedStudent)
-                 })
-                   .then(res => {
-                     if (!res.ok) {
-                       return res.json().then(errData => {
-                         throw new Error(errData.error || 'Failed to update student profile');
-                       });
-                     }
-                     return res.json();
-                   })
-                   .then(() => {
-                     setGlobalSuccess("Student profile updated successfully.");
-                     reloadAllAppData();
-                   })
-                   .catch(err => {
-                     console.error("Error updating student profile:", err);
-                     setGlobalError(`Failed to update student: ${err.message}`);
-                     reloadAllAppData();
-                   });
+                fetch(`${API_BASE_URL}/students/${updatedStudent.id}`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(updatedStudent)
+                })
+                  .then(res => {
+                    if (!res.ok) {
+                      return res.json().then(errData => {
+                        throw new Error(errData.error || 'Failed to update student profile');
+                      });
+                    }
+                    return res.json();
+                  })
+                  .then(() => {
+                    setGlobalSuccess("Student profile updated successfully.");
+                    reloadAllAppData();
+                  })
+                  .catch(err => {
+                    console.error("Error updating student profile:", err);
+                    setGlobalError(`Failed to update student: ${err.message}`);
+                    reloadAllAppData();
+                  });
 
-                 setEditingStudentData(null);
-               }}>
+                setEditingStudentData(null);
+              }}>
                 <div style={{ padding: '1rem 0' }}>
                   <div className="form-group">
                     <label>Full Name</label>
@@ -12255,6 +13471,18 @@ function App() {
                         <option value="Inactive">Inactive</option>
                       </select>
                     </div>
+                    <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '1rem', marginBottom: '1.25rem' }}>
+                      <input
+                        type="checkbox"
+                        id="edit-is-priority"
+                        checked={editingStudentData.isPriority || false}
+                        onChange={(e) => setEditingStudentData({ ...editingStudentData, isPriority: e.target.checked })}
+                        style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                      />
+                      <label htmlFor="edit-is-priority" style={{ color: '#fff', fontSize: '0.9rem', cursor: 'pointer', margin: 0, userSelect: 'none' }}>
+                        Mark as Priority Student
+                      </label>
+                    </div>
                   </div>
                 </div>
                 <div className="modal-actions">
@@ -12380,7 +13608,7 @@ function App() {
                             if (!year || !month) return null;
                             const daysInMonth = new Date(year, month, 0).getDate();
                             const firstDayIndex = new Date(year, month - 1, 1).getDay();
-                            
+
                             return (
                               <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '1rem' }}>
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', textAlign: 'center', fontWeight: 600, fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem' }}>
@@ -12400,12 +13628,12 @@ function App() {
                                     if (record) {
                                       status = (typeof record === 'object') ? (record.status || '') : String(record);
                                     }
-                                    
+
                                     const statusLower = status.toLowerCase();
                                     let cellBg = 'rgba(255, 255, 255, 0.03)';
                                     let cellBorder = '1px solid rgba(255, 255, 255, 0.05)';
                                     let cellColor = 'var(--color-text-light)';
-                                    
+
                                     if (statusLower === 'present') {
                                       cellBg = 'rgba(76, 175, 80, 0.15)';
                                       cellBorder = '1px solid rgba(76, 175, 80, 0.4)';
@@ -12423,7 +13651,7 @@ function App() {
                                       cellBorder = '1px solid rgba(255, 152, 0, 0.4)';
                                       cellColor = '#FF9800';
                                     }
-                                    
+
                                     return (
                                       <button
                                         key={`day-${dayNum}`}
@@ -12474,10 +13702,10 @@ function App() {
                                     );
                                   })}
                                 </div>
-                                
+
                                 {selectedCalendarDate && selectedCalendarDetail && (
                                   <div style={{ marginTop: '1rem', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--glass-border)', padding: '0.85rem', borderRadius: '10px', position: 'relative' }}>
-                                    <button 
+                                    <button
                                       type="button"
                                       style={{ position: 'absolute', top: '8px', right: '8px', background: 'transparent', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer' }}
                                       onClick={() => { setSelectedCalendarDate(null); setSelectedCalendarDetail(null); }}
@@ -12488,11 +13716,12 @@ function App() {
                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.8rem' }}>
                                       <div>
                                         <span style={{ color: 'var(--color-text-muted)' }}>Status: </span>
-                                        <strong style={{ color: 
-                                          selectedCalendarDetail.status.toLowerCase() === 'present' ? '#4CAF50' :
-                                          selectedCalendarDetail.status.toLowerCase() === 'absent' ? '#F44336' :
-                                          selectedCalendarDetail.status.toLowerCase() === 'holiday' ? '#2196F3' :
-                                          selectedCalendarDetail.status.toLowerCase() === 'leave' ? '#FF9800' : 'white'
+                                        <strong style={{
+                                          color:
+                                            selectedCalendarDetail.status.toLowerCase() === 'present' ? '#4CAF50' :
+                                              selectedCalendarDetail.status.toLowerCase() === 'absent' ? '#F44336' :
+                                                selectedCalendarDetail.status.toLowerCase() === 'holiday' ? '#2196F3' :
+                                                  selectedCalendarDetail.status.toLowerCase() === 'leave' ? '#FF9800' : 'white'
                                         }}>
                                           {selectedCalendarDetail.status.charAt(0).toUpperCase() + selectedCalendarDetail.status.slice(1)}
                                         </strong>
@@ -13180,6 +14409,18 @@ function App() {
               <div className="form-group">
                 <label>Joining Date</label>
                 <input type="date" className="form-control" required value={newStudent.joinDate} onChange={(e) => setNewStudent({ ...newStudent, joinDate: e.target.value })} />
+              </div>
+              <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '1rem', marginBottom: '1.25rem' }}>
+                <input
+                  type="checkbox"
+                  id="add-is-priority"
+                  checked={newStudent.isPriority || false}
+                  onChange={(e) => setNewStudent({ ...newStudent, isPriority: e.target.checked })}
+                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                />
+                <label htmlFor="add-is-priority" style={{ color: '#fff', fontSize: '0.9rem', cursor: 'pointer', margin: 0, userSelect: 'none' }}>
+                  Mark as Priority Student
+                </label>
               </div>
               <div className="form-group">
                 <label>Coupon Code (Optional)</label>

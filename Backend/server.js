@@ -103,7 +103,7 @@ let cachedSettings = {
   systemAlertMessage: '',
   sessionTimeoutMinutes: 60,
   minPasswordLength: 6,
-  failedLoginThreshold: 5,
+  failedLoginThreshold: 10,
   failedLoginBlockTimeMinutes: 15,
   logRetentionLimit: 1000
 };
@@ -306,6 +306,39 @@ function decryptStudent(student) {
   if (doc.dob) doc.dob = decrypt(doc.dob);
   if (doc.photo) doc.photo = decrypt(doc.photo);
   return doc;
+}
+
+// Grading Module helpers
+function calculateNextEligibleDate(baseDateStr) {
+  if (!baseDateStr || baseDateStr === 'N/A') return '';
+  try {
+    const parts = String(baseDateStr).split('-');
+    if (parts.length !== 3) return '';
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1; // 0-based
+    const day = parseInt(parts[2], 10);
+    if (isNaN(year) || isNaN(month) || isNaN(day)) return '';
+
+    const date = new Date(year, month, day);
+    date.setMonth(date.getMonth() + 4);
+
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  } catch (e) {
+    return '';
+  }
+}
+
+const BELT_ORDER = ['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'];
+
+function getNextBelt(currentBelt) {
+  const index = BELT_ORDER.findIndex(b => b.toLowerCase() === String(currentBelt || '').toLowerCase().trim());
+  if (index === -1 || index === BELT_ORDER.length - 1) {
+    return 'None';
+  }
+  return BELT_ORDER[index + 1];
 }
 
 // Attendance field helpers
@@ -1142,6 +1175,11 @@ async function loadSettingsCache() {
       settings.systemUpdateNotificationId = "default-help-release";
       needsUpdate = true;
     }
+
+    if (settings.failedLoginThreshold === 5 || !settings.failedLoginThreshold) {
+      settings.failedLoginThreshold = 10;
+      needsUpdate = true;
+    }
     
     if (needsUpdate) {
       await settings.save();
@@ -1168,6 +1206,11 @@ async function loadSettingsCache() {
     if (cachedSettings.lockPerformancePage === undefined) cachedSettings.lockPerformancePage = false;
     if (cachedSettings.lockBranchBatchMappingPage === undefined) cachedSettings.lockBranchBatchMappingPage = false;
     if (cachedSettings.lockFeesPage === undefined) cachedSettings.lockFeesPage = false;
+    if (cachedSettings.lockDashboardPage === undefined) cachedSettings.lockDashboardPage = false;
+    if (cachedSettings.lockAttendancePage === undefined) cachedSettings.lockAttendancePage = false;
+    if (cachedSettings.lockRemindersPage === undefined) cachedSettings.lockRemindersPage = false;
+    if (cachedSettings.lockGradingPage === undefined) cachedSettings.lockGradingPage = false;
+    if (cachedSettings.allowBranchAdminChangeBelt === undefined) cachedSettings.allowBranchAdminChangeBelt = false;
     console.log('[Settings Cache] Loaded from database:', cachedSettings);
   } catch (err) {
     console.error('[Settings Cache] Failed to load settings:', err);
@@ -2456,6 +2499,7 @@ app.post('/api/students', authenticateSession, async (req, res) => {
       nextId = lastStudent && lastStudent.id ? lastStudent.id + 1 : 1;
       
       req.body.id = nextId;
+      req.body.nextEligibleGradingDate = calculateNextEligibleDate(req.body.joinDate);
       const encryptedBody = encryptStudentData(req.body);
       const newStudent = new Student(encryptedBody);
       
@@ -2530,6 +2574,12 @@ app.put('/api/students/:id', authenticateSession, async (req, res) => {
       return res.status(400).json({ error: 'Parent Mobile number must be exactly 10 digits' });
     }
 
+    if (req.body.joinDate !== undefined) {
+      if (!student.gradingHistory || student.gradingHistory.length === 0) {
+        req.body.nextEligibleGradingDate = calculateNextEligibleDate(req.body.joinDate);
+      }
+    }
+
     const encryptedBody = encryptStudentData(req.body);
     const updated = await Student.findOneAndUpdate({ id: Number(id) }, encryptedBody, { new: true });
     res.json(decryptStudent(updated));
@@ -2559,6 +2609,202 @@ app.delete('/api/students/:id', authenticateSession, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ==========================================
+// --- GRADING MODULE API ENDPOINTS ---
+// ==========================================
+
+// 1. Get all students with grading fields (scoped by user permissions)
+app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+  try {
+    const { role, branch } = req.user;
+    let filter = {};
+
+    if (role === 'branchadmin') {
+      filter.branch = new RegExp(`^${branch}$`, 'i');
+    } else if (req.query.branch && req.query.branch.toLowerCase() !== 'all') {
+      filter.branch = new RegExp(`^${req.query.branch}$`, 'i');
+    }
+
+    const students = await Student.find(filter).select('-photo').lean();
+    
+    // Process and decrypt students, resolve dynamic nextEligibleGradingDate if empty
+    const processedStudents = students.map(s => {
+      const dec = decryptStudent(s);
+      
+      // Compute next eligible date dynamically if not set
+      if (!dec.nextEligibleGradingDate) {
+        dec.nextEligibleGradingDate = calculateNextEligibleDate(dec.joinDate);
+      }
+      
+      // Calculate eligibility status based on next eligible date
+      const todayStr = new Date().toISOString().split('T')[0];
+      dec.eligibilityStatus = (dec.nextEligibleGradingDate && todayStr >= dec.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
+      
+      // Next belt auto computation
+      dec.nextBelt = getNextBelt(dec.belt);
+      
+      return dec;
+    });
+
+    res.json(processedStudents);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Submit grading result (Pass/Fail)
+app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role, branch, username } = req.user;
+    const { result, gradingDate } = req.body;
+
+    if (!result || !['Pass', 'Fail'].includes(result)) {
+      return res.status(400).json({ error: 'Valid grading result (Pass or Fail) is required.' });
+    }
+    if (!gradingDate || !/^\d{4}-\d{2}-\d{2}$/.test(gradingDate)) {
+      return res.status(400).json({ error: 'Valid grading date (YYYY-MM-DD) is required.' });
+    }
+
+    const student = await Student.findOne({ id: Number(id) });
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found.' });
+    }
+
+    // Scoped branch check for branch admins
+    if (role === 'branchadmin' && student.branch.toLowerCase().trim() !== branch.toLowerCase().trim()) {
+      return res.status(403).json({ error: 'Unauthorized: cannot grade student in another branch.' });
+    }
+
+    const beltBefore = student.belt;
+    let beltAfter = beltBefore;
+
+    if (result === 'Pass') {
+      const nextBelt = getNextBelt(beltBefore);
+      if (nextBelt !== 'None') {
+        beltAfter = nextBelt;
+        student.belt = nextBelt;
+      }
+    }
+
+    const nextEligibleDate = calculateNextEligibleDate(gradingDate);
+
+    student.lastGradingDate = gradingDate;
+    student.lastGradingResult = result;
+    student.nextEligibleGradingDate = nextEligibleDate;
+
+    // Push entry to history
+    student.gradingHistory.push({
+      gradingDate,
+      beltBefore,
+      result,
+      beltAfter,
+      updatedBy: username,
+      createdAt: new Date()
+    });
+
+    await student.save();
+    
+    // Log action
+    addLog('api', `Graded student ${decrypt(student.name)} (ID: ${student.id}) - Result: ${result}, Belt After: ${beltAfter}`);
+
+    const returnedStudent = decryptStudent(student);
+    returnedStudent.nextBelt = getNextBelt(returnedStudent.belt);
+    const todayStr = new Date().toISOString().split('T')[0];
+    returnedStudent.eligibilityStatus = (returnedStudent.nextEligibleGradingDate && todayStr >= returnedStudent.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
+
+    res.json(returnedStudent);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. Edit grading details / info (manual override)
+app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role, branch } = req.user;
+    const { joinDate, lastGradingDate, belt } = req.body;
+
+    const student = await Student.findOne({ id: Number(id) });
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found.' });
+    }
+
+    // Scoped branch check for branch admins
+    if (role === 'branchadmin' && student.branch.toLowerCase().trim() !== branch.toLowerCase().trim()) {
+      return res.status(403).json({ error: 'Unauthorized: cannot edit student in another branch.' });
+    }
+
+    // Check branchadmin limitations: cannot edit joinDate or belt level unless allowBranchAdminChangeBelt is true
+    if (role === 'branchadmin') {
+      const systemSettingsObj = await SystemSetting.findOne({ configKey: 'main' });
+      const allowChange = systemSettingsObj ? systemSettingsObj.allowBranchAdminChangeBelt : false;
+      
+      if (!allowChange) {
+        if (joinDate !== undefined && joinDate !== student.joinDate) {
+          return res.status(403).json({ error: 'Unauthorized: Branch Admin does not have permission to manually change Join Date.' });
+        }
+        if (belt !== undefined && belt !== student.belt) {
+          return res.status(403).json({ error: 'Unauthorized: Branch Admin does not have permission to manually change student Belt level.' });
+        }
+      }
+    }
+
+    let modified = false;
+
+    if (joinDate !== undefined && joinDate !== student.joinDate) {
+      if (!joinDate || !/^\d{4}-\d{2}-\d{2}$/.test(joinDate)) {
+        return res.status(400).json({ error: 'Valid join date is required.' });
+      }
+      student.joinDate = joinDate;
+      modified = true;
+      
+      // Update nextEligibleGradingDate if student has no grading history
+      if (!student.gradingHistory || student.gradingHistory.length === 0) {
+        student.nextEligibleGradingDate = calculateNextEligibleDate(joinDate);
+      }
+    }
+
+    if (lastGradingDate !== undefined && lastGradingDate !== student.lastGradingDate) {
+      if (lastGradingDate && lastGradingDate !== 'N/A') {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(lastGradingDate)) {
+          return res.status(400).json({ error: 'Valid last grading date (YYYY-MM-DD) is required.' });
+        }
+        student.lastGradingDate = lastGradingDate;
+        student.nextEligibleGradingDate = calculateNextEligibleDate(lastGradingDate);
+      } else {
+        student.lastGradingDate = 'N/A';
+        student.nextEligibleGradingDate = calculateNextEligibleDate(student.joinDate);
+      }
+      modified = true;
+    }
+
+    if (belt !== undefined && belt !== student.belt) {
+      if (!BELT_ORDER.includes(belt)) {
+        return res.status(400).json({ error: `Invalid belt level. Choose from: ${BELT_ORDER.join(', ')}` });
+      }
+      student.belt = belt;
+      modified = true;
+    }
+
+    if (modified) {
+      await student.save();
+      addLog('api', `Manually updated grading info for student ${decrypt(student.name)} (ID: ${student.id})`);
+    }
+
+    const returnedStudent = decryptStudent(student);
+    returnedStudent.nextBelt = getNextBelt(returnedStudent.belt);
+    const todayStr = new Date().toISOString().split('T')[0];
+    returnedStudent.eligibilityStatus = (returnedStudent.nextEligibleGradingDate && todayStr >= returnedStudent.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
+
+    res.json(returnedStudent);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // 5. Get all attendance records (current year by default for optimization, scoped by branch/batch)
 app.get('/api/attendance', authenticateSession, async (req, res) => {
@@ -2958,7 +3204,11 @@ app.get('/api/system/maintenance', async (req, res) => {
       systemUpdateNotificationId: cachedSettings.systemUpdateNotificationId || '',
       lockPerformancePage: !!cachedSettings.lockPerformancePage,
       lockBranchBatchMappingPage: !!cachedSettings.lockBranchBatchMappingPage,
-      lockFeesPage: !!cachedSettings.lockFeesPage
+      lockFeesPage: !!cachedSettings.lockFeesPage,
+      lockDashboardPage: !!cachedSettings.lockDashboardPage,
+      lockAttendancePage: !!cachedSettings.lockAttendancePage,
+      lockRemindersPage: !!cachedSettings.lockRemindersPage,
+      lockGradingPage: !!cachedSettings.lockGradingPage
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2992,9 +3242,11 @@ app.post('/api/login', async (req, res) => {
       }
 
       if (user.lockUntil && new Date() < user.lockUntil) {
-        if (user.failedAttempts >= 10) {
-          return res.status(423).json({ success: false, error: 'Account temporarily locked. Please try again after 15 minutes.' });
-        } else if (user.failedAttempts >= 5) {
+        const threshold = cachedSettings.failedLoginThreshold || 10;
+        const blockTime = cachedSettings.failedLoginBlockTimeMinutes || 15;
+        if (user.failedAttempts >= threshold * 2) {
+          return res.status(423).json({ success: false, error: `Account temporarily locked. Please try again after ${blockTime} minutes.` });
+        } else if (user.failedAttempts >= threshold) {
           return res.status(423).json({ success: false, error: 'Too many failed login attempts. Please try again after 5 minutes.' });
         }
       }
@@ -3031,7 +3283,32 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Invalid username or password' });
     }
 
-    if (verifyPassword(password, user.password)) {
+    let passwordMatches = verifyPassword(password, user.password);
+
+    if (!passwordMatches) {
+      // Check if we can authenticate using the specific batch/branch credentials from config
+      const creds = await Credential.findOne({ configType: 'main' }).lean();
+      if (creds) {
+        const bodyBranch = String(branch || '').toLowerCase().trim();
+        const bodyBatch = String(batch || '').toLowerCase().trim();
+        
+        if (user.role === 'trainer' && creds.batchCredentials) {
+          const key = `${bodyBranch}_${bodyBatch}`;
+          const entry = creds.batchCredentials instanceof Map ? creds.batchCredentials.get(key) : creds.batchCredentials[key];
+          if (entry && entry.username && entry.username.toLowerCase().trim() === enteredUser) {
+            passwordMatches = verifyPassword(password, entry.password);
+          }
+        } else if (user.role === 'branchadmin' && creds.branchCredentials) {
+          const key = bodyBranch;
+          const entry = creds.branchCredentials instanceof Map ? creds.branchCredentials.get(key) : creds.branchCredentials[key];
+          if (entry && entry.username && entry.username.toLowerCase().trim() === enteredUser) {
+            passwordMatches = verifyPassword(password, entry.password);
+          }
+        }
+      }
+    }
+
+    if (passwordMatches) {
       const isSuper = loginType === 'superadmin' && user.role === 'superadmin';
       const isTrainer = (loginType === 'trainer' || loginType === 'coordinator') && (user.role === 'branchadmin' || user.role === 'trainer');
       const isDeveloper = loginType === 'developer' && user.role === 'developer';
@@ -3131,16 +3408,20 @@ app.post('/api/login', async (req, res) => {
     let lockoutError = null;
 
     if (user.role !== 'developer') {
-      if (user.failedAttempts > 10) {
+      const threshold = cachedSettings.failedLoginThreshold || 10;
+      const blockTimeMinutes = cachedSettings.failedLoginBlockTimeMinutes || 15;
+      const blockTimeMs = blockTimeMinutes * 60 * 1000;
+
+      if (user.failedAttempts > threshold * 2) {
         user.isLocked = true;
         user.lockUntil = null;
         user.lockedAt = new Date();
         lockoutError = 'Your account is locked due to security limits. Please contact the administrator.';
-      } else if (user.failedAttempts === 10) {
-        user.lockUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 mins lock
+      } else if (user.failedAttempts === threshold * 2) {
+        user.lockUntil = new Date(Date.now() + blockTimeMs);
         user.lockedAt = new Date();
-        lockoutError = 'Account temporarily locked. Please try again after 15 minutes.';
-      } else if (user.failedAttempts === 5) {
+        lockoutError = `Account temporarily locked. Please try again after ${blockTimeMinutes} minutes.`;
+      } else if (user.failedAttempts >= threshold) {
         user.lockUntil = new Date(Date.now() + 5 * 60 * 1000); // 5 mins lock
         user.lockedAt = new Date();
         lockoutError = 'Too many failed login attempts. Please try again after 5 minutes.';
@@ -3969,13 +4250,16 @@ app.get('/api/system-settings', authenticateSession, async (req, res) => {
 // Update system settings (Super Admin and Developer only)
 app.put('/api/system-settings', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
   try {
-    const { startingBillingMonth } = req.body;
+    const { startingBillingMonth, allowBranchAdminChangeBelt } = req.body;
     let settings = await SystemSetting.findOne({ configKey: 'main' });
     if (!settings) {
       settings = new SystemSetting({ configKey: 'main' });
     }
     if (startingBillingMonth !== undefined) {
       settings.startingBillingMonth = String(startingBillingMonth).trim();
+    }
+    if (allowBranchAdminChangeBelt !== undefined) {
+      settings.allowBranchAdminChangeBelt = !!allowBranchAdminChangeBelt;
     }
     await settings.save();
     cachedSettings = settings.toObject();
@@ -5012,7 +5296,12 @@ developerRouter.post('/settings', async (req, res) => {
       startingBillingMonth,
       lockPerformancePage,
       lockBranchBatchMappingPage,
-      lockFeesPage
+      lockFeesPage,
+      lockDashboardPage,
+      lockAttendancePage,
+      lockRemindersPage,
+      lockGradingPage,
+      allowBranchAdminChangeBelt
     } = req.body;
     
     // Validate inputs
@@ -5046,6 +5335,11 @@ developerRouter.post('/settings', async (req, res) => {
     if (lockPerformancePage !== undefined) settings.lockPerformancePage = !!lockPerformancePage;
     if (lockBranchBatchMappingPage !== undefined) settings.lockBranchBatchMappingPage = !!lockBranchBatchMappingPage;
     if (lockFeesPage !== undefined) settings.lockFeesPage = !!lockFeesPage;
+    if (lockDashboardPage !== undefined) settings.lockDashboardPage = !!lockDashboardPage;
+    if (lockAttendancePage !== undefined) settings.lockAttendancePage = !!lockAttendancePage;
+    if (lockRemindersPage !== undefined) settings.lockRemindersPage = !!lockRemindersPage;
+    if (lockGradingPage !== undefined) settings.lockGradingPage = !!lockGradingPage;
+    if (allowBranchAdminChangeBelt !== undefined) settings.allowBranchAdminChangeBelt = !!allowBranchAdminChangeBelt;
 
     if (systemUpdateNotification !== undefined && systemUpdateNotification !== settings.systemUpdateNotification) {
       settings.systemUpdateNotification = String(systemUpdateNotification).trim();
