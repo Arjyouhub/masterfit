@@ -177,6 +177,8 @@ window.fetch = function (url, options = {}) {
 };
 
 
+const ART_OPTIONS = ['Karate', 'Kickboxing', 'Kung Fu', 'MMA', 'Muay Thai', 'Taekwondo', 'Yoga', 'Kalaripayattu'];
+
 function App() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -1088,6 +1090,7 @@ function App() {
   const [editingStudentData, setEditingStudentData] = useState(null);
 
   // Persistent State
+  const [trainersList, setTrainersList] = useState([]);
   const [students, setStudents] = useState([]);
 
   const [attendanceRecords, setAttendanceRecords] = useState({});
@@ -1123,12 +1126,18 @@ function App() {
               endTime: b.endTime || '10:30',
               slotType: b.slotType || 'Morning',
               status: b.status || 'Active',
-              _id: b._id
+              _id: b._id,
+              trainer: b.trainer || ''
             }))
           ];
           setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
         })
         .catch(err => console.error('Error fetching public batches:', err));
+
+      fetch(`${API_BASE_URL}/public/trainers`)
+        .then(res => res.ok ? res.json() : [])
+        .then(data => setTrainersList(data || []))
+        .catch(err => console.error('Error fetching public trainers:', err));
 
       return;
     }
@@ -1208,12 +1217,19 @@ function App() {
             endTime: b.endTime || '10:30',
             slotType: b.slotType || 'Morning',
             status: b.status || 'Active',
-            _id: b._id
+            _id: b._id,
+            trainer: b.trainer || ''
           }))
         ];
         setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
       })
       .catch(err => console.error('Error fetching batches:', err));
+
+    // Fetch Trainers
+    fetch(`${API_BASE_URL}/public/trainers`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setTrainersList(data || []))
+      .catch(err => console.error('Error fetching trainers:', err));
 
     // 3.3 Fetch Scheduled Classes
     const todayStr = new Date().toLocaleDateString('en-CA');
@@ -3750,7 +3766,7 @@ function App() {
 
   // Form State
   const [newStudent, setNewStudent] = useState({
-    name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: '', photo: null, isPriority: false
+    name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: '', photo: null, isPriority: false, trainer: '', art: ''
   });
 
   // Unified dynamic batch loading by branchId for creation & edit modals/forms
@@ -4059,7 +4075,7 @@ function App() {
       .then(savedStudent => {
         setStudents(prev => sortStudentsAlphabetically([...prev, savedStudent]));
         setIsAddModalOpen(false);
-        setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: defaultBranch === 'All' ? (branches[0] || 'Kuttiady') : defaultBranch, photo: null, isPriority: false, trainerName: '', artName: '' });
+        setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: defaultBranch === 'All' ? (branches[0] || 'Kuttiady') : defaultBranch, photo: null, isPriority: false, trainer: '', art: '' });
 
         setGlobalSuccess("Student added successfully.");
         reloadAllAppData();
@@ -4871,7 +4887,7 @@ function App() {
                 <div className="dev-card" style={{ padding: '1rem' }}>
                   <h4 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Student Profile Summary</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem' }}>
-                    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Belt Level: <strong style={{ color: '#fff', float: 'right' }}>{student.belt}</strong></div>
+                    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Present Grad: <strong style={{ color: '#fff', float: 'right' }}>{student.belt}</strong></div>
                     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Admission Number: <strong style={{ color: '#fff', float: 'right' }}>{student.admissionNumber || student.admissionNo || student.id}</strong></div>
                     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Attendance: <strong style={{ float: 'right' }}><span style={{ color: '#30d158' }}>{attendanceSummary.present}P</span> / <span style={{ color: '#ff453a' }}>{attendanceSummary.absent}A</span> ({attendanceSummary.total} Total)</strong></div>
                     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Fees Paid: <strong style={{ color: '#30d158', float: 'right' }}>₹{feeSummary.totalPaid}</strong></div>
@@ -6072,7 +6088,7 @@ function App() {
                     onChange={(e) => setDevSettings({ ...devSettings, allowBranchAdminChangeBelt: e.target.checked })}
                     style={{ cursor: 'pointer' }}
                   />
-                  Allow Branch Admin to manually change Current Belt
+                  Allow Branch Admin to manually change Present Grad
                 </label>
               </div>
             </div>
@@ -8036,7 +8052,7 @@ function App() {
 
         {/* Belt Distribution Bar */}
         <div className="panel" style={{ marginBottom: '2rem', background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
-          <h3 className="panel-title" style={{ marginBottom: '1.25rem', fontSize: '0.85rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Belt Level Distribution</h3>
+          <h3 className="panel-title" style={{ marginBottom: '1.25rem', fontSize: '0.85rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Present Grad Distribution</h3>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
             {Object.entries(beltCounts).map(([beltName, count]) => (
               <div key={beltName} style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255, 255, 255, 0.02)', padding: '6px 14px', borderRadius: '20px', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
@@ -8074,7 +8090,7 @@ function App() {
               </select>
             </div>
             <div className="form-group">
-              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Belt Level</label>
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Present Grad</label>
               <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterBelt} onChange={(e) => setGradingFilterBelt(e.target.value)}>
                 <option value="All">All Belts</option>
                 {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
@@ -8150,7 +8166,7 @@ function App() {
                     <th>Branch</th>
                     <th>Batch</th>
                     <th>Trainer Name</th>
-                    <th>Current Belt</th>
+                    <th>Present Grad</th>
                     <th>Next Belt</th>
                     <th>Join Date</th>
                     <th>Last Grading</th>
@@ -8173,8 +8189,8 @@ function App() {
                       </td>
                       <td data-label="Branch">{student.branch}</td>
                       <td data-label="Batch">{getBatchNameFromCode(student.batch, student.branch)}</td>
-                      <td data-label="Trainer Name">{student.trainerName || 'N/A'}</td>
-                      <td data-label="Current Belt">
+                      <td data-label="Trainer Name">{student.trainer || 'N/A'}</td>
+                      <td data-label="Present Grad">
                         <span className={`badge ${getBeltColorClass(student.belt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem', borderRadius: '4px' }}>{student.belt}</span>
                       </td>
                       <td data-label="Next Belt">
@@ -8251,7 +8267,7 @@ function App() {
               <div style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '1rem', marginBottom: '1rem', display: 'flex', gap: '15px', fontSize: '0.9rem', color: 'var(--color-text-main)' }}>
                 <div>Branch: <strong>{selectedHistoryStudent.branch}</strong></div>
                 <div>Batch: <strong>{selectedHistoryStudent.batch}</strong></div>
-                <div>Current Belt: <span className={`badge ${getBeltColorClass(selectedHistoryStudent.belt)}`}>{selectedHistoryStudent.belt}</span></div>
+                <div>Present Grad: <span className={`badge ${getBeltColorClass(selectedHistoryStudent.belt)}`}>{selectedHistoryStudent.belt}</span></div>
               </div>
 
               {selectedHistoryStudent.gradingHistory && selectedHistoryStudent.gradingHistory.length > 0 ? (
@@ -8328,7 +8344,7 @@ function App() {
                     <span>Join Date:</span> <strong style={{ color: '#fff' }}>{selectedGradeStudent.joinDate || 'N/A'}</strong>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span>Current Belt Level:</span> <span className={`badge ${getBeltColorClass(selectedGradeStudent.belt)}`}>{selectedGradeStudent.belt}</span>
+                    <span>Present Grad:</span> <span className={`badge ${getBeltColorClass(selectedGradeStudent.belt)}`}>{selectedGradeStudent.belt}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>Target Promotion Belt:</span>
@@ -8359,8 +8375,8 @@ function App() {
                     onChange={(e) => setGradeResult(e.target.value)}
                     required
                   >
-                    <option value="Pass">Pass (Promote to next belt level)</option>
-                    <option value="Fail">Fail (Keep current belt level)</option>
+                    <option value="Pass">Pass (Promote to next grade level)</option>
+                    <option value="Fail">Fail (Keep current grade level)</option>
                   </select>
                 </div>
 
@@ -8424,7 +8440,7 @@ function App() {
                 </div>
 
                 <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                  <label>Current Belt level</label>
+                  <label>Present Grad</label>
                   <select
                     className="form-control"
                     value={editGradingForm.belt}
@@ -11360,10 +11376,10 @@ function App() {
                     onChange={(e) => handleToggleAllowBranchAdminChangeBelt(e.target.checked)}
                     style={{ cursor: 'pointer', width: '18px', height: '18px' }}
                   />
-                  <span>Allow Branch Admins to manually change student Current Belt level and Join Date</span>
+                  <span>Allow Branch Admins to manually change student Present Grad level and Join Date</span>
                 </label>
                 <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
-                  By default, Branch Admins can only change a student's belt level by conducting grading tests (marking Pass). When this option is enabled, Branch Admins can also manually override the Current Belt level and Join Date inside the Student Grading Edit form.
+                  By default, Branch Admins can only change a student's grade level by conducting grading tests (marking Pass). When this option is enabled, Branch Admins can also manually override the Present Grad level and Join Date inside the Student Grading Edit form.
                 </p>
               </div>
             </div>
@@ -11908,7 +11924,7 @@ function App() {
                 </button>
               </form>
               <button type="button" className="btn-secondary animate-item-7" style={{ width: '100%', justifyContent: 'center', marginTop: '0.5rem', display: 'inline-flex', alignItems: 'center', gap: '8px', height: '38px' }} disabled={isLoggingIn} onClick={() => {
-                setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: selectedBranchLogin, photo: null, trainerName: '', artName: '' });
+                setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: selectedBranchLogin, photo: null, trainer: '', art: '' });
                 setIsAddModalOpen(true);
               }}>
                 <UserPlus size={16} /> Enroll New Student
@@ -12636,21 +12652,7 @@ function App() {
 
 
 
-  // --- Main Admin Dashboard Template ---
-  const uniqueTrainers = Array.from(new Set(
-    students
-      .map(s => s?.trainerName)
-      .filter(name => name && name.trim())
-      .map(name => name.trim())
-  ));
 
-  const uniqueArts = Array.from(new Set([
-    "Karate", "Taekwondo", "Kung Fu", "Judo", "Kickboxing", "MMA",
-    ...students
-      .map(s => s?.artName)
-      .filter(name => name && name.trim())
-      .map(name => name.trim())
-  ]));
 
   const metrics = getDynamicMetrics();
   return (
@@ -13076,8 +13078,8 @@ function App() {
                         schedule: firstBatch ? firstBatch.schedule : 'Mon-Thu',
                         batch: firstBatch ? firstBatch.id : 'Morning',
                         photo: null,
-                        trainerName: '',
-                        artName: ''
+                        trainer: firstBatch ? firstBatch.trainer || '' : '',
+                        art: ''
                       });
                       setIsAddModalOpen(true);
                     }}>
@@ -13091,7 +13093,7 @@ function App() {
                           <tr>
                             <th>Name</th>
                             <th>Batch Schedule</th>
-                            <th>Belt Level</th>
+                            <th>Present Grad</th>
                             <th>Phone</th>
                             <th>Actions</th>
                           </tr>
@@ -13129,7 +13131,7 @@ function App() {
                                 <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', marginRight: '8px' }}>{student.branch}</span>
                                 <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}</span>
                               </td>
-                              <td data-label="Belt Level"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
+                              <td data-label="Present Grad"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
                               <td data-label="Phone" style={{ color: 'var(--color-text-muted)' }}>{student.phone}</td>
                               <td data-label="Actions">
                                 <div className="actions-flex-container">
@@ -13395,7 +13397,8 @@ function App() {
                             setEditingStudentData(prev => ({
                               ...prev,
                               batch: correspondingOpt.code,
-                              schedule: correspondingOpt.schedule
+                              schedule: correspondingOpt.schedule,
+                              trainer: correspondingOpt.trainer || prev.trainer || ''
                             }));
                           }
                         }}
@@ -13448,7 +13451,45 @@ function App() {
                       </select>
                     </div>
                     <div className="form-group">
-                      <label>Belt Level</label>
+                      <label>Art (Program)</label>
+                      <select
+                        className="form-control"
+                        value={editingStudentData.art || ''}
+                        onChange={(e) => setEditingStudentData({ ...editingStudentData, art: e.target.value })}
+                      >
+                        <option value="">Select Art</option>
+                        {ART_OPTIONS.map(art => (
+                          <option key={art} value={art}>{art}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid-2-col">
+                    <div className="form-group">
+                      <label>Trainer</label>
+                      <select
+                        className="form-control"
+                        value={editingStudentData.trainer || ''}
+                        onChange={(e) => setEditingStudentData({ ...editingStudentData, trainer: e.target.value })}
+                      >
+                        <option value="">Select Trainer</option>
+                        {(() => {
+                          const filtered = trainersList.filter(t => 
+                            !editingStudentData.branch || 
+                            !t.branch || 
+                            t.branch.toLowerCase().split(',').map(b => b.trim()).includes(editingStudentData.branch.toLowerCase().trim())
+                          );
+                          const listToShow = filtered.length > 0 ? filtered : trainersList;
+                          return listToShow.map(t => (
+                            <option key={t.username} value={t.username}>
+                              {t.username} {t.fullName ? `(${t.fullName})` : ''}
+                            </option>
+                          ));
+                        })()}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label>Present Grad</label>
                       <select
                         className="form-control"
                         value={editingStudentData.belt}
@@ -13554,28 +13595,6 @@ function App() {
                         </div>
                       </div>
                     )}
-                    <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                      <label>Trainer Name</label>
-                      <input
-                        type="text"
-                        list="trainer-list"
-                        className="form-control"
-                        placeholder="Enter or select trainer name"
-                        value={editingStudentData.trainerName || ''}
-                        onChange={(e) => setEditingStudentData({ ...editingStudentData, trainerName: e.target.value })}
-                      />
-                    </div>
-                    <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                      <label>Art Name</label>
-                      <input
-                        type="text"
-                        list="art-list"
-                        className="form-control"
-                        placeholder="Enter or select art name"
-                        value={editingStudentData.artName || ''}
-                        onChange={(e) => setEditingStudentData({ ...editingStudentData, artName: e.target.value })}
-                      />
-                    </div>
                   </div>
                 </div>
                 <div className="modal-actions">
@@ -13639,10 +13658,12 @@ function App() {
                       <span className="badge" style={{ background: 'var(--color-primary)', color: 'white' }}>{selectedStudent.branch} Branch</span>
                       <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>{getBatchNameFromSchedule(selectedStudent.schedule, selectedStudent.branch)}</span>
                       <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>{selectedStudent.schedule} Batch</span>
+                      {selectedStudent.trainer && <span className="badge" style={{ background: 'rgba(52, 152, 219, 0.15)', color: '#3498db' }}>Trainer: {selectedStudent.trainer}</span>}
+                      {selectedStudent.art && <span className="badge" style={{ background: 'rgba(155, 89, 182, 0.15)', color: '#9b59b6' }}>Art: {selectedStudent.art}</span>}
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem' }}>
-                      <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Trainer Name</span><div style={{ fontWeight: 600 }}>{selectedStudent.trainerName || 'N/A'}</div></div>
-                      <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Art Name</span><div style={{ fontWeight: 600 }}>{selectedStudent.artName || 'N/A'}</div></div>
+                      <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Trainer</span><div style={{ fontWeight: 600 }}>{selectedStudent.trainer || 'N/A'}</div></div>
+                      <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Art (Program)</span><div style={{ fontWeight: 600 }}>{selectedStudent.art || 'N/A'}</div></div>
                     </div>
                   </div>
 
@@ -14355,7 +14376,8 @@ function App() {
                         setNewStudent(prev => ({
                           ...prev,
                           batch: correspondingOpt.code,
-                          schedule: correspondingOpt.schedule
+                          schedule: correspondingOpt.schedule,
+                          trainer: correspondingOpt.trainer || prev.trainer || ''
                         }));
                       }
                     }}
@@ -14421,7 +14443,45 @@ function App() {
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Initial Belt</label>
+                  <label>Art (Program)</label>
+                  <select
+                    className="form-control"
+                    value={newStudent.art || ''}
+                    onChange={(e) => setNewStudent({ ...newStudent, art: e.target.value })}
+                  >
+                    <option value="">Select Art</option>
+                    {ART_OPTIONS.map(art => (
+                      <option key={art} value={art}>{art}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="grid-2-col">
+                <div className="form-group">
+                  <label>Trainer</label>
+                  <select
+                    className="form-control"
+                    value={newStudent.trainer || ''}
+                    onChange={(e) => setNewStudent({ ...newStudent, trainer: e.target.value })}
+                  >
+                    <option value="">Select Trainer</option>
+                    {(() => {
+                      const filtered = trainersList.filter(t => 
+                        !newStudent.branch || 
+                        !t.branch || 
+                        t.branch.toLowerCase().split(',').map(b => b.trim()).includes(newStudent.branch.toLowerCase().trim())
+                      );
+                      const listToShow = filtered.length > 0 ? filtered : trainersList;
+                      return listToShow.map(t => (
+                        <option key={t.username} value={t.username}>
+                          {t.username} {t.fullName ? `(${t.fullName})` : ''}
+                        </option>
+                      ));
+                    })()}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Present Grad</label>
                   <select className="form-control" value={newStudent.belt} onChange={(e) => setNewStudent({ ...newStudent, belt: e.target.value })}>
                     <option value="White">White Belt</option>
                     <option value="Yellow">Yellow Belt</option>
@@ -14437,30 +14497,6 @@ function App() {
               <div className="form-group">
                 <label>Joining Date</label>
                 <input type="date" className="form-control" required value={newStudent.joinDate} onChange={(e) => setNewStudent({ ...newStudent, joinDate: e.target.value })} />
-              </div>
-              <div className="grid-2-col" style={{ marginTop: '0.75rem' }}>
-                <div className="form-group">
-                  <label>Trainer Name</label>
-                  <input
-                    type="text"
-                    list="trainer-list"
-                    className="form-control"
-                    placeholder="Enter or select trainer"
-                    value={newStudent.trainerName || ''}
-                    onChange={(e) => setNewStudent({ ...newStudent, trainerName: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Art Name</label>
-                  <input
-                    type="text"
-                    list="art-list"
-                    className="form-control"
-                    placeholder="Enter or select art"
-                    value={newStudent.artName || ''}
-                    onChange={(e) => setNewStudent({ ...newStudent, artName: e.target.value })}
-                  />
-                </div>
               </div>
 
               <div className="form-group">
@@ -14986,16 +15022,6 @@ function App() {
         </div>
       )}
 
-      <datalist id="trainer-list">
-        {uniqueTrainers.map(t => (
-          <option key={t} value={t} />
-        ))}
-      </datalist>
-      <datalist id="art-list">
-        {uniqueArts.map(a => (
-          <option key={a} value={a} />
-        ))}
-      </datalist>
 
     </div>
   );
