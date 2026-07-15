@@ -24,6 +24,18 @@ const studentSchema = new mongoose.Schema({
   discountPercentage: { type: Number, default: 0 }, // discount percentage
   couponType: { type: String, default: 'percentage' }, // 'percentage' or 'amount'
   couponValue: { type: Number, default: 0 }, // discount value (percentage or flat amount)
+  appliedCoupons: {
+    type: [{
+      couponId: { type: String },
+      couponCode: { type: String, required: true },
+      discountType: { type: String, required: true },
+      discountValue: { type: Number, required: true },
+      appliedMonth: { type: Number, required: true },
+      appliedYear: { type: Number, required: true },
+      appliedAt: { type: Date, default: Date.now }
+    }],
+    default: []
+  },
   lastGradingDate: { type: String, default: 'N/A' },
   nextEligibleGradingDate: { type: String, default: '' },
   lastGradingResult: { type: String, default: 'N/A' },
@@ -38,7 +50,9 @@ const studentSchema = new mongoose.Schema({
     }],
     default: []
   },
-  isPriority: { type: Boolean, default: false }
+  isPriority: { type: Boolean, default: false },
+  trainerName: { type: String, default: '' },
+  artName: { type: String, default: '' }
 }, { timestamps: true });
 
 studentSchema.index({ branch: 1, status: 1 });

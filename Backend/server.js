@@ -2064,17 +2064,10 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
         startFeeMonth = startingBillingMonth;
       }
 
-      // Calculate monthly fee rate for this student
-      let monthlyRate = student.customMonthlyRate !== null && student.customMonthlyRate !== undefined 
+      // Calculate base rate for this student (default rate)
+      const baseMonthlyRate = student.customMonthlyRate !== null && student.customMonthlyRate !== undefined 
         ? student.customMonthlyRate 
         : defaultMonthlyRate;
-
-      // Apply coupon discount if applicable
-      if (student.discountPercentage > 0 && student.couponType === 'percentage') {
-        monthlyRate = monthlyRate * (1 - student.discountPercentage / 100);
-      } else if (student.couponValue > 0 && student.couponType === 'amount') {
-        monthlyRate = Math.max(0, monthlyRate - student.couponValue);
-      }
 
       // Calculate how many months have elapsed from startFeeMonth to currentYearMonth
       if (startFeeMonth <= currentYearMonth) {
@@ -2084,15 +2077,29 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
           const checkMonth = ((parseInt(startFeeMonth.split('-')[1]) - 1 + i) % 12) + 1;
           const ymStr = `${checkYear}-${String(checkMonth).padStart(2, '0')}`;
 
+          let monthlyRateForMonth = baseMonthlyRate;
+
+          // Apply month-specific coupon if applicable
+          if (student.appliedCoupons && student.appliedCoupons.length > 0) {
+            const matchedCoupon = student.appliedCoupons.find(c => c.appliedMonth === checkMonth && c.appliedYear === checkYear);
+            if (matchedCoupon) {
+              if (matchedCoupon.discountType === 'percentage') {
+                monthlyRateForMonth = monthlyRateForMonth * (1 - matchedCoupon.discountValue / 100);
+              } else if (matchedCoupon.discountType === 'amount') {
+                monthlyRateForMonth = Math.max(0, monthlyRateForMonth - matchedCoupon.discountValue);
+              }
+            }
+          }
+
           totalFeeRecords++;
           const paidMonths = student.paidMonths || {};
           // In Mongoose Map, lookups can be a Map or standard object
           const isPaid = paidMonths instanceof Map ? paidMonths.get(ymStr) : paidMonths[ymStr];
 
           if (isPaid) {
-            feeCollection += monthlyRate;
+            feeCollection += monthlyRateForMonth;
           } else {
-            pendingFees += monthlyRate;
+            pendingFees += monthlyRateForMonth;
           }
         }
       }

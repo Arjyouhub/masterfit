@@ -1040,6 +1040,45 @@ function App() {
     return val;
   };
 
+  const getAppliedCouponForMonth = (student, monthStr) => {
+    if (!student || !student.appliedCoupons || student.appliedCoupons.length === 0) return null;
+    const [year, month] = monthStr.split('-').map(Number);
+    return student.appliedCoupons.find(c => c.appliedMonth === month && c.appliedYear === year);
+  };
+
+  const getStudentDiscountForMonth = (s, rateToUse, monthStr) => {
+    const matchedCoupon = getAppliedCouponForMonth(s, monthStr);
+    if (matchedCoupon) {
+      if (matchedCoupon.discountType === 'percentage') {
+        return Math.round(rateToUse * matchedCoupon.discountValue / 100);
+      }
+      return matchedCoupon.discountValue;
+    }
+    return 0;
+  };
+
+  const getFeeInfoForMonth = (student, monthStr) => {
+    const rateToUse = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
+      ? student.customMonthlyRate
+      : monthlyFeeRate;
+
+    const matchedCoupon = getAppliedCouponForMonth(student, monthStr);
+    let finalRate = rateToUse;
+    if (matchedCoupon) {
+      if (matchedCoupon.discountType === 'percentage') {
+        const discount = Math.round(rateToUse * matchedCoupon.discountValue / 100);
+        finalRate = Math.max(0, rateToUse - discount);
+      } else {
+        finalRate = Math.max(0, rateToUse - matchedCoupon.discountValue);
+      }
+    }
+    return {
+      originalRate: rateToUse,
+      finalRate,
+      coupon: matchedCoupon
+    };
+  };
+
   const [branchCredentials, setBranchCredentials] = useState({});
 
   const [batchCredentials, setBatchCredentials] = useState({});
@@ -3642,8 +3681,6 @@ function App() {
       const rateToUse = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
         ? student.customMonthlyRate
         : monthlyFeeRate;
-      const discountAmount = getStudentDiscount(student, rateToUse);
-      const finalRate = Math.max(0, rateToUse - discountAmount);
 
       let [joinYear, joinMonth] = joinMonthStr.split('-').map(Number);
       let [currYear, currMonth] = currentMonthStr.split('-').map(Number);
@@ -3655,6 +3692,9 @@ function App() {
         while (tempYear < currYear || (tempYear === currYear && tempMonth <= currMonth)) {
           const monthStr = `${tempYear}-${String(tempMonth).padStart(2, '0')}`;
           const isPaid = student.paidMonths && student.paidMonths[monthStr];
+
+          const discountAmount = getStudentDiscountForMonth(student, rateToUse, monthStr);
+          const finalRate = Math.max(0, rateToUse - discountAmount);
 
           if (isPaid) {
             feeCollection += finalRate;
@@ -4019,7 +4059,7 @@ function App() {
       .then(savedStudent => {
         setStudents(prev => sortStudentsAlphabetically([...prev, savedStudent]));
         setIsAddModalOpen(false);
-        setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: defaultBranch === 'All' ? (branches[0] || 'Kuttiady') : defaultBranch, photo: null, isPriority: false });
+        setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: defaultBranch === 'All' ? (branches[0] || 'Kuttiady') : defaultBranch, photo: null, isPriority: false, trainerName: '', artName: '' });
 
         setGlobalSuccess("Student added successfully.");
         reloadAllAppData();
@@ -4110,10 +4150,13 @@ function App() {
     const rateToUse = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
       ? student.customMonthlyRate
       : monthlyFeeRate;
-    const discountAmount = getStudentDiscount(student, rateToUse);
-    const finalRate = Math.max(0, rateToUse - discountAmount);
 
-    const monthlyDue = unpaidMonths.length * finalRate;
+    let monthlyDue = 0;
+    unpaidMonths.forEach(m => {
+      const discountAmount = getStudentDiscountForMonth(student, rateToUse, m);
+      const finalRate = Math.max(0, rateToUse - discountAmount);
+      monthlyDue += finalRate;
+    });
     const totalDue = admissionDue + monthlyDue;
 
     return {
@@ -4356,6 +4399,63 @@ function App() {
     })
       .then(res => res.json())
       .catch(err => console.error("Error updating coupon from table:", err));
+  };
+
+  const handleCouponBlurForMonth = (student, monthStr, newCode) => {
+    const code = newCode.trim().toUpperCase();
+
+    // Validate the coupon code if one is entered
+    let resolved = null;
+    if (code) {
+      resolved = resolveCouponCode(code);
+      if (!resolved) {
+        alert(`❌ Invalid coupon code: "${code}"`);
+        return;
+      }
+    }
+
+    const [year, month] = monthStr.split('-').map(Number);
+    let updatedCoupons = student.appliedCoupons ? [...student.appliedCoupons] : [];
+    const index = updatedCoupons.findIndex(c => c.appliedMonth === month && c.appliedYear === year);
+
+    if (code) {
+      const newCoupon = {
+        couponId: code,
+        couponCode: code,
+        discountType: resolved.type,
+        discountValue: resolved.value,
+        appliedMonth: month,
+        appliedYear: year,
+        appliedAt: new Date().toISOString()
+      };
+      if (index > -1) {
+        updatedCoupons[index] = newCoupon;
+      } else {
+        updatedCoupons.push(newCoupon);
+      }
+    } else {
+      if (index > -1) {
+        updatedCoupons.splice(index, 1);
+      }
+    }
+
+    let updated = { ...student, appliedCoupons: updatedCoupons };
+
+    // Update frontend state
+    const updatedStudentsList = students.map(s => s.id === student.id ? updated : s);
+    setStudents(updatedStudentsList);
+    if (selectedStudent && selectedStudent.id === student.id) {
+      setSelectedStudent(updated);
+    }
+
+    // Save to database
+    fetch(`${API_BASE_URL}/students/${student.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated)
+    })
+      .then(res => res.json())
+      .catch(err => console.error("Error updating month coupon from table:", err));
   };
 
   const markAttendance = (studentId, status) => {
@@ -7105,7 +7205,7 @@ function App() {
         const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null
           ? s.customMonthlyRate
           : monthlyFeeRate;
-        const discountAmount = getStudentDiscount(s, rateToUse);
+        const discountAmount = getStudentDiscountForMonth(s, rateToUse, feeMonth);
         const finalRate = Math.max(0, rateToUse - discountAmount);
         return sum + finalRate;
       }, 0);
@@ -7280,7 +7380,6 @@ function App() {
                     {isAdminUser(loggedInUser) && <th>Branch</th>}
                     <th>Batch Time</th>
                     <th style={{ textAlign: 'center' }}>Admission (₹{admissionFeeRate})</th>
-                    <th style={{ textAlign: 'center' }}>Admission Coupon</th>
                     <th style={{ textAlign: 'center' }}>Monthly ({formatMonthName(feeMonth)})</th>
                     <th style={{ textAlign: 'center' }}>Monthly Coupon</th>
                     <th style={{ textAlign: 'center' }}>Fee Details</th>
@@ -7309,20 +7408,13 @@ function App() {
                                 setCustomRateInput(student.customMonthlyRate !== undefined && student.customMonthlyRate !== null ? student.customMonthlyRate : '');
                                 setCustomAdmissionInput(student.customAdmissionRate !== undefined && student.customAdmissionRate !== null ? student.customAdmissionRate : '');
                                 setCustomStartMonth(student.joinDate ? student.joinDate.slice(0, 7) : new Date().toISOString().slice(0, 7));
-                                setCouponInput(student.appliedCoupon || '');
+                                const couponForMonth = getAppliedCouponForMonth(student, feeMonth);
+                                setCouponInput(couponForMonth ? couponForMonth.couponCode : '');
                                 setAdmissionCouponInput(student.appliedAdmissionCoupon || '');
                                 let activeMsg = '';
-                                if (student.appliedCoupon) {
-                                  const resolved = resolveCouponCode(student.appliedCoupon);
-                                  if (resolved) {
-                                    const display = resolved.type === 'amount' ? `₹${resolved.value}` : `${resolved.value}%`;
-                                    activeMsg = `Active: ${student.appliedCoupon} (${display} Off)`;
-                                  } else {
-                                    const type = student.couponType || 'percentage';
-                                    const val = student.couponValue !== undefined ? student.couponValue : (student.discountPercentage || 0);
-                                    const display = type === 'amount' ? `₹${val}` : `${val}%`;
-                                    activeMsg = `Active: ${student.appliedCoupon} (${display} Off)`;
-                                  }
+                                if (couponForMonth) {
+                                  const display = couponForMonth.discountType === 'amount' ? `₹${couponForMonth.discountValue}` : `${couponForMonth.discountValue}%`;
+                                  activeMsg = `Active for ${formatMonthName(feeMonth)}: ${couponForMonth.couponCode} (${display} Off)`;
                                 }
                                 setCouponMessage(activeMsg);
 
@@ -7382,36 +7474,6 @@ function App() {
                             <option value="pending" style={{ background: '#181818', color: '#FF6B6B' }}>Pending</option>
                           </select>
                         </td>
-                        <td data-label="Admission Coupon" style={{ textAlign: 'center' }}>
-                          <input
-                            type="text"
-                            defaultValue={student.appliedAdmissionCoupon || ''}
-                            key={student.id + '_adm_' + (student.appliedAdmissionCoupon || '')}
-                            placeholder="Code"
-                            className="form-control"
-                            style={{
-                              padding: '0.3rem 0.6rem',
-                              fontSize: '0.8rem',
-                              width: '90px',
-                              textAlign: 'center',
-                              background: 'rgba(255,255,255,0.02)',
-                              border: '1px solid rgba(255,255,255,0.1)',
-                              borderRadius: '20px',
-                              color: 'white',
-                              outline: 'none'
-                            }}
-                            onBlur={(e) => {
-                              if (e.target.value !== (student.appliedAdmissionCoupon || '')) {
-                                handleCouponBlur(student, 'appliedAdmissionCoupon', e.target.value);
-                              }
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.target.blur();
-                              }
-                            }}
-                          />
-                        </td>
                         <td data-label="Monthly Fee" style={{ textAlign: 'center' }}>
                           <select
                             value={isPaid(student) ? "paid" : "pending"}
@@ -7442,34 +7504,40 @@ function App() {
                           </select>
                         </td>
                         <td data-label="Monthly Coupon" style={{ textAlign: 'center' }}>
-                          <input
-                            type="text"
-                            defaultValue={student.appliedCoupon || ''}
-                            key={student.id + '_mly_' + (student.appliedCoupon || '')}
-                            placeholder="Code"
-                            className="form-control"
-                            style={{
-                              padding: '0.3rem 0.6rem',
-                              fontSize: '0.8rem',
-                              width: '90px',
-                              textAlign: 'center',
-                              background: 'rgba(255,255,255,0.02)',
-                              border: '1px solid rgba(255,255,255,0.1)',
-                              borderRadius: '20px',
-                              color: 'white',
-                              outline: 'none'
-                            }}
-                            onBlur={(e) => {
-                              if (e.target.value !== (student.appliedCoupon || '')) {
-                                handleCouponBlur(student, 'appliedCoupon', e.target.value);
-                              }
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.target.blur();
-                              }
-                            }}
-                          />
+                          {(() => {
+                            const couponForMonth = getAppliedCouponForMonth(student, feeMonth);
+                            const couponCodeForMonth = couponForMonth ? couponForMonth.couponCode : '';
+                            return (
+                              <input
+                                type="text"
+                                defaultValue={couponCodeForMonth}
+                                key={student.id + '_mly_' + feeMonth + '_' + couponCodeForMonth}
+                                placeholder="Code"
+                                className="form-control"
+                                style={{
+                                  padding: '0.3rem 0.6rem',
+                                  fontSize: '0.8rem',
+                                  width: '90px',
+                                  textAlign: 'center',
+                                  background: 'rgba(255,255,255,0.02)',
+                                  border: '1px solid rgba(255,255,255,0.1)',
+                                  borderRadius: '20px',
+                                  color: 'white',
+                                  outline: 'none'
+                                }}
+                                onBlur={(e) => {
+                                  if (e.target.value !== couponCodeForMonth) {
+                                    handleCouponBlurForMonth(student, feeMonth, e.target.value);
+                                  }
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.target.blur();
+                                  }
+                                }}
+                              />
+                            );
+                          })()}
                         </td>
                         <td data-label="Fee Details" style={{ textAlign: 'center' }}>
                           <div style={{ display: 'inline-block' }}>
@@ -7749,6 +7817,19 @@ function App() {
                     <div style={{ fontSize: '1rem', fontWeight: 600, color: 'white' }}>
                       {formatMonthName(monthStr)}
                     </div>
+                    {(() => {
+                      const info = getFeeInfoForMonth(student, monthStr);
+                      return (
+                        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', textAlign: 'center' }}>
+                          Rate: <strong>₹{info.finalRate}</strong>
+                          {info.coupon && (
+                            <div style={{ fontSize: '0.75rem', color: '#51CF66', marginTop: '2px', fontWeight: 600 }}>
+                              Coupon: {info.coupon.couponCode}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                     <div>
                       {isPaid ? (
                         <span className="badge badge-green" style={{ fontSize: '0.8rem', padding: '3px 10px', borderRadius: '20px' }}>Paid ✓</span>
@@ -8068,6 +8149,7 @@ function App() {
                     <th>Student Name</th>
                     <th>Branch</th>
                     <th>Batch</th>
+                    <th>Trainer Name</th>
                     <th>Current Belt</th>
                     <th>Next Belt</th>
                     <th>Join Date</th>
@@ -8091,6 +8173,7 @@ function App() {
                       </td>
                       <td data-label="Branch">{student.branch}</td>
                       <td data-label="Batch">{getBatchNameFromCode(student.batch, student.branch)}</td>
+                      <td data-label="Trainer Name">{student.trainerName || 'N/A'}</td>
                       <td data-label="Current Belt">
                         <span className={`badge ${getBeltColorClass(student.belt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem', borderRadius: '4px' }}>{student.belt}</span>
                       </td>
@@ -8412,8 +8495,6 @@ function App() {
       const rateToUse = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
         ? student.customMonthlyRate
         : monthlyFeeRate;
-      const discountAmount = getStudentDiscount(student, rateToUse);
-      const finalRate = Math.max(0, rateToUse - discountAmount);
 
       let collectedMonthly = 0;
       let pendingMonthly = 0;
@@ -8430,6 +8511,9 @@ function App() {
         while (tempYear < currYear || (tempYear === currYear && tempMonth <= currMonth)) {
           const monthStr = `${tempYear}-${String(tempMonth).padStart(2, '0')}`;
           const isPaid = student.paidMonths && student.paidMonths[monthStr];
+
+          const discountAmount = getStudentDiscountForMonth(student, rateToUse, monthStr);
+          const finalRate = Math.max(0, rateToUse - discountAmount);
 
           if (isPaid) {
             collectedMonthly += finalRate;
@@ -11824,7 +11908,7 @@ function App() {
                 </button>
               </form>
               <button type="button" className="btn-secondary animate-item-7" style={{ width: '100%', justifyContent: 'center', marginTop: '0.5rem', display: 'inline-flex', alignItems: 'center', gap: '8px', height: '38px' }} disabled={isLoggingIn} onClick={() => {
-                setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: selectedBranchLogin, photo: null });
+                setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: selectedBranchLogin, photo: null, trainerName: '', artName: '' });
                 setIsAddModalOpen(true);
               }}>
                 <UserPlus size={16} /> Enroll New Student
@@ -12553,6 +12637,21 @@ function App() {
 
 
   // --- Main Admin Dashboard Template ---
+  const uniqueTrainers = Array.from(new Set(
+    students
+      .map(s => s?.trainerName)
+      .filter(name => name && name.trim())
+      .map(name => name.trim())
+  ));
+
+  const uniqueArts = Array.from(new Set([
+    "Karate", "Taekwondo", "Kung Fu", "Judo", "Kickboxing", "MMA",
+    ...students
+      .map(s => s?.artName)
+      .filter(name => name && name.trim())
+      .map(name => name.trim())
+  ]));
+
   const metrics = getDynamicMetrics();
   return (
     <div className="dashboard-container">
@@ -12976,7 +13075,9 @@ function App() {
                         branch: initialBranch,
                         schedule: firstBatch ? firstBatch.schedule : 'Mon-Thu',
                         batch: firstBatch ? firstBatch.id : 'Morning',
-                        photo: null
+                        photo: null,
+                        trainerName: '',
+                        artName: ''
                       });
                       setIsAddModalOpen(true);
                     }}>
@@ -13416,17 +13517,64 @@ function App() {
                         <option value="Inactive">Inactive</option>
                       </select>
                     </div>
-                    <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '1rem', marginBottom: '1.25rem' }}>
+                    {!editingStudentData.admissionPaid && (
+                      <div className="form-group" style={{ gridColumn: 'span 2', marginTop: '0.5rem' }}>
+                        <label>Admission Coupon Code (Optional)</label>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <input
+                            type="text"
+                            className="form-control"
+                            placeholder="Enter admission coupon (e.g. FIT20)"
+                            value={editingStudentData.appliedAdmissionCoupon || ''}
+                            onChange={(e) => {
+                              const code = e.target.value.toUpperCase().trim();
+                              setEditingStudentData({
+                                ...editingStudentData,
+                                appliedAdmissionCoupon: code
+                              });
+                            }}
+                          />
+                          {editingStudentData.appliedAdmissionCoupon && (() => {
+                            const coupon = resolveCouponCode(editingStudentData.appliedAdmissionCoupon);
+                            if (coupon) {
+                              const display = coupon.type === 'amount' ? `₹${coupon.value}` : `${coupon.value}%`;
+                              return (
+                                <div style={{ alignSelf: 'center', whiteSpace: 'nowrap', fontSize: '0.85rem', color: '#51CF66', fontWeight: 600 }}>
+                                  ✓ {display} Off
+                                </div>
+                              );
+                            } else {
+                              return (
+                                <div style={{ alignSelf: 'center', whiteSpace: 'nowrap', fontSize: '0.85rem', color: '#FF6B6B', fontWeight: 600 }}>
+                                  ❌ Invalid
+                                </div>
+                              );
+                            }
+                          })()}
+                        </div>
+                      </div>
+                    )}
+                    <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                      <label>Trainer Name</label>
                       <input
-                        type="checkbox"
-                        id="edit-is-priority"
-                        checked={editingStudentData.isPriority || false}
-                        onChange={(e) => setEditingStudentData({ ...editingStudentData, isPriority: e.target.checked })}
-                        style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                        type="text"
+                        list="trainer-list"
+                        className="form-control"
+                        placeholder="Enter or select trainer name"
+                        value={editingStudentData.trainerName || ''}
+                        onChange={(e) => setEditingStudentData({ ...editingStudentData, trainerName: e.target.value })}
                       />
-                      <label htmlFor="edit-is-priority" style={{ color: '#fff', fontSize: '0.9rem', cursor: 'pointer', margin: 0, userSelect: 'none' }}>
-                        Mark as Priority Student
-                      </label>
+                    </div>
+                    <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                      <label>Art Name</label>
+                      <input
+                        type="text"
+                        list="art-list"
+                        className="form-control"
+                        placeholder="Enter or select art name"
+                        value={editingStudentData.artName || ''}
+                        onChange={(e) => setEditingStudentData({ ...editingStudentData, artName: e.target.value })}
+                      />
                     </div>
                   </div>
                 </div>
@@ -13487,10 +13635,14 @@ function App() {
 
                   <div style={{ marginBottom: '1.5rem', background: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
                     <h4 style={{ margin: '0 0 1rem 0', color: 'var(--color-secondary)', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Academy Details</h4>
-                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
                       <span className="badge" style={{ background: 'var(--color-primary)', color: 'white' }}>{selectedStudent.branch} Branch</span>
                       <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>{getBatchNameFromSchedule(selectedStudent.schedule, selectedStudent.branch)}</span>
                       <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>{selectedStudent.schedule} Batch</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem' }}>
+                      <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Trainer Name</span><div style={{ fontWeight: 600 }}>{selectedStudent.trainerName || 'N/A'}</div></div>
+                      <div><span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Art Name</span><div style={{ fontWeight: 600 }}>{selectedStudent.artName || 'N/A'}</div></div>
                     </div>
                   </div>
 
@@ -13711,7 +13863,7 @@ function App() {
                         </div>
 
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
-                          <span>Admission Fee (₹{admissionFeeRate}):</span>
+                          <span>Admission Fee:</span>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             {selectedStudent.admissionPaid ? (
                               <>
@@ -13720,7 +13872,9 @@ function App() {
                               </>
                             ) : (
                               <>
-                                <span className="badge badge-red">Pending (₹{admissionFeeRate})</span>
+                                <span className="badge badge-red" style={{ marginRight: '4px' }}>
+                                  Pending (₹{feeDetails.admissionDue}){selectedStudent.appliedAdmissionCoupon ? ` [Coupon: ${selectedStudent.appliedAdmissionCoupon}]` : ''}
+                                </span>
                                 <button className="btn-small btn-primary" style={{ padding: '2px 6px', fontSize: '0.75rem' }} onClick={() => markFeePaid(selectedStudent.id, 'admissionPaid')}>Pay</button>
                               </>
                             )}
@@ -13742,12 +13896,17 @@ function App() {
                           <div style={{ marginBottom: '1rem' }}>
                             <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>UNPAID MONTHS ({feeDetails.unpaidMonths.length})</div>
                             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                              {feeDetails.unpaidMonths.map(m => (
-                                <div key={m} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(229, 9, 20, 0.1)', border: '1px solid rgba(229, 9, 20, 0.2)', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>
-                                  <span style={{ color: 'white' }}>{m}</span>
-                                  <button style={{ border: 'none', background: 'var(--color-primary)', color: 'white', borderRadius: '3px', cursor: 'pointer', padding: '2px 6px', fontSize: '0.7rem', fontWeight: 'bold' }} onClick={() => markFeePaidCustomMonth(selectedStudent.id, m)}>Pay</button>
-                                </div>
-                              ))}
+                              {feeDetails.unpaidMonths.map(m => {
+                                const info = getFeeInfoForMonth(selectedStudent, m);
+                                return (
+                                  <div key={m} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(229, 9, 20, 0.1)', border: '1px solid rgba(229, 9, 20, 0.2)', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>
+                                    <span style={{ color: 'white' }}>
+                                      {formatMonthName(m)}: <strong>₹{info.finalRate}</strong> {info.coupon ? `(${info.coupon.couponCode})` : ''}
+                                    </span>
+                                    <button style={{ border: 'none', background: 'var(--color-primary)', color: 'white', borderRadius: '3px', cursor: 'pointer', padding: '2px 6px', fontSize: '0.7rem', fontWeight: 'bold' }} onClick={() => markFeePaidCustomMonth(selectedStudent.id, m)}>Pay</button>
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
                         )}
@@ -13757,12 +13916,17 @@ function App() {
                           <div>
                             <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>PAID MONTHS ({feeDetails.paidMonthsList.length})</div>
                             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                              {feeDetails.paidMonthsList.map(m => (
-                                <div key={m} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(76, 175, 80, 0.1)', border: '1px solid rgba(76, 175, 80, 0.2)', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>
-                                  <span style={{ color: 'white' }}>{m}</span>
-                                  <button style={{ border: 'none', background: 'rgba(255,255,255,0.1)', color: 'white', borderRadius: '3px', cursor: 'pointer', padding: '2px 6px', fontSize: '0.7rem' }} onClick={() => unmarkFeePaidCustomMonth(selectedStudent.id, m)}>Undo</button>
-                                </div>
-                              ))}
+                              {feeDetails.paidMonthsList.map(m => {
+                                const info = getFeeInfoForMonth(selectedStudent, m);
+                                return (
+                                  <div key={m} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(76, 175, 80, 0.1)', border: '1px solid rgba(76, 175, 80, 0.2)', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>
+                                    <span style={{ color: 'white' }}>
+                                      {formatMonthName(m)}: <strong>₹{info.finalRate}</strong> {info.coupon ? `(${info.coupon.couponCode})` : ''}
+                                    </span>
+                                    <button style={{ border: 'none', background: 'rgba(255,255,255,0.1)', color: 'white', borderRadius: '3px', cursor: 'pointer', padding: '2px 6px', fontSize: '0.7rem' }} onClick={() => unmarkFeePaidCustomMonth(selectedStudent.id, m)}>Undo</button>
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
                         )}
@@ -13791,7 +13955,7 @@ function App() {
           <div className="modal-content" style={{ maxWidth: '450px' }}>
             <div className="panel-header">
               <h2 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Wallet size={20} color="var(--color-primary)" /> Customize Fees: {feeEditingStudent.name}
+                <Wallet size={20} color="var(--color-primary)" /> Customize Fees & Coupon: {feeEditingStudent.name} (for {formatMonthName(feeMonth)})
               </h2>
               <button className="btn-icon" onClick={() => setIsFeeEditModalOpen(false)}><X size={24} /></button>
             </div>
@@ -13837,7 +14001,7 @@ function App() {
 
               {/* Monthly Coupon Section */}
               <div className="form-group" style={{ marginTop: '1.25rem' }}>
-                <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', display: 'block' }}>Apply Monthly Coupon Code</label>
+                <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', display: 'block' }}>Apply Monthly Coupon Code (for {formatMonthName(feeMonth)})</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <input
                     type="text"
@@ -13853,14 +14017,18 @@ function App() {
                     style={{ padding: '0 1rem', fontSize: '0.85rem', height: '38px' }}
                     onClick={() => {
                       const code = couponInput.trim().toUpperCase();
+                      const [year, month] = feeMonth.split('-').map(Number);
+                      let updatedCoupons = feeEditingStudent.appliedCoupons ? [...feeEditingStudent.appliedCoupons] : [];
+                      const index = updatedCoupons.findIndex(c => c.appliedMonth === month && c.appliedYear === year);
+
                       if (!code) {
-                        setCouponMessage('Coupon cleared (0% Discount)');
+                        setCouponMessage(`Coupon cleared for ${formatMonthName(feeMonth)} (0% Discount)`);
+                        if (index > -1) {
+                          updatedCoupons.splice(index, 1);
+                        }
                         setFeeEditingStudent(prev => ({
                           ...prev,
-                          appliedCoupon: '',
-                          couponType: 'percentage',
-                          couponValue: 0,
-                          discountPercentage: 0
+                          appliedCoupons: updatedCoupons
                         }));
                         return;
                       }
@@ -13872,13 +14040,27 @@ function App() {
                       }
 
                       const display = coupon.type === 'amount' ? `₹${coupon.value}` : `${coupon.value}%`;
-                      setCouponMessage(`✓ Coupon Applied! ${display} Discount`);
+                      setCouponMessage(`✓ Coupon Applied for ${formatMonthName(feeMonth)}! ${display} Discount`);
+                      
+                      const newCoupon = {
+                        couponId: code,
+                        couponCode: code,
+                        discountType: coupon.type,
+                        discountValue: coupon.value,
+                        appliedMonth: month,
+                        appliedYear: year,
+                        appliedAt: new Date().toISOString()
+                      };
+
+                      if (index > -1) {
+                        updatedCoupons[index] = newCoupon;
+                      } else {
+                        updatedCoupons.push(newCoupon);
+                      }
+
                       setFeeEditingStudent(prev => ({
                         ...prev,
-                        appliedCoupon: code,
-                        couponType: coupon.type,
-                        couponValue: coupon.value,
-                        discountPercentage: coupon.type === 'percentage' ? coupon.value : 0
+                        appliedCoupons: updatedCoupons
                       }));
                     }}
                   >
@@ -13897,64 +14079,6 @@ function App() {
                 )}
               </div>
 
-              {/* Admission Coupon Section */}
-              <div className="form-group" style={{ marginTop: '1.25rem' }}>
-                <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', display: 'block' }}>Apply Admission Coupon Code</label>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="Enter admission coupon (e.g. FIT20)"
-                    value={admissionCouponInput}
-                    onChange={(e) => setAdmissionCouponInput(e.target.value.toUpperCase())}
-                    style={{ flex: 1 }}
-                  />
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    style={{ padding: '0 1rem', fontSize: '0.85rem', height: '38px' }}
-                    onClick={() => {
-                      const code = admissionCouponInput.trim().toUpperCase();
-                      if (!code) {
-                        setAdmissionCouponMessage('Admission Coupon cleared');
-                        setFeeEditingStudent(prev => ({
-                          ...prev,
-                          appliedAdmissionCoupon: ''
-                        }));
-                        return;
-                      }
-
-                      const coupon = resolveCouponCode(code);
-                      if (!coupon) {
-                        setAdmissionCouponMessage('❌ Invalid Coupon Code');
-                        return;
-                      }
-
-                      const display = coupon.type === 'amount' ? `₹${coupon.value}` : `${coupon.value}%`;
-                      setAdmissionCouponMessage(`✓ Admission Coupon Applied! ${display} Discount`);
-                      setFeeEditingStudent(prev => ({
-                        ...prev,
-                        appliedAdmissionCoupon: code
-                      }));
-                    }}
-                  >
-                    Apply
-                  </button>
-                </div>
-                {admissionCouponMessage && (
-                  <div style={{
-                    marginTop: '6px',
-                    fontSize: '0.8rem',
-                    color: admissionCouponMessage.includes('❌') ? '#FF6B6B' : '#51CF66',
-                    fontWeight: 500
-                  }}>
-                    {admissionCouponMessage}
-                  </div>
-                )}
-                <div style={{ marginTop: '8px', fontSize: '0.75rem', color: 'var(--color-text-muted)', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '4px' }}>
-                  <strong>Available Coupons:</strong> FIT10 (10% off), FIT20 (20% off), FIT50 (50% off), FREE (100% off)
-                </div>
-              </div>
             </div>
 
             <div className="modal-actions" style={{ marginTop: '1.5rem', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
@@ -13968,10 +14092,9 @@ function App() {
                 className="btn-primary"
                 onClick={() => {
                   const code = couponInput.trim().toUpperCase();
-                  let couponType = 'percentage';
-                  let couponValue = 0;
-                  let discountPercentage = 0;
-                  let appliedCoupon = '';
+                  const [year, month] = feeMonth.split('-').map(Number);
+                  let updatedCoupons = feeEditingStudent.appliedCoupons ? [...feeEditingStudent.appliedCoupons] : [];
+                  const index = updatedCoupons.findIndex(c => c.appliedMonth === month && c.appliedYear === year);
 
                   if (code) {
                     const resolved = resolveCouponCode(code);
@@ -13979,18 +14102,23 @@ function App() {
                       setCouponMessage('❌ Invalid Coupon Code');
                       return;
                     }
-                    appliedCoupon = code;
-                    couponType = resolved.type;
-                    couponValue = resolved.value;
-                    discountPercentage = resolved.type === 'percentage' ? resolved.value : 0;
-                  }
-
-                  const admCode = admissionCouponInput.trim().toUpperCase();
-                  if (admCode) {
-                    const resolved = resolveCouponCode(admCode);
-                    if (!resolved) {
-                      setAdmissionCouponMessage('❌ Invalid Admission Coupon Code');
-                      return;
+                    const newCoupon = {
+                      couponId: code,
+                      couponCode: code,
+                      discountType: resolved.type,
+                      discountValue: resolved.value,
+                      appliedMonth: month,
+                      appliedYear: year,
+                      appliedAt: new Date().toISOString()
+                    };
+                    if (index > -1) {
+                      updatedCoupons[index] = newCoupon;
+                    } else {
+                      updatedCoupons.push(newCoupon);
+                    }
+                  } else {
+                    if (index > -1) {
+                      updatedCoupons.splice(index, 1);
                     }
                   }
 
@@ -14001,11 +14129,7 @@ function App() {
                     joinDate: `${customStartMonth}-01`,
                     customMonthlyRate: rate,
                     customAdmissionRate: admissionRateOverride,
-                    appliedCoupon,
-                    couponType,
-                    couponValue,
-                    discountPercentage,
-                    appliedAdmissionCoupon: admCode
+                    appliedCoupons: updatedCoupons
                   };
 
                   setStudents(students.map(s => s.id === updatedStudent.id ? updatedStudent : s));
@@ -14314,18 +14438,31 @@ function App() {
                 <label>Joining Date</label>
                 <input type="date" className="form-control" required value={newStudent.joinDate} onChange={(e) => setNewStudent({ ...newStudent, joinDate: e.target.value })} />
               </div>
-              <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '1rem', marginBottom: '1.25rem' }}>
-                <input
-                  type="checkbox"
-                  id="add-is-priority"
-                  checked={newStudent.isPriority || false}
-                  onChange={(e) => setNewStudent({ ...newStudent, isPriority: e.target.checked })}
-                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                />
-                <label htmlFor="add-is-priority" style={{ color: '#fff', fontSize: '0.9rem', cursor: 'pointer', margin: 0, userSelect: 'none' }}>
-                  Mark as Priority Student
-                </label>
+              <div className="grid-2-col" style={{ marginTop: '0.75rem' }}>
+                <div className="form-group">
+                  <label>Trainer Name</label>
+                  <input
+                    type="text"
+                    list="trainer-list"
+                    className="form-control"
+                    placeholder="Enter or select trainer"
+                    value={newStudent.trainerName || ''}
+                    onChange={(e) => setNewStudent({ ...newStudent, trainerName: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Art Name</label>
+                  <input
+                    type="text"
+                    list="art-list"
+                    className="form-control"
+                    placeholder="Enter or select art"
+                    value={newStudent.artName || ''}
+                    onChange={(e) => setNewStudent({ ...newStudent, artName: e.target.value })}
+                  />
+                </div>
               </div>
+
               <div className="form-group">
                 <label>Coupon Code (Optional)</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -14348,6 +14485,41 @@ function App() {
                   />
                   {newStudent.appliedCoupon && (() => {
                     const coupon = resolveCouponCode(newStudent.appliedCoupon);
+                    if (coupon) {
+                      const display = coupon.type === 'amount' ? `₹${coupon.value}` : `${coupon.value}%`;
+                      return (
+                        <div style={{ alignSelf: 'center', whiteSpace: 'nowrap', fontSize: '0.85rem', color: '#51CF66', fontWeight: 600 }}>
+                          ✓ {display} Off
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div style={{ alignSelf: 'center', whiteSpace: 'nowrap', fontSize: '0.85rem', color: '#FF6B6B', fontWeight: 600 }}>
+                          ❌ Invalid
+                        </div>
+                      );
+                    }
+                  })()}
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Admission Coupon Code (Optional)</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="Enter admission coupon (e.g. FIT20)"
+                    value={newStudent.appliedAdmissionCoupon || ''}
+                    onChange={(e) => {
+                      const code = e.target.value.toUpperCase().trim();
+                      setNewStudent({
+                        ...newStudent,
+                        appliedAdmissionCoupon: code
+                      });
+                    }}
+                  />
+                  {newStudent.appliedAdmissionCoupon && (() => {
+                    const coupon = resolveCouponCode(newStudent.appliedAdmissionCoupon);
                     if (coupon) {
                       const display = coupon.type === 'amount' ? `₹${coupon.value}` : `${coupon.value}%`;
                       return (
@@ -14813,6 +14985,17 @@ function App() {
           </div>
         </div>
       )}
+
+      <datalist id="trainer-list">
+        {uniqueTrainers.map(t => (
+          <option key={t} value={t} />
+        ))}
+      </datalist>
+      <datalist id="art-list">
+        {uniqueArts.map(a => (
+          <option key={a} value={a} />
+        ))}
+      </datalist>
 
     </div>
   );
