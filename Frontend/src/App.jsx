@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  Users, CalendarDays, Wallet, Bell, Settings, LogOut, UserPlus, AlertTriangle, X,
+  Users, CalendarDays, Calendar, Layers, Wallet, Bell, Settings, LogOut, UserPlus, AlertTriangle, X,
   ChevronLeft, ChevronRight, CheckCircle, XCircle, MessageCircle, MessageSquare,
   Search, Phone, Trash2, ArrowRight, Activity, MapPin, TrendingUp, Award, Menu,
   Shield, Lock, Unlock, FileDown, FileUp, Database, Terminal, Cpu, HardDrive, Key, History,
@@ -304,6 +304,7 @@ function App() {
   const [announcementSuccess, setAnnouncementSuccess] = useState('');
   const [announcementError, setAnnouncementError] = useState('');
   const [latestAnnouncement, setLatestAnnouncement] = useState(null);
+  const [remindersTab, setRemindersTab] = useState('broadcast');
 
   // Rebuilt Developer Panel States
   const [devView, setDevView] = useState('dashboard');
@@ -435,6 +436,7 @@ function App() {
   // Financial Performance / Profit Filters States
   const [perfFilterBranch, setPerfFilterBranch] = useState('All');
   const [perfFilterBatch, setPerfFilterBatch] = useState('All');
+  const [perfActiveTab, setPerfActiveTab] = useState('students');
 
   const handleOpenAddClass = () => {
     setClassForm({
@@ -1306,7 +1308,7 @@ function App() {
       .catch(err => console.error('Error fetching system settings:', err));
 
     const activeRole = getCookieValue('umai_session_role') || userRole;
-    if (activeRole === 'superadmin' || activeRole === 'developer' || activeRole === 'branchadmin') {
+    if (activeRole === 'superadmin' || activeRole === 'developer' || activeRole === 'branchadmin' || activeRole === 'trainer') {
       fetchGradingStudents();
     }
   };
@@ -1315,9 +1317,24 @@ function App() {
     setLoadingGrading(true);
     setGradingError('');
     const activeRole = getCookieValue('umai_session_role') || userRole;
-    const branchParam = (activeRole === 'superadmin' || activeRole === 'developer') ? (gradingFilterBranch || 'All') : 'All';
+    const activeBranch = getCookieValue('umai_session_branch') || userBranch;
+    const activeBatch = getCookieValue('umai_session_batch') || userBatch;
 
-    fetch(`${API_BASE_URL}/grading/students?branch=${encodeURIComponent(branchParam)}`)
+    let branchParam = 'All';
+    let batchParam = 'All';
+
+    if (activeRole === 'superadmin' || activeRole === 'developer') {
+      branchParam = gradingFilterBranch || 'All';
+      batchParam = gradingFilterBatch || 'All';
+    } else if (activeRole === 'branchadmin') {
+      branchParam = activeBranch || 'All';
+      batchParam = gradingFilterBatch || 'All';
+    } else if (activeRole === 'trainer') {
+      branchParam = activeBranch || 'All';
+      batchParam = (gradingFilterBatch && gradingFilterBatch !== 'All') ? gradingFilterBatch : (activeBatch || 'All');
+    }
+
+    fetch(`${API_BASE_URL}/grading/students?branch=${encodeURIComponent(branchParam)}&batch=${encodeURIComponent(batchParam)}`)
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch student grading details.');
         return res.json();
@@ -1532,16 +1549,16 @@ function App() {
       .catch(err => console.error('Error fetching students:', err));
   }, [branchFilter, batchFilter, loggedInUser]);
 
-  // Fetch grading students dynamically when branch filter changes or grading view is opened
+  // Fetch grading students dynamically when branch/batch filter changes or grading view is opened
   useEffect(() => {
     const token = getSessionToken();
     if (!token) return;
 
     const activeRole = getCookieValue('umai_session_role') || userRole;
-    if (currentView === 'grading' && (activeRole === 'superadmin' || activeRole === 'developer' || activeRole === 'branchadmin')) {
+    if (currentView === 'grading' && (activeRole === 'superadmin' || activeRole === 'developer' || activeRole === 'branchadmin' || activeRole === 'trainer')) {
       fetchGradingStudents();
     }
-  }, [gradingFilterBranch, currentView, loggedInUser]);
+  }, [gradingFilterBranch, gradingFilterBatch, currentView, loggedInUser]);
 
   // Dynamic batch loading for Login Page
   useEffect(() => {
@@ -1963,8 +1980,8 @@ function App() {
         message: announcementForm.message.trim(),
         type: announcementForm.type || 'general',
         priority: announcementForm.priority || 'medium',
-        branch: 'all',
-        batch: 'all',
+        branch: announcementForm.branch || 'all',
+        batch: announcementForm.batch || 'all',
         targetUser: announcementForm.targetUser || 'all',
         expiryDate: announcementForm.expiryDate ? new Date(announcementForm.expiryDate).toISOString() : null,
         scheduledAt: announcementForm.scheduledAt ? new Date(announcementForm.scheduledAt).toISOString() : null,
@@ -6867,6 +6884,26 @@ function App() {
             for (let d = 1; d <= daysInMonth; d++) {
               const dateStr = `${year}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
               const dayRecord = attendanceRecords[dateStr];
+              const dayNamesShortList = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+              const dayOfWeekShort = dayNamesShortList[new Date(year, m, d).getDay()];
+
+              // Check if scheduled batch day
+              let isBatchDay = true;
+              if (batchFilter !== 'All') {
+                const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchFilter.toLowerCase());
+                if (selectedBatchObj) {
+                  const bDays = parseScheduleToDays(selectedBatchObj.schedule);
+                  isBatchDay = !!bDays[dayOfWeekShort];
+                }
+              } else {
+                const relevantStudents = searchedStudents.filter(s => (s.status || 'Active') !== 'Inactive' && (branchFilter === 'All' || s.branch === branchFilter));
+                if (relevantStudents.length > 0) {
+                  isBatchDay = relevantStudents.some(s => {
+                    const sched = s.schedule || batchOptions.find(b => b.id.toLowerCase() === (s.batch || '').toLowerCase())?.schedule;
+                    return sched ? !!parseScheduleToDays(sched)[dayOfWeekShort] : false;
+                  });
+                }
+              }
 
               let presentCount = 0;
               let totalMarked = 0;
@@ -6888,9 +6925,11 @@ function App() {
                 fontSize: '0.8rem',
                 fontWeight: '600',
                 cursor: 'pointer',
-                background: 'rgba(255, 255, 255, 0.02)',
+                background: !isBatchDay ? 'rgba(255, 255, 255, 0.01)' : 'rgba(255, 255, 255, 0.03)',
                 transition: 'all 0.2s ease',
-                border: '1px solid transparent'
+                border: !isBatchDay ? '1px dashed rgba(255, 255, 255, 0.08)' : '1px solid transparent',
+                color: !isBatchDay ? '#636366' : '#ffffff',
+                opacity: !isBatchDay ? 0.4 : 1
               };
 
               if (totalMarked > 0) {
@@ -6899,16 +6938,22 @@ function App() {
                   cellStyle.backgroundColor = 'rgba(76, 175, 80, 0.2)';
                   cellStyle.borderColor = '#4CAF50';
                   cellStyle.color = '#4CAF50';
+                  cellStyle.opacity = 1;
                 } else {
                   cellStyle.backgroundColor = 'rgba(255, 152, 0, 0.2)';
                   cellStyle.borderColor = '#FF9800';
                   cellStyle.color = '#FF9800';
+                  cellStyle.opacity = 1;
                 }
+              } else if (isBatchDay) {
+                cellStyle.borderColor = 'rgba(56, 189, 248, 0.25)';
+                cellStyle.color = '#38bdf8';
               }
 
               if (dateStr === markingDate) {
                 cellStyle.borderColor = 'var(--color-primary)';
                 cellStyle.boxShadow = '0 0 8px rgba(229, 9, 20, 0.4)';
+                cellStyle.opacity = 1;
               }
 
               monthDays.push(
@@ -6921,7 +6966,7 @@ function App() {
                     setCurrentDate(new Date(year, m, 1));
                     setAttendanceTab('monthly');
                   }}
-                  title={totalMarked > 0 ? `Attendance: ${presentCount} present` : `No attendance marked`}
+                  title={totalMarked > 0 ? `Attendance: ${presentCount} present` : (!isBatchDay ? `No batch scheduled (Off Day)` : `Class Day - click to mark`)}
                 >
                   {d}
                 </div>
@@ -6974,6 +7019,26 @@ function App() {
     const firstDay = new Date(year, month, 1).getDay();
     const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
+    const dayNamesShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const dayNamesFull = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    // Helper to determine if a day of the week has scheduled batch/class
+    const isDayBatchScheduled = (dayOfWeekShortName) => {
+      if (batchFilter !== 'All') {
+        const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchFilter.toLowerCase());
+        if (selectedBatchObj) {
+          const bDays = parseScheduleToDays(selectedBatchObj.schedule);
+          return !!bDays[dayOfWeekShortName];
+        }
+      }
+      const relevantStudents = searchedStudents.filter(s => (s.status || 'Active') !== 'Inactive' && (branchFilter === 'All' || s.branch === branchFilter));
+      if (relevantStudents.length === 0) return true;
+      return relevantStudents.some(s => {
+        const sched = s.schedule || batchOptions.find(b => b.id.toLowerCase() === (s.batch || '').toLowerCase())?.schedule;
+        return sched ? !!parseScheduleToDays(sched)[dayOfWeekShortName] : false;
+      });
+    };
+
     const days = [];
     for (let i = 0; i < firstDay; i++) {
       days.push(<div key={`empty-${i}`} className="calendar-day empty"></div>);
@@ -6982,6 +7047,8 @@ function App() {
     for (let i = 1; i <= daysInMonth; i++) {
       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
       const dayRecord = attendanceRecords[dateStr];
+      const dayOfWeekShort = dayNamesShort[new Date(year, month, i).getDay()];
+      const isClassDay = isDayBatchScheduled(dayOfWeekShort);
 
       let presentCount = 0;
       let absentCount = 0;
@@ -6997,55 +7064,211 @@ function App() {
       }
 
       days.push(
-        <div key={i} className={`calendar-day ${dateStr === markingDate ? 'today' : ''}`} onClick={() => setMarkingDate(dateStr)} style={{ cursor: 'pointer' }}>
-          <div className="day-number">{i}</div>
+        <div
+          key={i}
+          className={`calendar-day ${dateStr === markingDate ? 'today' : ''}`}
+          onClick={() => setMarkingDate(dateStr)}
+          style={{
+            cursor: 'pointer',
+            opacity: isClassDay ? 1 : 0.4,
+            background: dateStr === markingDate
+              ? 'rgba(229, 9, 20, 0.15)'
+              : (!isClassDay ? 'rgba(255, 255, 255, 0.01)' : 'rgba(255, 255, 255, 0.03)'),
+            border: dateStr === markingDate
+              ? '1px solid var(--color-primary)'
+              : (!isClassDay ? '1px dashed rgba(255, 255, 255, 0.08)' : '1px solid var(--glass-border)')
+          }}
+        >
+          <div className="day-number" style={{ color: !isClassDay ? '#636366' : '#fff' }}>{i}</div>
           <div className="day-content">
-            {totalMarked > 0 && (
+            {totalMarked > 0 ? (
               <div className="attendance-indicator" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                <span className="text-success" style={{ fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
-                  <CheckCircle size={12} /> {presentCount}
+                <span className="text-success" style={{ fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px', color: '#4CAF50' }}>
+                  <CheckCircle size={11} /> {presentCount}
                 </span>
-                <span className="text-danger" style={{ fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
-                  <XCircle size={12} /> {absentCount}
+                <span className="text-danger" style={{ fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px', color: '#ff453a' }}>
+                  <XCircle size={11} /> {absentCount}
                 </span>
               </div>
+            ) : isClassDay ? (
+              <span style={{ fontSize: '0.65rem', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', padding: '2px 5px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.2)', display: 'inline-block', marginTop: '2px' }}>
+                Class Day
+              </span>
+            ) : (
+              <span style={{ fontSize: '0.65rem', color: '#8e8e93', background: 'rgba(255, 255, 255, 0.04)', padding: '2px 5px', borderRadius: '4px', border: '1px solid rgba(255, 255, 255, 0.06)', display: 'inline-block', marginTop: '2px' }}>
+                No Batch
+              </span>
             )}
           </div>
         </div>
       );
     }
 
+    let markingDayOfWeekShort = 'Mon';
+    let markingDayOfWeekFull = 'Monday';
+
+    if (markingDate) {
+      const [mY, mM, mD] = markingDate.split('-').map(Number);
+      const dObj = new Date(mY, mM - 1, mD);
+      if (!isNaN(dObj.getTime())) {
+        markingDayOfWeekShort = dayNamesShort[dObj.getDay()];
+        markingDayOfWeekFull = dayNamesFull[dObj.getDay()];
+      }
+    }
+
+    const filteredAttendanceStudents = searchedStudents.filter(s => {
+      const isInactive = (s.status || 'Active') === 'Inactive';
+      if (isInactive) return false;
+
+      // 1. Day of Week filter: Only show students whose batch/schedule runs on this day of the week
+      const studentSched = s.schedule || (() => {
+        const bObj = batchOptions.find(b => b.id.toLowerCase() === (s.batch || '').toLowerCase());
+        return bObj ? bObj.schedule : '';
+      })();
+
+      if (studentSched) {
+        const activeDaysMap = parseScheduleToDays(studentSched);
+        if (activeDaysMap && !activeDaysMap[markingDayOfWeekShort]) {
+          return false; // Does not have class on this day
+        }
+      }
+
+      // 2. Time Slot Filter (All, Morning, Evening, Night)
+      const matchBatch = attendanceBatchFilter === 'All' ||
+        s.batch === attendanceBatchFilter ||
+        (() => {
+          const batchObj = batchOptions.find(b => b.id.toLowerCase() === (s.batch || '').toLowerCase());
+          return batchObj && batchObj.slotType && batchObj.slotType.toLowerCase() === attendanceBatchFilter.toLowerCase();
+        })();
+
+      // 3. Branch filter
+      const matchBranch = branchFilter === 'All' || s.branch === branchFilter;
+
+      // 4. Batch filter dropdown
+      const matchBatchSchedule = batchFilter === 'All' || (() => {
+        const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchFilter.toLowerCase());
+        if (!selectedBatchObj) return false;
+        const studentBatchLower = (s.batch || '').toLowerCase().trim();
+        const targetIdLower = selectedBatchObj.id.toLowerCase().trim();
+        const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
+        if (studentBatchLower === targetIdLower) return true;
+        if (studentBatchLower === targetNameLower) return true;
+        if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
+          return false;
+        }
+        return schedulesMatch(s.schedule, selectedBatchObj.schedule);
+      })();
+
+      return matchBatch && matchBranch && matchBatchSchedule;
+    });
+
+    let dailyPresentCount = 0;
+    let dailyAbsentCount = 0;
+    filteredAttendanceStudents.forEach(s => {
+      const st = attendanceRecords[markingDate]?.[s.id];
+      if (st === 'present') dailyPresentCount++;
+      else if (st === 'absent') dailyAbsentCount++;
+    });
+
     return (
-      <div className="attendance-view">
-        <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
+      <div className="attendance-view" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        {/* Sub-view switcher segmented pill bar */}
+        <div style={{
+          display: 'flex',
+          gap: '6px',
+          background: 'rgba(0, 0, 0, 0.35)',
+          padding: '4px',
+          borderRadius: '10px',
+          border: '1px solid rgba(255, 255, 255, 0.06)',
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch'
+        }}>
           <button
-            className={`btn-primary ${attendanceTab === 'monthly' ? '' : 'btn-secondary'}`}
-            style={attendanceTab === 'monthly' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
+            type="button"
             onClick={() => setAttendanceTab('monthly')}
+            style={{
+              flex: 1,
+              minWidth: '130px',
+              padding: '8px 14px',
+              borderRadius: '8px',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              border: 'none',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              background: attendanceTab === 'monthly' ? 'rgba(255, 255, 255, 0.14)' : 'transparent',
+              color: attendanceTab === 'monthly' ? '#fff' : '#8e8e93',
+              boxShadow: attendanceTab === 'monthly' ? '0 2px 8px rgba(0,0,0,0.3)' : 'none',
+              transition: 'all 0.2s ease',
+              whiteSpace: 'nowrap'
+            }}
           >
-            Monthly Dashboard
+            <CalendarDays size={14} /> Daily & Monthly
           </button>
           <button
-            className={`btn-primary ${attendanceTab === 'year2026' ? '' : 'btn-secondary'}`}
-            style={attendanceTab === 'year2026' ? {} : { background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)', boxShadow: 'none' }}
+            type="button"
             onClick={() => setAttendanceTab('year2026')}
+            style={{
+              flex: 1,
+              minWidth: '130px',
+              padding: '8px 14px',
+              borderRadius: '8px',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              border: 'none',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              background: attendanceTab === 'year2026' ? 'rgba(255, 255, 255, 0.14)' : 'transparent',
+              color: attendanceTab === 'year2026' ? '#fff' : '#8e8e93',
+              boxShadow: attendanceTab === 'year2026' ? '0 2px 8px rgba(0,0,0,0.3)' : 'none',
+              transition: 'all 0.2s ease',
+              whiteSpace: 'nowrap'
+            }}
           >
-            {new Date().getFullYear()} Full Calendar
+            <Calendar size={14} /> {new Date().getFullYear()} Full Year Calendar
           </button>
         </div>
 
         {attendanceTab === 'monthly' ? (
           <>
-            <div className="panel" style={{ marginBottom: '2rem' }}>
-              <div className="panel-header" style={{ flexWrap: 'wrap', gap: '1rem' }}>
-                <h3 className="panel-title">Daily Attendance</h3>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
-                  {/* Branch Filter Selector */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>Branch:</span>
+            {/* Daily Attendance Controller Card */}
+            <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1.25rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '1rem', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <h3 className="panel-title" style={{ fontSize: '0.95rem', margin: 0, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Daily Attendance
+                  </h3>
+                  <span className="badge" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', fontSize: '0.75rem', padding: '2px 8px', borderRadius: '6px' }}>
+                    📅 {markingDayOfWeekFull}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: '0.75rem', padding: '3px 8px' }}>
+                    👥 {filteredAttendanceStudents.length} Students
+                  </span>
+                  <span className="badge" style={{ background: 'rgba(76, 175, 80, 0.15)', color: '#4CAF50', border: '1px solid rgba(76, 175, 80, 0.25)', fontSize: '0.75rem', padding: '3px 8px' }}>
+                    ✓ {dailyPresentCount} Present
+                  </span>
+                  <span className="badge" style={{ background: 'rgba(244, 67, 54, 0.15)', color: '#ff453a', border: '1px solid rgba(244, 67, 54, 0.25)', fontSize: '0.75rem', padding: '3px 8px' }}>
+                    ✕ {dailyAbsentCount} Absent
+                  </span>
+                </div>
+              </div>
+
+                {/* Filters Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginBottom: '1rem' }}>
+                  {/* Branch Selector */}
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Branch</label>
                     <select
                       className="form-control"
-                      style={{ padding: '0.4rem 2rem 0.4rem 0.75rem', width: '160px', height: '36px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                      style={{ width: '100%', height: '40px', borderRadius: '8px', fontSize: '0.88rem', padding: '0 10px' }}
                       value={branchFilter}
                       onChange={(e) => setBranchFilter(e.target.value)}
                       disabled={!isAdminUser(loggedInUser)}
@@ -7063,12 +7286,12 @@ function App() {
                     </select>
                   </div>
 
-                  {/* Batch Filter Selector */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>Batch:</span>
+                  {/* Batch Selector */}
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Batch</label>
                     <select
                       className="form-control"
-                      style={{ padding: '0.4rem 2rem 0.4rem 0.75rem', width: '160px', height: '36px', background: 'rgba(0,0,0,0.4)', borderRadius: '8px', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                      style={{ width: '100%', height: '40px', borderRadius: '8px', fontSize: '0.88rem', padding: '0 10px' }}
                       value={batchFilter}
                       onChange={(e) => setBatchFilter(e.target.value)}
                       disabled={isBatchAdminUser(loggedInUser)}
@@ -7080,133 +7303,239 @@ function App() {
                     </select>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>Date:</span>
+                  {/* Date Input */}
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Date</label>
                     <input
                       type="date"
                       className="form-control"
-                      style={{ width: 'auto', padding: '0.4rem 0.75rem', height: '36px', background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', borderRadius: '8px' }}
+                      style={{ width: '100%', height: '40px', borderRadius: '8px', fontSize: '0.88rem', padding: '0 10px' }}
                       value={markingDate}
                       onChange={(e) => setMarkingDate(e.target.value)}
                     />
                   </div>
+
+                  {/* Search Input */}
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Search</label>
+                    <div style={{ position: 'relative' }}>
+                      <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none', zIndex: 2 }} />
+                      <input
+                        type="text"
+                        placeholder="Search student..."
+                        className="form-control search-input-box"
+                        style={{ paddingLeft: '38px', width: '100%', height: '40px', borderRadius: '8px', fontSize: '0.88rem' }}
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Time Slot Filter Pills */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '4px' }}>
+                  <span style={{ color: 'var(--color-text-muted)', fontSize: '0.78rem', fontWeight: 600, flexShrink: 0 }}>Slot:</span>
+                  <button
+                    type="button"
+                    className={`quick-chip ${attendanceBatchFilter === 'All' ? 'active' : ''}`}
+                    style={{ padding: '4px 12px', fontSize: '0.75rem', borderRadius: '6px' }}
+                    onClick={() => setAttendanceBatchFilter('All')}
+                  >
+                    All Slots
+                  </button>
+                  <button
+                    type="button"
+                    className={`quick-chip ${attendanceBatchFilter === 'Morning' ? 'active' : ''}`}
+                    style={{ padding: '4px 12px', fontSize: '0.75rem', borderRadius: '6px' }}
+                    onClick={() => setAttendanceBatchFilter('Morning')}
+                  >
+                    🌅 Morning
+                  </button>
+                  <button
+                    type="button"
+                    className={`quick-chip ${attendanceBatchFilter === 'Evening' ? 'active' : ''}`}
+                    style={{ padding: '4px 12px', fontSize: '0.75rem', borderRadius: '6px' }}
+                    onClick={() => setAttendanceBatchFilter('Evening')}
+                  >
+                    🌇 Evening
+                  </button>
+                  <button
+                    type="button"
+                    className={`quick-chip ${attendanceBatchFilter === 'Night' ? 'active' : ''}`}
+                    style={{ padding: '4px 12px', fontSize: '0.75rem', borderRadius: '6px' }}
+                    onClick={() => setAttendanceBatchFilter('Night')}
+                  >
+                    🌙 Night
+                  </button>
                 </div>
               </div>
 
-              <div className="filter-row" style={{ marginBottom: '0.5rem' }}>
-                <span style={{ color: 'var(--color-text-muted)', width: '80px', fontSize: '0.85rem' }}>Time:</span>
-                <button className={`btn-small ${attendanceBatchFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setAttendanceBatchFilter('All')}>All</button>
-                <button className={`btn-small ${attendanceBatchFilter === 'Morning' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setAttendanceBatchFilter('Morning')}>Morning</button>
-                <button className={`btn-small ${attendanceBatchFilter === 'Evening' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setAttendanceBatchFilter('Evening')}>Evening</button>
-                <button className={`btn-small ${attendanceBatchFilter === 'Night' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setAttendanceBatchFilter('Night')}>Night</button>
-              </div>
-
-              <div className="table-responsive" style={{ marginTop: '1.5rem' }}>
-                <table className="data-table responsive-table-cards">
-                  <thead>
-                    <tr>
-                      <th>Student</th>
-                      <th>Batch Info</th>
-                      <th>Status</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {searchedStudents.filter(s => {
-                      const isInactive = (s.status || 'Active') === 'Inactive';
-                      if (isInactive) return false;
-                      const matchBatch = attendanceBatchFilter === 'All' ||
-                        s.batch === attendanceBatchFilter ||
-                        (() => {
-                          const batchObj = batchOptions.find(b => b.id.toLowerCase() === (s.batch || '').toLowerCase());
-                          return batchObj && batchObj.slotType && batchObj.slotType.toLowerCase() === attendanceBatchFilter.toLowerCase();
-                        })();
-                      const matchSchedule = batchFilter === 'All' || (() => {
-                        const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchFilter.toLowerCase());
-                        if (!selectedBatchObj) return false;
-                        const studentBatchLower = (s.batch || '').toLowerCase().trim();
-                        const targetIdLower = selectedBatchObj.id.toLowerCase().trim();
-                        const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
-                        if (studentBatchLower === targetIdLower) return true;
-                        if (studentBatchLower === targetNameLower) return true;
-                        if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
-                          return false;
-                        }
-                        return schedulesMatch(s.schedule, selectedBatchObj.schedule);
-                      })();
-                      return matchBatch && matchSchedule;
-                    }).map(student => {
-                      const status = attendanceRecords[markingDate]?.[student.id];
-                      return (
-                        <tr key={student.id}>
-                          <td
-                            data-label="Student"
-                            style={{ fontWeight: 700, color: '#E50914', cursor: 'pointer', textDecoration: 'underline' }}
-                            onClick={() => handleSelectStudent(student)}
-                          >
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              {student.studentName || student.name}
-                              {student.isPriority && (
-                                <Star size={14} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
-                              )}
-                            </span>
-                          </td>
-                          <td data-label="Batch Info"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}</span></td>
-                          <td data-label="Status">
-                            {status === 'present' && <span className="badge badge-green">Present</span>}
-                            {status === 'absent' && <span className="badge badge-red">Absent</span>}
-                            {!status && <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Pending</span>}
-                          </td>
-                          <td data-label="Action">
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                              <button
-                                className={`btn-small ${status === 'present' ? 'btn-primary' : ''}`}
-                                style={status === 'present' ? { backgroundColor: '#4CAF50', borderColor: '#4CAF50' } : {}}
-                                onClick={() => markAttendance(student.id, status === 'present' ? 'none' : 'present')}
-                              >
-                                <CheckCircle size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Present
-                              </button>
-                              <button
-                                className={`btn-small ${status === 'absent' ? 'btn-primary' : ''}`}
-                                style={status === 'absent' ? { backgroundColor: '#F44336', borderColor: '#F44336' } : {}}
-                                onClick={() => markAttendance(student.id, status === 'absent' ? 'none' : 'absent')}
-                              >
-                                <XCircle size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Absent
-                              </button>
-                            </div>
-                          </td>
+              {/* Student Attendance List / Cards */}
+              <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', overflow: 'hidden', padding: 0 }}>
+                {filteredAttendanceStudents.length > 0 ? (
+                  <div className="premium-table-container" style={{ border: 'none', background: 'transparent' }}>
+                    <table className="premium-table responsive-table-cards">
+                      <thead>
+                        <tr>
+                          <th>Student</th>
+                          <th>Batch Schedule</th>
+                          <th>Status</th>
+                          <th style={{ textAlign: 'center' }}>Mark Attendance</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                      </thead>
+                      <tbody>
+                        {filteredAttendanceStudents.map(student => {
+                          const status = attendanceRecords[markingDate]?.[student.id];
+                          const initials = (student.studentName || student.name || 'S').split(' ').map(n => n[0]).slice(0, 2).join('');
 
-            <div className="calendar-container panel">
-              <div className="calendar-header">
-                <button className="btn-icon" onClick={() => setCurrentDate(new Date(year, month - 1, 1))}>
-                  <ChevronLeft size={24} />
-                </button>
-                <h2 className="calendar-title" style={{ fontFamily: 'var(--font-heading)' }}>{monthNames[month]} {year}</h2>
-                <button className="btn-icon" onClick={() => setCurrentDate(new Date(year, month + 1, 1))}>
-                  <ChevronRight size={24} />
-                </button>
+                          return (
+                            <tr key={student.id}>
+                              <td data-label="Student" style={{ fontWeight: 700, color: '#fff' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                  <div className="student-avatar-badge">{initials}</div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSelectStudent(student)}
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      padding: 0,
+                                      fontWeight: 700,
+                                      color: '#fff',
+                                      cursor: 'pointer',
+                                      fontFamily: 'inherit',
+                                      fontSize: 'inherit',
+                                      textAlign: 'left',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px'
+                                    }}
+                                  >
+                                    {student.studentName || student.name}
+                                    {student.isPriority && (
+                                      <Star size={13} fill="#FFD700" color="#FFD700" title="Priority Student" />
+                                    )}
+                                  </button>
+                                </div>
+                              </td>
+                              <td data-label="Batch Info">
+                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+                                  <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', fontSize: '0.72rem', padding: '2px 6px' }}>
+                                    {student.branch}
+                                  </span>
+                                  <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: '0.72rem', padding: '2px 6px' }}>
+                                    {getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}
+                                  </span>
+                                </div>
+                              </td>
+                              <td data-label="Status">
+                                {status === 'present' && <span className="badge badge-green" style={{ fontSize: '0.75rem', padding: '3px 8px' }}>Present</span>}
+                                {status === 'absent' && <span className="badge badge-red" style={{ fontSize: '0.75rem', padding: '3px 8px' }}>Absent</span>}
+                                {!status && <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem', fontStyle: 'italic' }}>Pending</span>}
+                              </td>
+                              <td data-label="Action">
+                                <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                                  <button
+                                    type="button"
+                                    className={`btn-small ${status === 'present' ? 'btn-primary' : ''}`}
+                                    style={{
+                                      backgroundColor: status === 'present' ? '#4CAF50' : 'rgba(76, 175, 80, 0.12)',
+                                      borderColor: status === 'present' ? '#4CAF50' : 'rgba(76, 175, 80, 0.3)',
+                                      color: status === 'present' ? '#fff' : '#4CAF50',
+                                      fontWeight: 600,
+                                      padding: '6px 14px',
+                                      borderRadius: '6px',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      transition: 'all 0.2s ease',
+                                      boxShadow: status === 'present' ? '0 2px 8px rgba(76, 175, 80, 0.35)' : 'none'
+                                    }}
+                                    onClick={() => markAttendance(student.id, status === 'present' ? 'none' : 'present')}
+                                  >
+                                    <CheckCircle size={13} /> Present
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`btn-small ${status === 'absent' ? 'btn-primary' : ''}`}
+                                    style={{
+                                      backgroundColor: status === 'absent' ? '#F44336' : 'rgba(244, 67, 54, 0.12)',
+                                      borderColor: status === 'absent' ? '#F44336' : 'rgba(244, 67, 54, 0.3)',
+                                      color: status === 'absent' ? '#fff' : '#ff453a',
+                                      fontWeight: 600,
+                                      padding: '6px 14px',
+                                      borderRadius: '6px',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      transition: 'all 0.2s ease',
+                                      boxShadow: status === 'absent' ? '0 2px 8px rgba(244, 67, 54, 0.35)' : 'none'
+                                    }}
+                                    onClick={() => markAttendance(student.id, status === 'absent' ? 'none' : 'absent')}
+                                  >
+                                    <XCircle size={13} /> Absent
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '3.5rem 2rem', color: 'var(--color-text-muted)' }}>
+                    <Users size={32} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
+                    <div style={{ fontSize: '0.95rem', color: '#fff', fontWeight: 600 }}>No Students Found</div>
+                    <p style={{ fontSize: '0.8rem', margin: 0, marginTop: '4px' }}>No student records match the selected attendance filters.</p>
+                  </div>
+                )}
               </div>
-              <div className="calendar-grid-header">
-                <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+
+              {/* Monthly Calendar View */}
+              <div className="calendar-container panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1.25rem' }}>
+                <div className="calendar-header" style={{ marginBottom: '0.75rem' }}>
+                  <button className="btn-icon" onClick={() => setCurrentDate(new Date(year, month - 1, 1))}>
+                    <ChevronLeft size={22} />
+                  </button>
+                  <h2 className="calendar-title" style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.25rem', color: '#fff', margin: 0 }}>{monthNames[month]} {year}</h2>
+                  <button className="btn-icon" onClick={() => setCurrentDate(new Date(year, month + 1, 1))}>
+                    <ChevronRight size={22} />
+                  </button>
+                </div>
+
+                {/* Calendar Legend */}
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1rem', fontSize: '0.75rem', color: 'var(--color-text-muted)', paddingBottom: '0.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4CAF50' }}></span> Present
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ff453a' }}></span> Absent
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#38bdf8' }}></span> Class Day
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#636366', border: '1px dashed rgba(255,255,255,0.2)' }}></span> No Batch (Off Day)
+                  </span>
+                </div>
+
+                <div className="calendar-grid-header">
+                  <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+                </div>
+                <div className="calendar-grid">
+                  {days}
+                </div>
               </div>
-              <div className="calendar-grid">
-                {days}
-              </div>
-            </div>
-          </>
-        ) : (
-          renderYearCalendar()
-        )}
-      </div>
-    );
-  };
+            </>
+          ) : (
+            renderYearCalendar()
+          )}
+        </div>
+      );
+    };
 
   const renderFees = () => {
     const isPaid = (student) => student.paidMonths && student.paidMonths[feeMonth];
@@ -7920,13 +8249,78 @@ function App() {
     return beltList[index + 1];
   };
 
+  // Helper for batch options in grading view based on logged-in user role
+  const getGradingBatchOptions = () => {
+    if (userRole === 'trainer') {
+      const allowed = (userBatch || '').split(',').map(b => b.trim()).filter(Boolean);
+      if (allowed.length === 0) return [];
+      return allowed.map(b => {
+        const found = batchOptions.find(opt => (opt.id || opt.code || '').toLowerCase() === b.toLowerCase());
+        return {
+          id: b,
+          name: found ? found.name : getBatchNameFromCode(b, userBranch)
+        };
+      });
+    } else if (userRole === 'branchadmin') {
+      return getFilteredBatchOptions(userBranch);
+    } else {
+      return getFilteredBatchOptions(isAdminUser(loggedInUser) ? gradingFilterBranch : undefined);
+    }
+  };
+
   const getFilteredGradingStudents = () => {
+    const isTrainer = userRole === 'trainer';
+    const isBranchAdm = userRole === 'branchadmin';
+    const activeBranchLower = (userBranch || '').toLowerCase().trim();
+    const allowedTrainerBatches = (userBatch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+
     return gradingStudents.filter(student => {
-      const matchesSearch = student.name.toLowerCase().includes(searchQuery.toLowerCase().trim());
+      // Role-based client protection: restrict to trainer's branch & batch
+      if (isTrainer) {
+        if (activeBranchLower && (student.branch || '').toLowerCase().trim() !== activeBranchLower) {
+          return false;
+        }
+        if (allowedTrainerBatches.length > 0) {
+          const studentBatchLower = (student.batch || '').toLowerCase().trim();
+          if (!allowedTrainerBatches.includes(studentBatchLower)) {
+            const batchNameMatch = allowedTrainerBatches.some(b => {
+              const opt = batchOptions.find(o => (o.id || o.code || '').toLowerCase() === b);
+              return (opt && opt.name && opt.name.toLowerCase().trim() === studentBatchLower) ||
+                     (opt && schedulesMatch(opt.schedule, student.schedule));
+            });
+            if (!batchNameMatch) return false;
+          }
+        }
+      } else if (isBranchAdm) {
+        if (activeBranchLower && (student.branch || '').toLowerCase().trim() !== activeBranchLower) {
+          return false;
+        }
+      } else if (isAdminUser(loggedInUser)) {
+        if (gradingFilterBranch !== 'All') {
+          if ((student.branch || '').toLowerCase().trim() !== gradingFilterBranch.toLowerCase().trim()) {
+            return false;
+          }
+        }
+      }
+
+      const query = (searchQuery || '').toLowerCase().trim();
+      const matchesSearch = !query ||
+        student.name.toLowerCase().includes(query) ||
+        String(student.id || '').includes(query) ||
+        String(student.admissionNumber || '').includes(query);
 
       let matchesBatch = true;
       if (gradingFilterBatch !== 'All') {
-        matchesBatch = (student.batch || '').toLowerCase() === gradingFilterBatch.toLowerCase();
+        const studentBatchLower = (student.batch || '').toLowerCase().trim();
+        const filterBatchLower = gradingFilterBatch.toLowerCase().trim();
+        matchesBatch = studentBatchLower === filterBatchLower;
+        if (!matchesBatch) {
+          const opt = batchOptions.find(o => (o.id || o.code || '').toLowerCase() === filterBatchLower);
+          if (opt) {
+            matchesBatch = (opt.name && opt.name.toLowerCase().trim() === studentBatchLower) ||
+                           schedulesMatch(opt.schedule, student.schedule);
+          }
+        }
       }
 
       let matchesBelt = true;
@@ -7948,19 +8342,7 @@ function App() {
         }
       }
 
-      let matchesDateRange = true;
-      if (gradingFilterStartDate) {
-        if (!student.lastGradingDate || student.lastGradingDate === 'N/A' || student.lastGradingDate < gradingFilterStartDate) {
-          matchesDateRange = false;
-        }
-      }
-      if (gradingFilterEndDate) {
-        if (!student.lastGradingDate || student.lastGradingDate === 'N/A' || student.lastGradingDate > gradingFilterEndDate) {
-          matchesDateRange = false;
-        }
-      }
-
-      return matchesSearch && matchesBatch && matchesBelt && matchesEligibility && matchesResult && matchesDateRange;
+      return matchesSearch && matchesBatch && matchesBelt && matchesEligibility && matchesResult;
     });
   };
 
@@ -8020,6 +8402,8 @@ function App() {
 
   const renderGrading = () => {
     const isSuper = isAdminUser(loggedInUser);
+    const isTrainer = userRole === 'trainer';
+    const isBranchAdm = userRole === 'branchadmin';
     const filtered = getFilteredGradingStudents();
 
     // Stats calculations
@@ -8037,66 +8421,160 @@ function App() {
       }
     });
 
+    const batchListOptions = getGradingBatchOptions();
+
     return (
-      <div className="grading-view">
-        {gradingError && <div style={{ color: '#E50914', marginBottom: '1.5rem', background: 'rgba(229, 9, 20, 0.1)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(229, 9, 20, 0.3)', fontWeight: 500 }}>{gradingError}</div>}
-        {gradingSuccess && <div style={{ color: '#4CAF50', marginBottom: '1.5rem', background: 'rgba(76, 175, 80, 0.1)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(76, 175, 80, 0.3)', fontWeight: 500 }}>{gradingSuccess}</div>}
+      <div className="grading-view-container">
+        {gradingError && <div style={{ color: '#E50914', background: 'rgba(229, 9, 20, 0.1)', padding: '0.85rem 1.25rem', borderRadius: '10px', border: '1px solid rgba(229, 9, 20, 0.3)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '8px' }}><AlertTriangle size={18} /> {gradingError}</div>}
+        {gradingSuccess && <div style={{ color: '#4CAF50', background: 'rgba(76, 175, 80, 0.1)', padding: '0.85rem 1.25rem', borderRadius: '10px', border: '1px solid rgba(76, 175, 80, 0.3)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '8px' }}><CheckCircle size={18} /> {gradingSuccess}</div>}
+
+        {/* Clean Compact Top Action Bar */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.25rem' }}>
+          <div>
+            {isTrainer && (
+              <span className="grading-scope-pill trainer">
+                <Activity size={13} /> {userBranch} • {userBatch ? getBatchNameFromCode(userBatch, userBranch) : 'Assigned Batch'}
+              </span>
+            )}
+            {isBranchAdm && (
+              <span className="grading-scope-pill branchadmin">
+                <MapPin size={13} /> Branch: {userBranch}
+              </span>
+            )}
+            {isSuper && (
+              <span className="grading-scope-pill admin">
+                <Shield size={13} /> Super Admin View
+              </span>
+            )}
+          </div>
+
+          <button
+            className="btn-secondary"
+            onClick={fetchGradingStudents}
+            disabled={loadingGrading}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '0.45rem 0.95rem', fontSize: '0.8rem', borderRadius: '8px' }}
+          >
+            <History size={14} className={loadingGrading ? 'spin-icon' : ''} />
+            {loadingGrading ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
 
         {/* Dashboard Stats Cards */}
-        <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: '2rem' }}>
-          <div className="stat-card glow-card-blue">
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(54, 162, 235, 0.1)' }}><Users className="stat-icon" style={{ color: '#36A2EB' }} /></div>
+        <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.85rem' }}>
+          <div className="stat-card glow-card-blue" style={{ background: 'linear-gradient(145deg, rgba(20, 24, 38, 0.7) 0%, rgba(15, 17, 26, 0.8) 100%)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(56, 189, 248, 0.12)', width: '38px', height: '38px', borderRadius: '8px' }}>
+              <Users className="stat-icon" style={{ color: '#38bdf8' }} size={18} />
+            </div>
             <div className="stat-details">
-              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Total Students</h3>
-              <p className="stat-value" style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>{totalCount}</p>
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.72rem', fontWeight: 600 }}>Total Students</h3>
+              <p className="stat-value" style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem', color: '#fff' }}>{totalCount}</p>
             </div>
           </div>
-          <div className="stat-card glow-card-green">
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(76, 175, 80, 0.1)' }}><CheckCircle className="stat-icon" style={{ color: '#4CAF50' }} /></div>
+
+          <div className="stat-card glow-card-green" style={{ background: 'linear-gradient(145deg, rgba(16, 32, 24, 0.7) 0%, rgba(12, 22, 18, 0.8) 100%)', border: '1px solid rgba(34, 197, 94, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(34, 197, 94, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
+              <CheckCircle className="stat-icon" style={{ color: '#4ade80' }} size={18} />
+            </div>
             <div className="stat-details">
-              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Eligible for Test</h3>
-              <p className="stat-value" style={{ color: '#4CAF50', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>{eligibleCount}</p>
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#86efac', fontSize: '0.72rem', fontWeight: 600 }}>Ready for Test</h3>
+              <p className="stat-value" style={{ color: '#4ade80', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{eligibleCount}</p>
             </div>
           </div>
-          <div className="stat-card glow-card-blue">
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(54, 162, 235, 0.1)' }}><Award className="stat-icon" style={{ color: '#36A2EB' }} /></div>
+
+          <div className="stat-card glow-card-blue" style={{ background: 'linear-gradient(145deg, rgba(18, 28, 45, 0.7) 0%, rgba(13, 19, 32, 0.8) 100%)', border: '1px solid rgba(59, 130, 246, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(59, 130, 246, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
+              <Award className="stat-icon" style={{ color: '#60a5fa' }} size={18} />
+            </div>
             <div className="stat-details">
-              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Passed Tests</h3>
-              <p className="stat-value" style={{ color: '#36A2EB', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>{passedCount}</p>
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#93c5fd', fontSize: '0.72rem', fontWeight: 600 }}>Passed</h3>
+              <p className="stat-value" style={{ color: '#60a5fa', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{passedCount}</p>
             </div>
           </div>
-          <div className="stat-card glow-card-red">
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(229, 9, 20, 0.1)' }}><XCircle className="stat-icon" style={{ color: '#ff453a' }} /></div>
+
+          <div className="stat-card glow-card-red" style={{ background: 'linear-gradient(145deg, rgba(38, 16, 20, 0.7) 0%, rgba(24, 12, 14, 0.8) 100%)', border: '1px solid rgba(244, 63, 94, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(244, 63, 94, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
+              <XCircle className="stat-icon" style={{ color: '#fb7185' }} size={18} />
+            </div>
             <div className="stat-details">
-              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Failed Tests</h3>
-              <p className="stat-value" style={{ color: '#ff453a', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>{failedCount}</p>
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#fda4af', fontSize: '0.72rem', fontWeight: 600 }}>Failed / Retest</h3>
+              <p className="stat-value" style={{ color: '#fb7185', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{failedCount}</p>
             </div>
           </div>
         </div>
 
         {/* Belt Distribution Bar */}
-        <div className="panel" style={{ marginBottom: '2rem', background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
-          <h3 className="panel-title" style={{ marginBottom: '1.25rem', fontSize: '0.85rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Present Grad Distribution</h3>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-            {Object.entries(beltCounts).map(([beltName, count]) => (
-              <div key={beltName} style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255, 255, 255, 0.02)', padding: '6px 14px', borderRadius: '20px', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
-                <span className={`badge ${getBeltColorClass(beltName)}`} style={{ padding: '3px 8px', fontSize: '0.7rem', borderRadius: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{beltName}</span>
-                <strong style={{ fontSize: '0.85rem', color: '#fff', fontFamily: 'Outfit, sans-serif' }}>{count}</strong>
-              </div>
-            ))}
-          </div>
+        <div className="belt-distribution-strip" style={{ padding: '0.75rem 1rem' }}>
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, marginRight: '4px' }}>
+            Belts:
+          </span>
+          {Object.entries(beltCounts).map(([beltName, count]) => {
+            const isSelected = gradingFilterBelt === beltName;
+            return (
+              <button
+                key={beltName}
+                type="button"
+                className={`belt-pill-btn ${isSelected ? 'active' : ''}`}
+                onClick={() => setGradingFilterBelt(isSelected ? 'All' : beltName)}
+                title={`Filter by ${beltName} belt`}
+                style={{ padding: '0.25rem 0.65rem' }}
+              >
+                <span className={`badge ${getBeltColorClass(beltName)}`} style={{ padding: '2px 6px', fontSize: '0.7rem', borderRadius: '4px', textTransform: 'uppercase' }}>
+                  {beltName}
+                </span>
+                <span className="belt-count" style={{ fontSize: '0.7rem' }}>{count}</span>
+              </button>
+            );
+          })}
         </div>
 
-        {/* Filters Panel */}
-        <div className="filters-wrapper-card">
-          <div className="panel-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
-            <h3 className="panel-title" style={{ fontSize: '0.9rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Grading Filters</h3>
+        {/* Streamlined Clean Filters Panel */}
+        <div className="filters-wrapper-card" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+          {/* Quick Filter Chips */}
+          <div className="grading-quick-chips" style={{ marginBottom: '0.85rem', paddingBottom: '0.65rem' }}>
+            <button
+              type="button"
+              className={`quick-chip ${gradingFilterEligibility === 'All' && gradingFilterBelt === 'All' ? 'active' : ''}`}
+              onClick={() => {
+                setGradingFilterEligibility('All');
+                setGradingFilterBelt('All');
+              }}
+            >
+              All ({totalCount})
+            </button>
+            <button
+              type="button"
+              className={`quick-chip ${gradingFilterEligibility === 'Eligible' ? 'active-eligible' : ''}`}
+              onClick={() => setGradingFilterEligibility(gradingFilterEligibility === 'Eligible' ? 'All' : 'Eligible')}
+            >
+              ⚡ Ready for Test ({eligibleCount})
+            </button>
+            <button
+              type="button"
+              className={`quick-chip ${gradingFilterEligibility === 'Not Eligible' ? 'active-fail' : ''}`}
+              onClick={() => setGradingFilterEligibility(gradingFilterEligibility === 'Not Eligible' ? 'All' : 'Not Eligible')}
+            >
+              Not Ready ({totalCount - eligibleCount})
+            </button>
           </div>
-          <div className="grid-filters-layout">
+
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Search Input */}
+            <div style={{ position: 'relative', minWidth: '220px', flex: '1 1 240px' }}>
+              <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+              <input
+                type="text"
+                placeholder="Search student..."
+                className="form-control"
+                style={{ paddingLeft: '36px', height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+
+            {/* Branch (Superadmin only) */}
             {isSuper && (
-              <div className="form-group">
-                <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Branch</label>
-                <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterBranch} onChange={(e) => setGradingFilterBranch(e.target.value)}>
+              <div style={{ minWidth: '140px', flex: '1 1 140px' }}>
+                <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }} value={gradingFilterBranch} onChange={(e) => setGradingFilterBranch(e.target.value)}>
                   <option value="All">All Branches</option>
                   {branches.map(b => (
                     <option key={b} value={b}>{b}</option>
@@ -8104,194 +8582,194 @@ function App() {
                 </select>
               </div>
             )}
-            <div className="form-group">
-              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Batch</label>
-              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterBatch} onChange={(e) => setGradingFilterBatch(e.target.value)}>
-                <option value="All">All Batches</option>
-                {getFilteredBatchOptions(isSuper ? gradingFilterBranch : undefined).map(opt => (
+
+            {/* Batch Filter */}
+            <div style={{ minWidth: '140px', flex: '1 1 140px' }}>
+              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }} value={gradingFilterBatch} onChange={(e) => setGradingFilterBatch(e.target.value)}>
+                <option value="All">{isTrainer ? 'All My Batches' : 'All Batches'}</option>
+                {batchListOptions.map(opt => (
                   <option key={opt.id} value={opt.id}>{opt.name}</option>
                 ))}
               </select>
             </div>
-            <div className="form-group">
-              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Present Grad</label>
-              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterBelt} onChange={(e) => setGradingFilterBelt(e.target.value)}>
+
+            {/* Belt Rank */}
+            <div style={{ minWidth: '120px', flex: '1 1 120px' }}>
+              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }} value={gradingFilterBelt} onChange={(e) => setGradingFilterBelt(e.target.value)}>
                 <option value="All">All Belts</option>
                 {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
                   <option key={b} value={b}>{b}</option>
                 ))}
               </select>
             </div>
-            <div className="form-group">
-              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Eligibility</label>
-              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterEligibility} onChange={(e) => setGradingFilterEligibility(e.target.value)}>
+
+            {/* Eligibility */}
+            <div style={{ minWidth: '130px', flex: '1 1 130px' }}>
+              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }} value={gradingFilterEligibility} onChange={(e) => setGradingFilterEligibility(e.target.value)}>
                 <option value="All">All Eligibility</option>
                 <option value="Eligible">Eligible</option>
                 <option value="Not Eligible">Not Eligible</option>
               </select>
             </div>
-            <div className="form-group">
-              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Last Result</label>
-              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterResult} onChange={(e) => setGradingFilterResult(e.target.value)}>
-                <option value="All">All Results</option>
-                <option value="Pass">Pass</option>
-                <option value="Fail">Fail</option>
-                <option value="No History">No History / N/A</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Grading Date Range</label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <input type="date" className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', flex: 1 }} value={gradingFilterStartDate} onChange={(e) => setGradingFilterStartDate(e.target.value)} placeholder="Start" />
-                <input type="date" className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', flex: 1 }} value={gradingFilterEndDate} onChange={(e) => setGradingFilterEndDate(e.target.value)} placeholder="End" />
-              </div>
-            </div>
-          </div>
 
-          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', alignItems: 'center', marginTop: '1.25rem', flexWrap: 'wrap' }}>
-            <button className="btn-secondary" style={{ padding: '6px 16px', fontSize: '0.85rem', height: '38px', borderRadius: '8px' }} onClick={() => {
-              setGradingFilterBranch('All');
-              setGradingFilterBatch('All');
-              setGradingFilterBelt('All');
-              setGradingFilterEligibility('All');
-              setGradingFilterResult('All');
-              setGradingFilterStartDate('');
-              setGradingFilterEndDate('');
-              setSearchQuery('');
-            }}>Reset Filters</button>
-            <div style={{ position: 'relative', width: '220px' }}>
-              <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
-              <input
-                type="text"
-                placeholder="Search students..."
-                className="form-control"
-                style={{ paddingLeft: '36px', height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
+            {/* Reset Button */}
+            <button
+              className="btn-secondary"
+              style={{ padding: '0 1rem', fontSize: '0.8rem', height: '38px', borderRadius: '8px', whiteSpace: 'nowrap' }}
+              onClick={() => {
+                setGradingFilterBranch('All');
+                setGradingFilterBatch('All');
+                setGradingFilterBelt('All');
+                setGradingFilterEligibility('All');
+                setGradingFilterResult('All');
+                setSearchQuery('');
+              }}
+            >
+              Reset
+            </button>
           </div>
         </div>
 
-        {/* Student Table */}
-        <div className="panel" style={{ background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
-          <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: 'none', paddingBottom: 0 }}>
-            <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Students List ({filtered.length})</h3>
-          </div>
-
+        {/* Clean Student Table */}
+        <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', overflow: 'hidden', padding: 0 }}>
           {loadingGrading ? (
-            <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--color-text-muted)' }}>Loading student details...</div>
+            <div style={{ textAlign: 'center', padding: '4rem 2rem', color: 'var(--color-text-muted)' }}>
+              <History size={28} className="spin-icon" style={{ marginBottom: '0.75rem', opacity: 0.7 }} />
+              <div>Loading students...</div>
+            </div>
           ) : filtered.length > 0 ? (
-            <div className="premium-table-container">
+            <div className="premium-table-container" style={{ border: 'none', background: 'transparent' }}>
               <table className="premium-table responsive-table-cards">
                 <thead>
                   <tr>
-                    <th>Student Name</th>
-                    <th>Branch</th>
+                    <th>Student</th>
                     <th>Batch</th>
-                    <th>Trainer Name</th>
-                    <th>Present Grad</th>
-                    <th>Next Belt</th>
-                    <th>Join Date</th>
-                    <th>Last Grading</th>
-                    <th>Next Eligible</th>
+                    <th>Present Belt</th>
                     <th>Eligibility</th>
-                    <th>Result</th>
                     <th style={{ textAlign: 'center' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map(student => (
-                    <tr key={student.id}>
-                      <td style={{ fontWeight: 700, color: '#fff' }} data-label="Student Name">
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          {student.name}
-                          {student.isPriority && (
-                            <Star size={14} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
-                          )}
-                        </span>
-                      </td>
-                      <td data-label="Branch">{student.branch}</td>
-                      <td data-label="Batch">{getBatchNameFromCode(student.batch, student.branch)}</td>
-                      <td data-label="Trainer Name">{student.trainer || 'N/A'}</td>
-                      <td data-label="Present Grad">
-                        <span className={`badge ${getBeltColorClass(student.belt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem', borderRadius: '4px' }}>{student.belt}</span>
-                      </td>
-                      <td data-label="Next Belt">
-                        {student.nextBelt !== 'None' ? (
-                          <span className={`badge ${getBeltColorClass(student.nextBelt)}`} style={{ opacity: 0.85, padding: '3px 8px', fontSize: '0.75rem', borderRadius: '4px' }}>{student.nextBelt}</span>
-                        ) : (
-                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>None (Max)</span>
-                        )}
-                      </td>
-                      <td data-label="Join Date">{student.joinDate}</td>
-                      <td data-label="Last Grading">{student.lastGradingDate || 'N/A'}</td>
-                      <td data-label="Next Eligible">{student.nextEligibleGradingDate || 'N/A'}</td>
-                      <td data-label="Eligibility">
-                        <span className={student.eligibilityStatus === 'Eligible' ? 'badge-outline-green' : 'badge-outline-red'}>
-                          {student.eligibilityStatus}
-                        </span>
-                      </td>
-                      <td data-label="Result">
-                        {student.lastGradingResult === 'Pass' ? (
-                          <span className="badge-outline-green">Pass</span>
-                        ) : student.lastGradingResult === 'Fail' ? (
-                          <span className="badge-outline-red">Fail</span>
-                        ) : (
-                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>N/A</span>
-                        )}
-                      </td>
-                      <td data-label="Actions">
-                        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', alignItems: 'center' }}>
-                          <button className="btn-secondary action-btn-pill" onClick={() => {
-                            setSelectedHistoryStudent(student);
-                            setIsHistoryModalOpen(true);
-                          }}>History</button>
+                  {filtered.map(student => {
+                    const initials = (student.name || 'S').split(' ').map(n => n[0]).slice(0, 2).join('');
+                    const isEligible = student.eligibilityStatus === 'Eligible';
 
-                          <button className="btn-primary action-btn-pill" style={{ background: 'var(--color-accent-primary)' }} onClick={() => {
-                            setSelectedGradeStudent(student);
-                            setGradeResult('Pass');
-                            setGradeDate(new Date().toISOString().split('T')[0]);
-                            setIsGradeModalOpen(true);
-                          }}>Grade</button>
+                    return (
+                      <tr key={student.id}>
+                        <td data-label="Student" style={{ fontWeight: 700, color: '#fff' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div className="student-avatar-badge">{initials}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                              <span>{student.name}</span>
+                              {student.isPriority && (
+                                <Star size={13} fill="#FFD700" color="#FFD700" title="Priority Student" />
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td data-label="Batch">
+                          <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: '0.75rem', padding: '3px 8px', borderRadius: '6px' }}>
+                            {getBatchNameFromCode(student.batch, student.branch)}
+                          </span>
+                        </td>
+                        <td data-label="Present Belt">
+                          <span className={`badge ${getBeltColorClass(student.belt)}`} style={{ padding: '4px 10px', fontSize: '0.75rem', borderRadius: '6px', fontWeight: 600 }}>
+                            {student.belt}
+                          </span>
+                        </td>
+                        <td data-label="Eligibility">
+                          <span className={isEligible ? 'badge-outline-green' : 'badge-outline-red'} style={{ fontSize: '0.75rem', padding: '3px 10px', borderRadius: '12px' }}>
+                            {student.eligibilityStatus || 'Not Eligible'}
+                          </span>
+                        </td>
+                        <td data-label="Actions">
+                          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', alignItems: 'center' }}>
+                            <button
+                              className="btn-secondary action-btn-pill"
+                              style={{ padding: '5px 12px', fontSize: '0.75rem', borderRadius: '8px' }}
+                              onClick={() => {
+                                setSelectedHistoryStudent(student);
+                                setIsHistoryModalOpen(true);
+                              }}
+                            >
+                              History
+                            </button>
 
-                          <button className="btn-icon" style={{ color: '#2196F3', background: 'rgba(33, 150, 243, 0.1)', border: '1px solid rgba(33, 150, 243, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => {
-                            setSelectedEditGradingStudent(student);
-                            setEditGradingForm({
-                              joinDate: student.joinDate,
-                              lastGradingDate: student.lastGradingDate || 'N/A',
-                              belt: student.belt
-                            });
-                            setIsEditGradingModalOpen(true);
-                          }}><Settings size={12} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            <button
+                              className="btn-primary action-btn-pill"
+                              style={{ background: 'var(--color-accent-primary, #e50914)', padding: '5px 14px', fontSize: '0.75rem', borderRadius: '8px', fontWeight: 600 }}
+                              onClick={() => {
+                                setSelectedGradeStudent(student);
+                                setGradeResult('Pass');
+                                setGradeDate(new Date().toISOString().split('T')[0]);
+                                setIsGradeModalOpen(true);
+                              }}
+                            >
+                              Grade
+                            </button>
+
+                            <button
+                              className="btn-icon"
+                              title="Edit Grading Record Override"
+                              style={{ color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.25)', width: '30px', height: '30px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                              onClick={() => {
+                                setSelectedEditGradingStudent(student);
+                                setEditGradingForm({
+                                  joinDate: student.joinDate,
+                                  lastGradingDate: student.lastGradingDate || 'N/A',
+                                  belt: student.belt
+                                });
+                                setIsEditGradingModalOpen(true);
+                              }}
+                            >
+                              <Settings size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           ) : (
-            <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--color-text-muted)' }}>No student matching the current filters.</div>
+            <div style={{ textAlign: 'center', padding: '3.5rem 2rem', color: 'var(--color-text-muted)' }}>
+              <Users size={32} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
+              <div style={{ fontSize: '0.95rem', color: '#fff', fontWeight: 600 }}>No Students Found</div>
+              <p style={{ fontSize: '0.8rem', margin: 0, marginTop: '4px' }}>
+                {isTrainer
+                  ? 'No students found in your assigned batch with the selected filters.'
+                  : 'No students match the current filter criteria.'}
+              </p>
+            </div>
           )}
         </div>
 
         {/* Modal: View Grading History */}
         {isHistoryModalOpen && selectedHistoryStudent && (
           <div className="modal-overlay" style={{ zIndex: 1000 }}>
-            <div className="modal-content" style={{ maxWidth: '650px', background: 'var(--color-bg-surface)', padding: '1.5rem', borderRadius: '8px' }}>
-              <div className="panel-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 className="panel-title">Grading History: {selectedHistoryStudent.name}</h3>
-                <button className="btn-icon" onClick={() => {
-                  setIsHistoryModalOpen(false);
-                  setSelectedHistoryStudent(null);
-                }} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}><X size={20} /></button>
+            <div className="modal-content" style={{ maxWidth: '650px', background: 'var(--color-bg-surface, #12141d)', padding: '1.75rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <div className="panel-header" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
+                <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.1rem', margin: 0 }}>
+                  <Award size={20} style={{ color: '#38bdf8' }} />
+                  Grading History: {selectedHistoryStudent.name}
+                </h3>
+                <button
+                  className="btn-icon"
+                  onClick={() => {
+                    setIsHistoryModalOpen(false);
+                    setSelectedHistoryStudent(null);
+                  }}
+                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}
+                >
+                  <X size={20} />
+                </button>
               </div>
 
-              <div style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '1rem', marginBottom: '1rem', display: 'flex', gap: '15px', fontSize: '0.9rem', color: 'var(--color-text-main)' }}>
-                <div>Branch: <strong>{selectedHistoryStudent.branch}</strong></div>
-                <div>Batch: <strong>{selectedHistoryStudent.batch}</strong></div>
-                <div>Present Grad: <span className={`badge ${getBeltColorClass(selectedHistoryStudent.belt)}`}>{selectedHistoryStudent.belt}</span></div>
+              <div style={{ background: 'rgba(255,255,255,0.03)', padding: '0.85rem 1rem', borderRadius: '10px', marginBottom: '1.25rem', display: 'flex', flexWrap: 'wrap', gap: '15px', fontSize: '0.85rem', color: 'var(--color-text-main)' }}>
+                <div>Branch: <strong style={{ color: '#fff' }}>{selectedHistoryStudent.branch}</strong></div>
+                <div>Batch: <strong style={{ color: '#fff' }}>{getBatchNameFromCode(selectedHistoryStudent.batch, selectedHistoryStudent.branch)}</strong></div>
+                <div>Current Belt: <span className={`badge ${getBeltColorClass(selectedHistoryStudent.belt)}`} style={{ padding: '2px 8px', fontSize: '0.75rem' }}>{selectedHistoryStudent.belt}</span></div>
               </div>
 
               {selectedHistoryStudent.gradingHistory && selectedHistoryStudent.gradingHistory.length > 0 ? (
@@ -8303,29 +8781,29 @@ function App() {
                         <th>Belt Before</th>
                         <th>Result</th>
                         <th>Belt After</th>
-                        <th>Updated By</th>
-                        <th>Attempted At</th>
+                        <th>Examiner</th>
+                        <th>Recorded At</th>
                       </tr>
                     </thead>
                     <tbody>
                       {[...selectedHistoryStudent.gradingHistory].reverse().map((attempt, index) => (
                         <tr key={index}>
-                          <td data-label="Date">{attempt.gradingDate}</td>
+                          <td data-label="Date" style={{ fontWeight: 600 }}>{attempt.gradingDate}</td>
                           <td data-label="Belt Before">
-                            <span className={`badge ${getBeltColorClass(attempt.beltBefore)}`} style={{ transform: 'scale(0.85)' }}>{attempt.beltBefore}</span>
+                            <span className={`badge ${getBeltColorClass(attempt.beltBefore)}`} style={{ padding: '2px 6px', fontSize: '0.75rem' }}>{attempt.beltBefore}</span>
                           </td>
                           <td data-label="Result">
                             {attempt.result === 'Pass' ? (
-                              <span className="badge badge-green" style={{ background: 'rgba(76, 175, 80, 0.15)', color: '#4CAF50', border: '1px solid rgba(76, 175, 80, 0.3)', padding: '2px 6px', fontSize: '0.75rem' }}>Pass</span>
+                              <span className="badge badge-green" style={{ background: 'rgba(76, 175, 80, 0.15)', color: '#4CAF50', border: '1px solid rgba(76, 175, 80, 0.3)', padding: '2px 8px', fontSize: '0.75rem' }}>Pass</span>
                             ) : (
-                              <span className="badge badge-red" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#ff453a', border: '1px solid rgba(229, 9, 20, 0.3)', padding: '2px 6px', fontSize: '0.75rem' }}>Fail</span>
+                              <span className="badge badge-red" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#ff453a', border: '1px solid rgba(229, 9, 20, 0.3)', padding: '2px 8px', fontSize: '0.75rem' }}>Fail</span>
                             )}
                           </td>
                           <td data-label="Belt After">
-                            <span className={`badge ${getBeltColorClass(attempt.beltAfter)}`} style={{ transform: 'scale(0.85)' }}>{attempt.beltAfter}</span>
+                            <span className={`badge ${getBeltColorClass(attempt.beltAfter)}`} style={{ padding: '2px 6px', fontSize: '0.75rem' }}>{attempt.beltAfter}</span>
                           </td>
-                          <td data-label="Updated By">{attempt.updatedBy}</td>
-                          <td data-label="Attempted At" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                          <td data-label="Examiner" style={{ color: '#ccc' }}>{attempt.updatedBy}</td>
+                          <td data-label="Recorded At" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
                             {new Date(attempt.createdAt || attempt.date).toLocaleString()}
                           </td>
                         </tr>
@@ -8334,14 +8812,23 @@ function App() {
                   </table>
                 </div>
               ) : (
-                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No grading attempts recorded. Tracking starts from now.</div>
+                <div style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--color-text-muted)' }}>
+                  <Award size={30} style={{ opacity: 0.4, marginBottom: '0.5rem' }} />
+                  <div>No grading attempts recorded yet.</div>
+                </div>
               )}
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
-                <button className="btn-secondary" onClick={() => {
-                  setIsHistoryModalOpen(false);
-                  setSelectedHistoryStudent(null);
-                }}>Close</button>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
+                <button
+                  className="btn-secondary"
+                  style={{ borderRadius: '8px', padding: '0.5rem 1.25rem' }}
+                  onClick={() => {
+                    setIsHistoryModalOpen(false);
+                    setSelectedHistoryStudent(null);
+                  }}
+                >
+                  Close
+                </button>
               </div>
             </div>
           </div>
@@ -8350,41 +8837,57 @@ function App() {
         {/* Modal: Conduct Grade Test */}
         {isGradeModalOpen && selectedGradeStudent && (
           <div className="modal-overlay" style={{ zIndex: 1000 }}>
-            <div className="modal-content" style={{ maxWidth: '500px', background: 'var(--color-bg-surface)', padding: '1.5rem', borderRadius: '8px' }}>
-              <div className="panel-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 className="panel-title">Conduct Grading Test</h3>
-                <button className="btn-icon" onClick={() => {
-                  setIsGradeModalOpen(false);
-                  setSelectedGradeStudent(null);
-                }} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}><X size={20} /></button>
+            <div className="modal-content" style={{ maxWidth: '520px', background: 'var(--color-bg-surface, #12141d)', padding: '1.75rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <div className="panel-header" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
+                <h3 className="panel-title" style={{ fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                  <Award size={20} style={{ color: 'var(--color-accent-primary, #e50914)' }} />
+                  Belt Grade Test
+                </h3>
+                <button
+                  className="btn-icon"
+                  onClick={() => {
+                    setIsGradeModalOpen(false);
+                    setSelectedGradeStudent(null);
+                  }}
+                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}
+                >
+                  <X size={20} />
+                </button>
               </div>
 
               <form onSubmit={handleSubmitGrade}>
-                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.04)', marginBottom: '1.5rem', fontSize: '0.9rem', color: 'var(--color-text-main)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span>Student:</span> <strong style={{ color: '#fff' }}>{selectedGradeStudent.name}</strong>
+                {/* Student Info Card */}
+                <div style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)', padding: '1.1rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)', marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Candidate:</span>
+                    <strong style={{ color: '#fff', fontSize: '1rem' }}>{selectedGradeStudent.name}</strong>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span>Join Date:</span> <strong style={{ color: '#fff' }}>{selectedGradeStudent.joinDate || 'N/A'}</strong>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Branch & Batch:</span>
+                    <span style={{ color: '#e0e0e0', fontSize: '0.85rem' }}>{selectedGradeStudent.branch} • {getBatchNameFromCode(selectedGradeStudent.batch, selectedGradeStudent.branch)}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span>Present Grad:</span> <span className={`badge ${getBeltColorClass(selectedGradeStudent.belt)}`}>{selectedGradeStudent.belt}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Current Belt:</span>
+                    <span className={`badge ${getBeltColorClass(selectedGradeStudent.belt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem' }}>{selectedGradeStudent.belt}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Target Promotion Belt:</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Promotion Target:</span>
                     {selectedGradeStudent.nextBelt !== 'None' ? (
-                      <span className={`badge ${getBeltColorClass(selectedGradeStudent.nextBelt)}`}>{selectedGradeStudent.nextBelt}</span>
+                      <span className={`badge ${getBeltColorClass(selectedGradeStudent.nextBelt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem', fontWeight: 700 }}>
+                        ➔ {selectedGradeStudent.nextBelt}
+                      </span>
                     ) : (
-                      <strong style={{ color: 'var(--color-text-muted)' }}>Max Level Reached</strong>
+                      <strong style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>Max Belt Rank Reached</strong>
                     )}
                   </div>
                 </div>
 
                 <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                  <label>Grading Date</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>Test Date</label>
                   <input
                     type="date"
                     className="form-control"
+                    style={{ height: '40px', borderRadius: '10px', fontSize: '0.85rem' }}
                     value={gradeDate}
                     onChange={(e) => setGradeDate(e.target.value)}
                     required
@@ -8392,25 +8895,51 @@ function App() {
                 </div>
 
                 <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                  <label>Test Result</label>
-                  <select
-                    className="form-control"
-                    value={gradeResult}
-                    onChange={(e) => setGradeResult(e.target.value)}
-                    required
-                  >
-                    <option value="Pass">Pass (Promote to next grade level)</option>
-                    <option value="Fail">Fail (Keep current grade level)</option>
-                  </select>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>Test Result</label>
+                  <div className="grade-result-options-grid">
+                    <div
+                      className={`grade-result-card ${gradeResult === 'Pass' ? 'selected-pass' : ''}`}
+                      onClick={() => setGradeResult('Pass')}
+                    >
+                      <CheckCircle size={24} style={{ color: '#4ade80' }} />
+                      <h4 className="grade-result-title">Pass</h4>
+                      <p className="grade-result-desc">
+                        Promotes student to <strong>{selectedGradeStudent.nextBelt !== 'None' ? selectedGradeStudent.nextBelt : 'Next Level'}</strong>
+                      </p>
+                    </div>
+
+                    <div
+                      className={`grade-result-card ${gradeResult === 'Fail' ? 'selected-fail' : ''}`}
+                      onClick={() => setGradeResult('Fail')}
+                    >
+                      <XCircle size={24} style={{ color: '#f87171' }} />
+                      <h4 className="grade-result-title">Fail</h4>
+                      <p className="grade-result-desc">
+                        Retains current <strong>{selectedGradeStudent.belt}</strong> belt level
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                  <button type="button" className="btn-secondary" onClick={() => {
-                    setIsGradeModalOpen(false);
-                    setSelectedGradeStudent(null);
-                  }}>Cancel</button>
-                  <button type="submit" className="btn-primary" disabled={gradingActionLoading} style={{ background: 'var(--color-accent-primary)' }}>
-                    {gradingActionLoading ? 'Submitting...' : 'Save Result'}
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ padding: '0.6rem 1.25rem', borderRadius: '10px' }}
+                    onClick={() => {
+                      setIsGradeModalOpen(false);
+                      setSelectedGradeStudent(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn-primary"
+                    disabled={gradingActionLoading}
+                    style={{ background: 'var(--color-accent-primary, #e50914)', padding: '0.6rem 1.5rem', borderRadius: '10px', fontWeight: 600 }}
+                  >
+                    {gradingActionLoading ? 'Saving...' : 'Submit Grade Result'}
                   </button>
                 </div>
               </form>
@@ -8421,25 +8950,32 @@ function App() {
         {/* Modal: Edit Grading Info Override */}
         {isEditGradingModalOpen && selectedEditGradingStudent && (
           <div className="modal-overlay" style={{ zIndex: 1000 }}>
-            <div className="modal-content" style={{ maxWidth: '500px', background: 'var(--color-bg-surface)', padding: '1.5rem', borderRadius: '8px' }}>
-              <div className="panel-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 className="panel-title">Edit Student Grading Info</h3>
-                <button className="btn-icon" onClick={() => {
-                  setIsEditGradingModalOpen(false);
-                  setSelectedEditGradingStudent(null);
-                }} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}><X size={20} /></button>
+            <div className="modal-content" style={{ maxWidth: '500px', background: 'var(--color-bg-surface, #12141d)', padding: '1.75rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <div className="panel-header" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
+                <h3 className="panel-title" style={{ fontSize: '1.1rem', margin: 0 }}>Edit Student Grading Info</h3>
+                <button
+                  className="btn-icon"
+                  onClick={() => {
+                    setIsEditGradingModalOpen(false);
+                    setSelectedEditGradingStudent(null);
+                  }}
+                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}
+                >
+                  <X size={20} />
+                </button>
               </div>
 
               <form onSubmit={handleSubmitEditGrading}>
                 <div style={{ marginBottom: '1.25rem', fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
-                  Student: <strong style={{ color: '#fff' }}>{selectedEditGradingStudent.name}</strong> (ID: {selectedEditGradingStudent.id})
+                  Student: <strong style={{ color: '#fff' }}>{selectedEditGradingStudent.name}</strong> (ID: #{selectedEditGradingStudent.id})
                 </div>
 
                 <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                  <label>Join Date</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>Join Date</label>
                   <input
                     type="date"
                     className="form-control"
+                    style={{ height: '40px', borderRadius: '10px' }}
                     value={editGradingForm.joinDate}
                     onChange={(e) => setEditGradingForm({ ...editGradingForm, joinDate: e.target.value })}
                     required
@@ -8451,22 +8987,24 @@ function App() {
                 </div>
 
                 <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                  <label>Last Grading Date</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>Last Grading Date</label>
                   <input
                     type="text"
                     className="form-control"
+                    style={{ height: '40px', borderRadius: '10px' }}
                     value={editGradingForm.lastGradingDate}
                     onChange={(e) => setEditGradingForm({ ...editGradingForm, lastGradingDate: e.target.value })}
                     placeholder="YYYY-MM-DD or N/A"
                     required
                   />
-                  <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Enter N/A if student has not taken a grading test yet. Recalculates eligibility date.</span>
+                  <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Enter N/A if student has not taken a grading test yet. Recalculates next eligibility date.</span>
                 </div>
 
                 <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                  <label>Present Grad</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>Present Grade</label>
                   <select
                     className="form-control"
+                    style={{ height: '40px', borderRadius: '10px' }}
                     value={editGradingForm.belt}
                     onChange={(e) => setEditGradingForm({ ...editGradingForm, belt: e.target.value })}
                     required
@@ -8482,11 +9020,23 @@ function App() {
                 </div>
 
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                  <button type="button" className="btn-secondary" onClick={() => {
-                    setIsEditGradingModalOpen(false);
-                    setSelectedEditGradingStudent(null);
-                  }}>Cancel</button>
-                  <button type="submit" className="btn-primary" disabled={gradingActionLoading}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ borderRadius: '10px', padding: '0.6rem 1.25rem' }}
+                    onClick={() => {
+                      setIsEditGradingModalOpen(false);
+                      setSelectedEditGradingStudent(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn-primary"
+                    disabled={gradingActionLoading}
+                    style={{ borderRadius: '10px', padding: '0.6rem 1.5rem', fontWeight: 600 }}
+                  >
                     {gradingActionLoading ? 'Saving...' : 'Save Override'}
                   </button>
                 </div>
@@ -8697,52 +9247,171 @@ function App() {
     });
 
     return (
-      <div className="performance-view">
+      <div className="performance-view-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
         {/* Dashboard Financial Stats Cards */}
-        <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: '2rem' }}>
-          <div className="stat-card glow-card-green">
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(76, 175, 80, 0.1)' }}><Wallet className="stat-icon" style={{ color: '#4CAF50' }} /></div>
+        <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '0.85rem' }}>
+          <div className="stat-card glow-card-green" style={{ background: 'linear-gradient(145deg, rgba(16, 32, 24, 0.7) 0%, rgba(12, 22, 18, 0.8) 100%)', border: '1px solid rgba(76, 175, 80, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(76, 175, 80, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
+              <Wallet className="stat-icon" style={{ color: '#4CAF50' }} size={18} />
+            </div>
             <div className="stat-details">
-              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Collected Profit (Revenue)</h3>
-              <p className="stat-value" style={{ color: '#4CAF50', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>₹{overallCollected.toLocaleString()}</p>
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#86efac', fontSize: '0.72rem', fontWeight: 600 }}>Collected Profit</h3>
+              <p className="stat-value" style={{ color: '#4CAF50', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>₹{overallCollected.toLocaleString()}</p>
             </div>
           </div>
-          <div className="stat-card glow-card-red">
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(229, 9, 20, 0.1)' }}><AlertTriangle className="stat-icon" style={{ color: '#ff453a' }} /></div>
+
+          <div className="stat-card glow-card-red" style={{ background: 'linear-gradient(145deg, rgba(38, 16, 20, 0.7) 0%, rgba(24, 12, 14, 0.8) 100%)', border: '1px solid rgba(229, 9, 20, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(229, 9, 20, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
+              <AlertTriangle className="stat-icon" style={{ color: '#ff453a' }} size={18} />
+            </div>
             <div className="stat-details">
-              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Pending Fees</h3>
-              <p className="stat-value" style={{ color: '#ff453a', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>₹{overallPending.toLocaleString()}</p>
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#fda4af', fontSize: '0.72rem', fontWeight: 600 }}>Pending Fees</h3>
+              <p className="stat-value" style={{ color: '#ff453a', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>₹{overallPending.toLocaleString()}</p>
             </div>
           </div>
-          <div className="stat-card glow-card-blue">
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(54, 162, 235, 0.1)' }}><Activity className="stat-icon" style={{ color: '#36A2EB' }} /></div>
+
+          <div className="stat-card glow-card-blue" style={{ background: 'linear-gradient(145deg, rgba(18, 28, 45, 0.7) 0%, rgba(13, 19, 32, 0.8) 100%)', border: '1px solid rgba(54, 162, 235, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(54, 162, 235, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
+              <Activity className="stat-icon" style={{ color: '#36A2EB' }} size={18} />
+            </div>
             <div className="stat-details">
-              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Expected Gross Revenue</h3>
-              <p className="stat-value" style={{ color: '#36A2EB', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>₹{overallExpected.toLocaleString()}</p>
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#93c5fd', fontSize: '0.72rem', fontWeight: 600 }}>Expected Revenue</h3>
+              <p className="stat-value" style={{ color: '#36A2EB', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>₹{overallExpected.toLocaleString()}</p>
             </div>
           </div>
-          <div className="stat-card glow-card-yellow">
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 199, 0, 0.1)' }}><TrendingUp className="stat-icon" style={{ color: '#ffc700' }} /></div>
+
+          <div className="stat-card glow-card-yellow" style={{ background: 'linear-gradient(145deg, rgba(38, 32, 14, 0.7) 0%, rgba(24, 20, 10, 0.8) 100%)', border: '1px solid rgba(255, 199, 0, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+            <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 199, 0, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
+              <TrendingUp className="stat-icon" style={{ color: '#ffc700' }} size={18} />
+            </div>
             <div className="stat-details">
-              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 600 }}>Collection Rate</h3>
-              <p className="stat-value" style={{ color: '#ffc700', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>{overallCollectionRate}%</p>
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#fde047', fontSize: '0.72rem', fontWeight: 600 }}>Collection Rate</h3>
+              <p className="stat-value" style={{ color: '#ffc700', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{overallCollectionRate}%</p>
             </div>
           </div>
         </div>
 
-        {/* Filters Panel */}
-        <div className="filters-wrapper-card">
-          <div className="panel-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
-            <h3 className="panel-title" style={{ fontSize: '0.9rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Performance Filters</h3>
+        {/* Modern Filters Bar with View Switcher */}
+        <div className="filters-wrapper-card" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+          {/* Sub-view switcher segmented pill bar */}
+          <div style={{
+            display: 'flex',
+            gap: '6px',
+            background: 'rgba(0, 0, 0, 0.35)',
+            padding: '4px',
+            borderRadius: '10px',
+            border: '1px solid rgba(255, 255, 255, 0.06)',
+            marginBottom: '1rem',
+            overflowX: 'auto',
+            WebkitOverflowScrolling: 'touch'
+          }}>
+            <button
+              type="button"
+              onClick={() => setPerfActiveTab('students')}
+              style={{
+                flex: 1,
+                minWidth: '110px',
+                padding: '8px 12px',
+                borderRadius: '8px',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                border: 'none',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                background: perfActiveTab === 'students' ? 'rgba(255, 255, 255, 0.14)' : 'transparent',
+                color: perfActiveTab === 'students' ? '#fff' : '#8e8e93',
+                boxShadow: perfActiveTab === 'students' ? '0 2px 8px rgba(0,0,0,0.3)' : 'none',
+                transition: 'all 0.2s ease',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              <Users size={14} /> Students <span style={{ opacity: 0.85, fontSize: '0.72rem', background: 'rgba(255,255,255,0.1)', padding: '1px 6px', borderRadius: '10px' }}>{filtered.length}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setPerfActiveTab('batches')}
+              style={{
+                flex: 1,
+                minWidth: '110px',
+                padding: '8px 12px',
+                borderRadius: '8px',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                border: 'none',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                background: perfActiveTab === 'batches' ? 'rgba(255, 255, 255, 0.14)' : 'transparent',
+                color: perfActiveTab === 'batches' ? '#fff' : '#8e8e93',
+                boxShadow: perfActiveTab === 'batches' ? '0 2px 8px rgba(0,0,0,0.3)' : 'none',
+                transition: 'all 0.2s ease',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              <Calendar size={14} /> Batches <span style={{ opacity: 0.85, fontSize: '0.72rem', background: 'rgba(255,255,255,0.1)', padding: '1px 6px', borderRadius: '10px' }}>{batchSummaries.length}</span>
+            </button>
+
+            {isSuper && activeBranch === 'All' && (
+              <button
+                type="button"
+                onClick={() => setPerfActiveTab('branches')}
+                style={{
+                  flex: 1,
+                  minWidth: '110px',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  background: perfActiveTab === 'branches' ? 'rgba(255, 255, 255, 0.14)' : 'transparent',
+                  color: perfActiveTab === 'branches' ? '#fff' : '#8e8e93',
+                  boxShadow: perfActiveTab === 'branches' ? '0 2px 8px rgba(0,0,0,0.3)' : 'none',
+                  transition: 'all 0.2s ease',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                <Layers size={14} /> Branches <span style={{ opacity: 0.85, fontSize: '0.72rem', background: 'rgba(255,255,255,0.1)', padding: '1px 6px', borderRadius: '10px' }}>{branchSummaries.length}</span>
+              </button>
+            )}
           </div>
-          <div className="grid-filters-layout" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Search Input */}
+            <div style={{ position: 'relative', minWidth: '220px', flex: '1 1 240px' }}>
+              <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+              <input
+                type="text"
+                placeholder="Search student..."
+                className="form-control"
+                style={{ paddingLeft: '36px', height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+
+            {/* Branch (Superadmin only) */}
             {isSuper ? (
-              <div className="form-group">
-                <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Branch</label>
-                <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={perfFilterBranch} onChange={(e) => {
-                  setPerfFilterBranch(e.target.value);
-                  setPerfFilterBatch('All');
-                }}>
+              <div style={{ minWidth: '140px', flex: '1 1 140px' }}>
+                <select
+                  className="form-control"
+                  style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
+                  value={perfFilterBranch}
+                  onChange={(e) => {
+                    setPerfFilterBranch(e.target.value);
+                    setPerfFilterBatch('All');
+                  }}
+                >
                   <option value="All">All Branches</option>
                   {branches.map(b => (
                     <option key={b} value={b}>{b}</option>
@@ -8750,75 +9419,186 @@ function App() {
                 </select>
               </div>
             ) : (
-              <div className="form-group">
-                <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Branch</label>
-                <input type="text" className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={userBranch} disabled />
+              <div style={{ minWidth: '140px', flex: '1 1 140px' }}>
+                <input type="text" className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }} value={userBranch} disabled />
               </div>
             )}
-            <div className="form-group">
-              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Batch</label>
-              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={perfFilterBatch} onChange={(e) => setPerfFilterBatch(e.target.value)}>
+
+            {/* Batch Filter */}
+            <div style={{ minWidth: '140px', flex: '1 1 140px' }}>
+              <select
+                className="form-control"
+                style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
+                value={perfFilterBatch}
+                onChange={(e) => setPerfFilterBatch(e.target.value)}
+              >
                 <option value="All">All Batches</option>
                 {getFilteredBatchOptions(isSuper ? perfFilterBranch : undefined).map(opt => (
                   <option key={opt.id} value={opt.id}>{opt.name}</option>
                 ))}
               </select>
             </div>
-            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-              <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
-                <button className="btn-secondary" style={{ padding: '6px 16px', fontSize: '0.85rem', height: '38px', borderRadius: '8px', flex: 1 }} onClick={() => {
-                  if (isSuper) setPerfFilterBranch('All');
-                  setPerfFilterBatch('All');
-                  setSearchQuery('');
-                }}>Reset Filters</button>
-                <div style={{ position: 'relative', flex: 1.5 }}>
-                  <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
-                  <input
-                    type="text"
-                    placeholder="Search students..."
-                    className="form-control"
-                    style={{ paddingLeft: '36px', height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                </div>
-              </div>
-            </div>
+
+            {/* Reset Button */}
+            <button
+              className="btn-secondary"
+              style={{ padding: '0 1rem', fontSize: '0.8rem', height: '38px', borderRadius: '8px', whiteSpace: 'nowrap' }}
+              onClick={() => {
+                if (isSuper) setPerfFilterBranch('All');
+                setPerfFilterBatch('All');
+                setSearchQuery('');
+              }}
+            >
+              Reset
+            </button>
           </div>
         </div>
 
-        {/* Branch-wise summary report (Super Admin and viewing 'All' branches only) */}
-        {isSuper && activeBranch === 'All' && (
-          <div className="panel" style={{ marginBottom: '2rem', background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
-            <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: 'none', paddingBottom: 0 }}>
-              <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Branch-wise Profit Summary</h3>
-            </div>
-            <div className="premium-table-container">
+        {/* Tab 1: Detailed Student-wise Breakdown */}
+        {perfActiveTab === 'students' && (
+          <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', overflow: 'hidden', padding: 0 }}>
+            {filtered.length > 0 ? (
+              <div className="premium-table-container" style={{ border: 'none', background: 'transparent' }}>
+                <table className="premium-table responsive-table-cards">
+                  <thead>
+                    <tr>
+                      <th>Student</th>
+                      <th>Batch</th>
+                      <th>Admission</th>
+                      <th>Monthly Status</th>
+                      <th>Paid (Profit)</th>
+                      <th>Pending</th>
+                      <th>Collection</th>
+                      <th style={{ textAlign: 'center' }}>Contact Outreach</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(student => {
+                      const initials = (student.studentName || student.name || 'S').split(' ').map(n => n[0]).slice(0, 2).join('');
+                      const stats = getStudentFeeStats(student);
+                      const rate = stats.expected > 0 ? Math.round((stats.totalCollected / stats.expected) * 100) : 0;
+
+                      return (
+                        <tr key={student.id}>
+                          <td data-label="Student" style={{ fontWeight: 700, color: '#fff' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <div className="student-avatar-badge">{initials}</div>
+                              <button
+                                type="button"
+                                onClick={() => handleSelectStudent(student)}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  padding: 0,
+                                  fontWeight: 700,
+                                  color: '#fff',
+                                  cursor: 'pointer',
+                                  fontFamily: 'inherit',
+                                  fontSize: 'inherit',
+                                  textAlign: 'left',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                {student.studentName || student.name}
+                                {student.isPriority && (
+                                  <Star size={13} fill="#FFD700" color="#FFD700" title="Priority Student" />
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                          <td data-label="Batch">
+                            <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: '0.75rem', padding: '3px 8px', borderRadius: '6px' }}>
+                              {getBatchNameFromSchedule(student.schedule, student.branch)}
+                            </span>
+                          </td>
+                          <td data-label="Admission">
+                            {student.admissionPaid ? (
+                              <span className="badge-outline-green" style={{ fontSize: '0.72rem', padding: '2px 8px' }}>Paid</span>
+                            ) : (
+                              <span className="badge-outline-red" style={{ fontSize: '0.72rem', padding: '2px 8px' }}>Pending (₹{stats.pendingAdmission})</span>
+                            )}
+                          </td>
+                          <td data-label="Monthly Status" style={{ fontSize: '0.8rem' }}>
+                            <span style={{ color: '#4CAF50', fontWeight: 600 }}>{stats.paidCount} Paid</span> • <span style={{ color: '#ff453a', fontWeight: 600 }}>{stats.pendingCount} Due</span>
+                          </td>
+                          <td data-label="Paid (Profit)" style={{ fontWeight: 700, color: '#4CAF50' }}>
+                            ₹{stats.totalCollected.toLocaleString()}
+                          </td>
+                          <td data-label="Pending" style={{ fontWeight: 700, color: stats.totalPending > 0 ? '#ff453a' : 'var(--color-text-muted)' }}>
+                            ₹{stats.totalPending.toLocaleString()}
+                          </td>
+                          <td data-label="Collection" style={{ width: '15%' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <div className="progress-container" style={{ flex: 1, height: '6px', background: 'rgba(255,255,255,0.08)', borderRadius: '4px' }}>
+                                <div className="progress-bar" style={{ width: `${rate}%`, background: rate >= 80 ? '#4CAF50' : rate >= 50 ? '#36A2EB' : '#ff453a', height: '100%', borderRadius: '4px' }}></div>
+                              </div>
+                              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>{rate}%</span>
+                            </div>
+                          </td>
+                          <td data-label="Contact Outreach">
+                            <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', alignItems: 'center' }}>
+                              <a href={`tel:${student.phone}`} style={{ color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.25)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="Call Student">
+                                <Phone size={13} />
+                              </a>
+                              <a href={`https://wa.me/${student.phone}`} target="_blank" rel="noreferrer" style={{ color: '#4ade80', background: 'rgba(74, 222, 128, 0.1)', border: '1px solid rgba(74, 222, 128, 0.25)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="WhatsApp Student">
+                                <MessageCircle size={13} />
+                              </a>
+                              <a href={`sms:${student.phone}`} style={{ color: '#fbbf24', background: 'rgba(251, 191, 36, 0.1)', border: '1px solid rgba(251, 191, 36, 0.25)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="SMS Student">
+                                <MessageSquare size={13} />
+                              </a>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '3.5rem 2rem', color: 'var(--color-text-muted)' }}>
+                <Users size={32} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
+                <div style={{ fontSize: '0.95rem', color: '#fff', fontWeight: 600 }}>No Students Found</div>
+                <p style={{ fontSize: '0.8rem', margin: 0, marginTop: '4px' }}>No student records match the selected performance filter.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab 2: Batch Summary Breakdown */}
+        {perfActiveTab === 'batches' && (
+          <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', overflow: 'hidden', padding: 0 }}>
+            <div className="premium-table-container" style={{ border: 'none', background: 'transparent' }}>
               <table className="premium-table responsive-table-cards">
                 <thead>
                   <tr>
-                    <th>Branch Name</th>
-                    <th>Students Count</th>
-                    <th>Fee Collected (Profit)</th>
-                    <th>Pending Fees</th>
+                    <th>Batch Name</th>
+                    <th>Students</th>
+                    <th>Fee Collected</th>
+                    <th>Pending Due</th>
                     <th>Expected Revenue</th>
                     <th>Collection Progress</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {branchSummaries.map(bSummary => (
-                    <tr key={bSummary.name}>
-                      <td style={{ fontWeight: 600, color: '#fff' }} data-label="Branch Name">{bSummary.name}</td>
-                      <td data-label="Students Count">{bSummary.studentsCount}</td>
-                      <td style={{ color: '#4CAF50', fontWeight: 600 }} data-label="Fee Collected (Profit)">₹{bSummary.collected.toLocaleString()}</td>
-                      <td style={{ color: '#ff453a' }} data-label="Pending Fees">₹{bSummary.pending.toLocaleString()}</td>
-                      <td data-label="Expected Revenue">₹{bSummary.expected.toLocaleString()}</td>
-                      <td style={{ width: '25%' }} data-label="Collection Progress">
+                  {batchSummaries.map(batSummary => (
+                    <tr key={batSummary.id}>
+                      <td style={{ fontWeight: 600, color: '#fff' }} data-label="Batch Name">{batSummary.name}</td>
+                      <td data-label="Students">
+                        <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: '0.75rem', padding: '3px 8px' }}>
+                          {batSummary.studentsCount} Students
+                        </span>
+                      </td>
+                      <td style={{ color: '#4CAF50', fontWeight: 700 }} data-label="Fee Collected">₹{batSummary.collected.toLocaleString()}</td>
+                      <td style={{ color: '#ff453a', fontWeight: 700 }} data-label="Pending Due">₹{batSummary.pending.toLocaleString()}</td>
+                      <td style={{ color: '#38bdf8', fontWeight: 600 }} data-label="Expected Revenue">₹{batSummary.expected.toLocaleString()}</td>
+                      <td style={{ width: '22%' }} data-label="Collection Progress">
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <div className="progress-container" style={{ flex: 1, height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px' }}>
-                            <div className="progress-bar" style={{ width: `${bSummary.rate}%`, background: '#4CAF50', height: '100%', borderRadius: '4px' }}></div>
+                          <div className="progress-container" style={{ flex: 1, height: '7px', background: 'rgba(255,255,255,0.08)', borderRadius: '4px' }}>
+                            <div className="progress-bar" style={{ width: `${batSummary.rate}%`, background: batSummary.rate >= 80 ? '#4CAF50' : batSummary.rate >= 50 ? '#38bdf8' : '#ff453a', height: '100%', borderRadius: '4px' }}></div>
                           </div>
-                          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', minWidth: '35px' }}>{bSummary.rate}%</span>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', minWidth: '35px' }}>{batSummary.rate}%</span>
                         </div>
                       </td>
                     </tr>
@@ -8829,146 +9609,48 @@ function App() {
           </div>
         )}
 
-        {/* Batch-wise summary report */}
-        <div className="panel" style={{ marginBottom: '2rem', background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
-          <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: 'none', paddingBottom: 0 }}>
-            <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Batch-wise Profit Summary ({batchSummaries.length} Batches)</h3>
-          </div>
-          <div className="premium-table-container">
-            <table className="premium-table responsive-table-cards">
-              <thead>
-                <tr>
-                  <th>Batch Name</th>
-                  <th>Students Count</th>
-                  <th>Fee Collected (Profit)</th>
-                  <th>Pending Fees</th>
-                  <th>Expected Revenue</th>
-                  <th>Collection Progress</th>
-                </tr>
-              </thead>
-              <tbody>
-                {batchSummaries.map(batSummary => (
-                  <tr key={batSummary.id}>
-                    <td style={{ fontWeight: 600, color: '#fff' }} data-label="Batch Name">{batSummary.name}</td>
-                    <td data-label="Students Count">{batSummary.studentsCount}</td>
-                    <td style={{ color: '#4CAF50', fontWeight: 600 }} data-label="Fee Collected (Profit)">₹{batSummary.collected.toLocaleString()}</td>
-                    <td style={{ color: '#ff453a' }} data-label="Pending Fees">₹{batSummary.pending.toLocaleString()}</td>
-                    <td data-label="Expected Revenue">₹{batSummary.expected.toLocaleString()}</td>
-                    <td style={{ width: '25%' }} data-label="Collection Progress">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div className="progress-container" style={{ flex: 1, height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px' }}>
-                          <div className="progress-bar" style={{ width: `${batSummary.rate}%`, background: '#36A2EB', height: '100%', borderRadius: '4px' }}></div>
-                        </div>
-                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', minWidth: '35px' }}>{batSummary.rate}%</span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Student-wise detailed table */}
-        <div className="panel" style={{ background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
-          <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: 'none', paddingBottom: 0 }}>
-            <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Detailed Student Profit Breakdown ({filtered.length} Students)</h3>
-          </div>
-          {filtered.length > 0 ? (
-            <div className="premium-table-container">
+        {/* Tab 3: Branch Summary Breakdown (Super Admin) */}
+        {perfActiveTab === 'branches' && isSuper && activeBranch === 'All' && (
+          <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', overflow: 'hidden', padding: 0 }}>
+            <div className="premium-table-container" style={{ border: 'none', background: 'transparent' }}>
               <table className="premium-table responsive-table-cards">
                 <thead>
                   <tr>
-                    <th>Student Name</th>
-                    <th>Batch</th>
-                    <th>Admission Fee</th>
-                    <th>Monthly Fees</th>
-                    <th>Total Paid (Profit)</th>
-                    <th>Total Pending</th>
+                    <th>Branch Name</th>
+                    <th>Students</th>
+                    <th>Fee Collected</th>
+                    <th>Pending Due</th>
+                    <th>Expected Revenue</th>
                     <th>Collection Progress</th>
-                    <th style={{ textAlign: 'center' }}>Contact Outreach</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map(student => {
-                    const stats = getStudentFeeStats(student);
-                    const rate = stats.expected > 0 ? Math.round((stats.totalCollected / stats.expected) * 100) : 0;
-                    return (
-                      <tr key={student.id}>
-                        <td data-label="Student Name">
-                          <button
-                            type="button"
-                            onClick={() => handleSelectStudent(student)}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              padding: 0,
-                              fontWeight: 700,
-                              color: 'var(--color-primary)',
-                              cursor: 'pointer',
-                              textDecoration: 'underline',
-                              fontFamily: 'inherit',
-                              fontSize: 'inherit',
-                              textAlign: 'left',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px'
-                            }}
-                          >
-                            {student.studentName || student.name}
-                            {student.isPriority && (
-                              <Star size={14} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
-                            )}
-                          </button>
-                        </td>
-                        <td data-label="Batch">
-                          <span className="badge" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--color-text-light)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                            {getBatchNameFromSchedule(student.schedule, student.branch)}
-                          </span>
-                        </td>
-                        <td data-label="Admission Fee">
-                          {student.admissionPaid ? (
-                            <span className="badge-outline-green">Paid</span>
-                          ) : (
-                            <span className="badge-outline-red">Pending (₹{stats.pendingAdmission})</span>
-                          )}
-                        </td>
-                        <td data-label="Monthly Fees" style={{ fontSize: '0.825rem' }}>
-                          <span style={{ color: '#4CAF50', fontWeight: 600 }}>{stats.paidCount} Paid</span> • <span style={{ color: '#ff453a', fontWeight: 600 }}>{stats.pendingCount} Pending</span>
-                        </td>
-                        <td style={{ fontWeight: 600, color: '#4CAF50' }} data-label="Total Paid (Profit)">₹{stats.totalCollected.toLocaleString()}</td>
-                        <td style={{ fontWeight: 600, color: stats.totalPending > 0 ? '#ff453a' : 'var(--color-text-muted)' }} data-label="Total Pending">₹{stats.totalPending.toLocaleString()}</td>
-                        <td style={{ width: '15%' }} data-label="Collection Progress">
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <div className="progress-container" style={{ flex: 1, height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px' }}>
-                              <div className="progress-bar" style={{ width: `${rate}%`, background: 'var(--color-primary)', height: '100%', borderRadius: '4px' }}></div>
-                            </div>
-                            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>{rate}%</span>
+                  {branchSummaries.map(bSummary => (
+                    <tr key={bSummary.name}>
+                      <td style={{ fontWeight: 600, color: '#fff' }} data-label="Branch Name">{bSummary.name}</td>
+                      <td data-label="Students">
+                        <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: '0.75rem', padding: '3px 8px' }}>
+                          {bSummary.studentsCount} Students
+                        </span>
+                      </td>
+                      <td style={{ color: '#4CAF50', fontWeight: 700 }} data-label="Fee Collected">₹{bSummary.collected.toLocaleString()}</td>
+                      <td style={{ color: '#ff453a', fontWeight: 700 }} data-label="Pending Due">₹{bSummary.pending.toLocaleString()}</td>
+                      <td style={{ color: '#38bdf8', fontWeight: 600 }} data-label="Expected Revenue">₹{bSummary.expected.toLocaleString()}</td>
+                      <td style={{ width: '22%' }} data-label="Collection Progress">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div className="progress-container" style={{ flex: 1, height: '7px', background: 'rgba(255,255,255,0.08)', borderRadius: '4px' }}>
+                            <div className="progress-bar" style={{ width: `${bSummary.rate}%`, background: bSummary.rate >= 80 ? '#4CAF50' : bSummary.rate >= 50 ? '#38bdf8' : '#ff453a', height: '100%', borderRadius: '4px' }}></div>
                           </div>
-                        </td>
-                        <td data-label="Contact Outreach">
-                          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', alignItems: 'center' }}>
-                            <a href={`tel:${student.phone}`} style={{ color: '#2196F3', background: 'rgba(33, 150, 243, 0.1)', border: '1px solid rgba(33, 150, 243, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="Call Student">
-                              <Phone size={13} />
-                            </a>
-                            <a href={`https://wa.me/${student.phone}`} target="_blank" rel="noreferrer" style={{ color: '#25D366', background: 'rgba(37, 211, 102, 0.1)', border: '1px solid rgba(37, 211, 102, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="WhatsApp Student">
-                              <MessageCircle size={13} />
-                            </a>
-                            <a href={`sms:${student.phone}`} style={{ color: '#FF9800', background: 'rgba(255, 152, 0, 0.1)', border: '1px solid rgba(255, 152, 0, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="SMS Message Student">
-                              <MessageSquare size={13} />
-                            </a>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', minWidth: '35px' }}>{bSummary.rate}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--color-text-muted)' }}>No student matching the current filters.</div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -8979,95 +9661,511 @@ function App() {
       const fees = calculateStudentFees(s, currentSystemMonth);
       return fees.totalDue > 0;
     });
+
+    const activeAnnouncementsList = notifications && notifications.length > 0 ? notifications : devNotifications;
+
     return (
-      <div className="reminders-container">
-        <div className="panel" style={{ marginBottom: '2rem', background: 'rgba(229, 9, 20, 0.1)', border: '1px solid rgba(229, 9, 20, 0.3)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
-            <AlertTriangle size={32} color="var(--color-primary)" />
-            <div>
-              <h2 style={{ margin: 0, color: 'var(--color-primary)', fontFamily: 'var(--font-heading)' }}>Monthly Fee Due!</h2>
-              <p style={{ margin: '0.5rem 0 0 0', color: 'var(--color-text-muted)' }}>Auto alerts triggered: 30 days since last payment. Notify students below.</p>
-            </div>
+      <div className="reminders-container" style={{ maxWidth: '1200px', margin: '0 auto' }}>
+        {/* Page Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+          <div>
+            <h2 style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.5rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Bell size={24} color="#E50914" /> Broadcast & Notification Center
+            </h2>
+            <p style={{ margin: '4px 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+              Send instant notices to all trainers, branch admins, or specific branches. Alerts appear automatically upon login.
+            </p>
           </div>
-          <button className="btn-primary w-full-mobile" onClick={() => alert('Automated reminders triggered!')}>
-            <Bell size={18} /> Send All Reminders Now
-          </button>
+
+          {/* Subtabs Switcher */}
+          <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', padding: '4px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', gap: '4px' }}>
+            <button
+              type="button"
+              onClick={() => setRemindersTab('broadcast')}
+              style={{
+                background: remindersTab === 'broadcast' ? 'linear-gradient(135deg, #E50914, #b91c1c)' : 'transparent',
+                color: '#fff',
+                border: 'none',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '0.85rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.2s ease',
+                boxShadow: remindersTab === 'broadcast' ? '0 2px 8px rgba(229, 9, 20, 0.4)' : 'none'
+              }}
+            >
+              <Send size={15} /> Staff Broadcast ({activeAnnouncementsList.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setRemindersTab('fees')}
+              style={{
+                background: remindersTab === 'fees' ? 'linear-gradient(135deg, #E50914, #b91c1c)' : 'transparent',
+                color: '#fff',
+                border: 'none',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '0.85rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.2s ease',
+                boxShadow: remindersTab === 'fees' ? '0 2px 8px rgba(229, 9, 20, 0.4)' : 'none'
+              }}
+            >
+              <Wallet size={15} /> Fee Dues ({unpaidStudents.length})
+            </button>
+          </div>
         </div>
 
-        <div className="panel">
-          <div className="panel-header">
-            <h3 className="panel-title">Pending Action ({unpaidStudents.length})</h3>
-          </div>
-          {unpaidStudents.length > 0 ? (
-            <div className="table-responsive">
-              <table className="data-table responsive-table-cards">
-                <thead>
-                  <tr>
-                    <th>Student Name</th>
-                    <th>Phone</th>
-                    <th>Due Amount</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {unpaidStudents.map(student => {
-                    const fees = calculateStudentFees(student, currentSystemMonth);
-                    const brName = student.branch.toUpperCase();
-                    let msg = `Hi ${student.studentName || student.name}, this is a reminder from MASTER FIT Academy (${brName}). You have pending dues: `;
-                    const items = [];
-                    if (fees.admissionDue > 0) items.push(`Admission Fee (₹${fees.admissionDue})`);
-                    if (fees.unpaidMonths.length > 0) items.push(`Monthly Fees for ${fees.unpaidMonths.join(', ')} (₹${fees.monthlyDue})`);
-                    msg += items.join(' and ') + `. Total outstanding: ₹${fees.totalDue}. Please clear it as soon as possible. Thank you!`;
-                    const encodedMsg = encodeURIComponent(msg);
+        {/* TAB 1: Staff Broadcast & Announcements */}
+        {remindersTab === 'broadcast' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {/* Quick Summary Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+              <div className="stat-card" style={{ borderTop: '3px solid #3b82f6' }}>
+                <div className="stat-icon-wrapper" style={{ background: 'rgba(59, 130, 246, 0.12)', borderColor: 'rgba(59, 130, 246, 0.25)' }}>
+                  <Bell size={20} color="#3b82f6" />
+                </div>
+                <div className="stat-details">
+                  <h3>Active Notices</h3>
+                  <p className="stat-value" style={{ color: '#3b82f6' }}>{activeAnnouncementsList.length}</p>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Broadcasting to logged-in users</span>
+                </div>
+              </div>
+
+              <div className="stat-card" style={{ borderTop: '3px solid #4CAF50' }}>
+                <div className="stat-icon-wrapper" style={{ background: 'rgba(76, 175, 80, 0.12)', borderColor: 'rgba(76, 175, 80, 0.25)' }}>
+                  <Users size={20} color="#4CAF50" />
+                </div>
+                <div className="stat-details">
+                  <h3>Target Reach</h3>
+                  <p className="stat-value" style={{ color: '#4CAF50' }}>All Staff</p>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Trainers & Branch Admins</span>
+                </div>
+              </div>
+
+              <div className="stat-card" style={{ borderTop: '3px solid #FFD700' }}>
+                <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 215, 0, 0.12)', borderColor: 'rgba(255, 215, 0, 0.25)' }}>
+                  <AlertCircle size={20} color="#FFD700" />
+                </div>
+                <div className="stat-details">
+                  <h3>Login Popup Alerts</h3>
+                  <p className="stat-value" style={{ color: '#FFD700' }}>
+                    {activeAnnouncementsList.filter(n => n.priority === 'high').length}
+                  </p>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Urgent instant modals</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Broadcast Composer Form */}
+            <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '16px', padding: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem', flexWrap: 'wrap', gap: '8px' }}>
+                <h3 style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.15rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Send size={18} color="var(--color-primary)" />
+                  {editingNotificationId ? 'Edit Broadcast Notice' : 'Send New Notification to Staff'}
+                </h3>
+                {editingNotificationId && (
+                  <button
+                    type="button"
+                    className="btn-small btn-secondary"
+                    onClick={() => {
+                      setEditingNotificationId(null);
+                      setAnnouncementForm({
+                        title: '',
+                        message: '',
+                        type: 'general',
+                        priority: 'medium',
+                        branch: 'all',
+                        batch: 'all',
+                        targetUser: 'all',
+                        expiryDate: '',
+                        scheduledAt: '',
+                        isScheduled: false
+                      });
+                    }}
+                  >
+                    Cancel Edit
+                  </button>
+                )}
+              </div>
+
+              {/* Alert Messages */}
+              {announcementSuccess && (
+                <div style={{ background: 'rgba(76, 175, 80, 0.12)', border: '1px solid rgba(76, 175, 80, 0.3)', color: '#4CAF50', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem' }}>
+                  <CheckCircle size={16} /> {announcementSuccess}
+                </div>
+              )}
+              {announcementError && (
+                <div style={{ background: 'rgba(244, 67, 54, 0.12)', border: '1px solid rgba(244, 67, 54, 0.3)', color: '#F44336', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem' }}>
+                  <AlertTriangle size={16} /> {announcementError}
+                </div>
+              )}
+
+              {/* Quick Template Chips */}
+              <div style={{ marginBottom: '1.25rem' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '6px', fontWeight: 600 }}>QUICK TEMPLATES:</span>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {[
+                    { label: '🏖️ Holiday Notice', title: 'Holiday Announcement: Academy Closed', type: 'holiday', msg: 'Please note that all branches and classes will remain closed tomorrow on account of holiday. Classes will resume as per regular schedule.' },
+                    { label: '🥋 Belt Grading Exam', title: 'Upcoming Belt Grading Examination', type: 'exam', msg: 'All eligible students and branch trainers are requested to prepare the registration and grading roster for the upcoming examination session.' },
+                    { label: '💼 Staff Meeting', title: 'Monthly Staff & Trainer Meeting', type: 'general', msg: 'All branch managers and instructors are requested to attend the upcoming monthly coordination meeting.' },
+                    { label: '⚠️ Urgent Maintenance', title: 'System Notice: Scheduled Update', type: 'warning', msg: 'Please ensure all attendance entries for the current week are marked and verified before the upcoming maintenance.' }
+                  ].map((tpl, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => {
+                        setAnnouncementForm({
+                          ...announcementForm,
+                          title: tpl.title,
+                          message: tpl.msg,
+                          type: tpl.type
+                        });
+                      }}
+                      style={{
+                        background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        color: 'var(--color-text-light)',
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {tpl.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Form Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                {/* Title */}
+                <div style={{ gridColumn: 'span 2' }}>
+                  <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
+                    Notice Title <span style={{ color: '#E50914' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g., Special Batch Timings / Holiday Notice / Exam Details"
+                    value={announcementForm.title}
+                    onChange={(e) => setAnnouncementForm({ ...announcementForm, title: e.target.value })}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                {/* Target Audience */}
+                <div>
+                  <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
+                    Target Audience
+                  </label>
+                  <select
+                    className="form-control"
+                    value={announcementForm.targetUser || 'all'}
+                    onChange={(e) => setAnnouncementForm({ ...announcementForm, targetUser: e.target.value })}
+                    style={{ width: '100%' }}
+                  >
+                    <option value="all">🌐 All Users (Trainers & Branch Admins)</option>
+                    <option value="trainers">🥋 All Trainers Only</option>
+                    <option value="branches">🏢 All Branch Admins Only</option>
+                    {trainerOptions && trainerOptions.length > 0 && trainerOptions.map(t => (
+                      <option key={t} value={t}>👤 Trainer: {t}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Branch Scope */}
+                <div>
+                  <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
+                    Target Branch
+                  </label>
+                  <select
+                    className="form-control"
+                    value={announcementForm.branch || 'all'}
+                    onChange={(e) => setAnnouncementForm({ ...announcementForm, branch: e.target.value })}
+                    style={{ width: '100%' }}
+                  >
+                    <option value="all">🏢 All Branches</option>
+                    {branches && branches.map(b => (
+                      <option key={b} value={b}>📍 {b} Branch</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Notification Category */}
+                <div>
+                  <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
+                    Notice Category
+                  </label>
+                  <select
+                    className="form-control"
+                    value={announcementForm.type || 'general'}
+                    onChange={(e) => setAnnouncementForm({ ...announcementForm, type: e.target.value })}
+                    style={{ width: '100%' }}
+                  >
+                    <option value="general">📢 General Announcement</option>
+                    <option value="holiday">🏖️ Holiday / Leave Notice</option>
+                    <option value="exam">🥋 Belt Grading / Exam</option>
+                    <option value="warning">⚠️ Urgent Notice / Instruction</option>
+                    <option value="update">🚀 Academy Update</option>
+                  </select>
+                </div>
+
+                {/* Priority Level */}
+                <div>
+                  <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
+                    Priority & Display Style
+                  </label>
+                  <select
+                    className="form-control"
+                    value={announcementForm.priority || 'medium'}
+                    onChange={(e) => setAnnouncementForm({ ...announcementForm, priority: e.target.value })}
+                    style={{ width: '100%' }}
+                  >
+                    <option value="low">🟢 Normal (Notification List)</option>
+                    <option value="medium">🟡 Medium Priority</option>
+                    <option value="high">🔴 High / Urgent (Instant Popup on Login!)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Message Body */}
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
+                  Notice Message / Description <span style={{ color: '#E50914' }}>*</span>
+                </label>
+                <textarea
+                  className="form-control"
+                  rows={4}
+                  placeholder="Enter the full announcement details. This will appear when trainers or branch admins log in..."
+                  value={announcementForm.message}
+                  onChange={(e) => setAnnouncementForm({ ...announcementForm, message: e.target.value })}
+                  style={{ width: '100%', height: 'auto', minHeight: '90px', padding: '10px 14px', lineHeight: '1.5' }}
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                {editingNotificationId && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      setEditingNotificationId(null);
+                      setAnnouncementForm({
+                        title: '',
+                        message: '',
+                        type: 'general',
+                        priority: 'medium',
+                        branch: 'all',
+                        batch: 'all',
+                        targetUser: 'all',
+                        expiryDate: '',
+                        scheduledAt: '',
+                        isScheduled: false
+                      });
+                    }}
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={handleSaveAnnouncement}
+                  disabled={devActionLoading}
+                  style={{ padding: '0.7rem 1.5rem', fontWeight: 700, fontSize: '0.9rem', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+                >
+                  <Send size={16} />
+                  {devActionLoading ? 'Publishing...' : (editingNotificationId ? 'Update Notice' : 'Broadcast Notice Now')}
+                </button>
+              </div>
+            </div>
+
+            {/* Active & Sent Notices History */}
+            <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '16px', overflow: 'hidden', padding: 0 }}>
+              <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.1rem', color: '#fff' }}>Published Broadcasts & Notice History</h3>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>Total {activeAnnouncementsList.length} Active Broadcasts</span>
+                </div>
+                <button className="btn-small btn-secondary" onClick={() => { loadNotifications(); loadDevNotifications(); }}>
+                  🔄 Refresh
+                </button>
+              </div>
+
+              {activeAnnouncementsList.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', divideY: '1px solid rgba(255,255,255,0.06)' }}>
+                  {activeAnnouncementsList.map((n) => {
+                    const priorityColor = n.priority === 'high' ? '#E50914' : n.priority === 'medium' ? '#FFD700' : '#4CAF50';
+                    const targetDisplay = n.targetUser === 'all' ? '🌐 All Users' : n.targetUser === 'trainers' ? '🥋 All Trainers' : n.targetUser === 'branches' ? '🏢 All Branch Admins' : `👤 ${n.targetUser}`;
+                    const branchDisplay = n.branch && n.branch !== 'all' ? `📍 ${n.branch}` : '🏢 All Branches';
 
                     return (
-                      <tr key={student.id}>
-                        <td data-label="Student Name" onClick={() => handleSelectStudent(student)} style={{ cursor: 'pointer', color: '#E50914', textDecoration: 'underline', fontWeight: 700 }}>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                            {student.studentName || student.name}
-                            {student.isPriority && (
-                              <Star size={14} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
-                            )}
-                          </span>
-                        </td>
-                        <td data-label="Phone">{student.phone}</td>
-                        <td data-label="Due Amount">
-                          <span className="badge badge-red">₹{fees.totalDue}</span>
-                          <span style={{ fontSize: '0.75rem', display: 'block', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                            {fees.admissionDue > 0 ? 'Admission' : ''}
-                            {fees.admissionDue > 0 && fees.unpaidMonths.length > 0 ? ' + ' : ''}
-                            {fees.unpaidMonths.length > 0 ? `${fees.unpaidMonths.length}m monthly` : ''}
-                          </span>
-                        </td>
-                        <td data-label="Action">
-                          <div className="actions-flex-container">
-                            <a href={`https://wa.me/${student.phone}?text=${encodedMsg}`} target="_blank" rel="noreferrer" className="btn-small" style={{ background: '#25D366', color: 'white', border: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
-                              <MessageCircle size={14} /> WhatsApp
-                            </a>
-                            <a href={`tel:${student.phone}`} className="btn-icon" style={{ color: '#2196F3' }} title="Call Student">
-                              <Phone size={18} />
-                            </a>
-                            <a href={`sms:${student.phone}`} className="btn-icon" style={{ color: '#FF9800' }} title="SMS Message Student">
-                              <MessageSquare size={18} />
-                            </a>
-                            <button className="btn-icon" onClick={() => handleDeleteStudent(student.id)} style={{ color: '#F44336' }} title="Delete">
-                              <Trash2 size={18} />
-                            </button>
+                      <div key={n._id} style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
+                        <div style={{ flex: 1, minWidth: '240px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' }}>
+                            <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#fff' }}>{n.title}</span>
+                            <span className="badge" style={{ background: `${priorityColor}22`, color: priorityColor, border: `1px solid ${priorityColor}44`, fontSize: '0.7rem', padding: '2px 6px' }}>
+                              {n.priority === 'high' ? '🔴 Urgent Popup' : n.priority === 'medium' ? '🟡 Medium' : '🟢 Normal'}
+                            </span>
+                            <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--color-text-light)', fontSize: '0.7rem', padding: '2px 6px' }}>
+                              {targetDisplay}
+                            </span>
+                            <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.12)', color: '#FFD700', fontSize: '0.7rem', padding: '2px 6px' }}>
+                              {branchDisplay}
+                            </span>
                           </div>
-                        </td>
-                      </tr>
+                          <p style={{ margin: 0, color: 'var(--color-text-light)', fontSize: '0.85rem', lineHeight: '1.5' }}>
+                            {n.message}
+                          </p>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '8px', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                            <span>Sender: <strong style={{ color: '#fff' }}>{n.sender || 'Admin'}</strong></span>
+                            <span>•</span>
+                            <span>Sent: {n.createdAt ? new Date(n.createdAt).toLocaleDateString() : 'N/A'} at {n.createdAt ? new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                            {n.readBy && (
+                              <>
+                                <span>•</span>
+                                <span style={{ color: '#4CAF50' }}>✓ Read by {n.readBy.length} users</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            className="btn-icon"
+                            style={{ color: '#38bdf8', padding: '6px' }}
+                            title="Edit Notice"
+                            onClick={() => handleStartEditAnnouncement(n)}
+                          >
+                            <Eye size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-icon"
+                            style={{ color: '#F44336', padding: '6px' }}
+                            title="Delete Notice"
+                            onClick={() => handleDeleteNotification(n._id)}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
                     );
                   })}
-                </tbody>
-              </table>
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '3.5rem 2rem', color: 'var(--color-text-muted)' }}>
+                  <Bell size={32} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
+                  <div style={{ fontSize: '0.95rem', color: '#fff', fontWeight: 600 }}>No Broadcast Notices Yet</div>
+                  <p style={{ fontSize: '0.8rem', margin: 0, marginTop: '4px' }}>Use the form above to send an announcement to trainers and branches.</p>
+                </div>
+              )}
             </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--color-text-muted)' }}>
-              <CheckCircle size={48} style={{ color: '#4CAF50', marginBottom: '1rem' }} />
-              <p>All clear! No pending payments.</p>
+          </div>
+        )}
+
+        {/* TAB 2: Fee Due Reminders */}
+        {remindersTab === 'fees' && (
+          <div>
+            <div className="panel" style={{ marginBottom: '1.5rem', background: 'rgba(229, 9, 20, 0.1)', border: '1px solid rgba(229, 9, 20, 0.3)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.25rem' }}>
+                <AlertTriangle size={30} color="var(--color-primary)" />
+                <div>
+                  <h3 style={{ margin: 0, color: 'var(--color-primary)', fontFamily: 'Outfit, sans-serif' }}>Monthly Fee Due Reminders</h3>
+                  <p style={{ margin: '0.3rem 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Direct WhatsApp and SMS alerts for students with overdue fees.</p>
+                </div>
+              </div>
             </div>
-          )}
-        </div>
+
+            <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '16px', overflow: 'hidden', padding: 0 }}>
+              <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                <h3 className="panel-title" style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.1rem', color: '#fff' }}>Pending Dues List ({unpaidStudents.length})</h3>
+              </div>
+              {unpaidStudents.length > 0 ? (
+                <div className="premium-table-container" style={{ border: 'none', background: 'transparent' }}>
+                  <table className="premium-table responsive-table-cards">
+                    <thead>
+                      <tr>
+                        <th>Student Name</th>
+                        <th>Phone</th>
+                        <th>Due Amount</th>
+                        <th style={{ textAlign: 'center' }}>Send Reminder</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {unpaidStudents.map(student => {
+                        const fees = calculateStudentFees(student, currentSystemMonth);
+                        const brName = student.branch.toUpperCase();
+                        let msg = `Hi ${student.studentName || student.name}, this is a reminder from MASTER FIT Academy (${brName}). You have pending dues: `;
+                        const items = [];
+                        if (fees.admissionDue > 0) items.push(`Admission Fee (₹${fees.admissionDue})`);
+                        if (fees.unpaidMonths.length > 0) items.push(`Monthly Fees for ${fees.unpaidMonths.join(', ')} (₹${fees.monthlyDue})`);
+                        msg += items.join(' and ') + `. Total outstanding: ₹${fees.totalDue}. Please clear it as soon as possible. Thank you!`;
+                        const encodedMsg = encodeURIComponent(msg);
+
+                        return (
+                          <tr key={student.id}>
+                            <td data-label="Student Name" onClick={() => handleSelectStudent(student)} style={{ cursor: 'pointer', color: '#E50914', textDecoration: 'underline', fontWeight: 700 }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                {student.studentName || student.name}
+                                {student.isPriority && (
+                                  <Star size={13} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
+                                )}
+                              </span>
+                            </td>
+                            <td data-label="Phone" style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>{student.phone}</td>
+                            <td data-label="Due Amount">
+                              <span className="badge badge-red">₹{fees.totalDue}</span>
+                              <span style={{ fontSize: '0.72rem', display: 'block', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                                {fees.admissionDue > 0 ? 'Admission' : ''}
+                                {fees.admissionDue > 0 && fees.unpaidMonths.length > 0 ? ' + ' : ''}
+                                {fees.unpaidMonths.length > 0 ? `${fees.unpaidMonths.length}m monthly` : ''}
+                              </span>
+                            </td>
+                            <td data-label="Send Reminder">
+                              <div className="actions-flex-container" style={{ justifyContent: 'center' }}>
+                                <a href={`https://wa.me/${student.phone}?text=${encodedMsg}`} target="_blank" rel="noreferrer" className="btn-small" style={{ background: '#25D366', color: 'white', border: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none', padding: '5px 10px', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 600 }}>
+                                  <MessageCircle size={14} /> WhatsApp
+                                </a>
+                                <a href={`tel:${student.phone}`} className="btn-icon" style={{ color: '#2196F3', padding: '6px' }} title="Call Student">
+                                  <Phone size={16} />
+                                </a>
+                                <a href={`sms:${student.phone}`} className="btn-icon" style={{ color: '#FF9800', padding: '6px' }} title="SMS Message Student">
+                                  <MessageSquare size={16} />
+                                </a>
+                                <button className="btn-icon" onClick={() => handleDeleteStudent(student.id)} style={{ color: '#F44336', padding: '6px' }} title="Delete">
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '3.5rem 0', color: 'var(--color-text-muted)' }}>
+                  <CheckCircle size={40} style={{ color: '#4CAF50', marginBottom: '0.75rem' }} />
+                  <p style={{ margin: 0, color: '#fff', fontWeight: 600 }}>All clear! No pending payments.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -12686,8 +13784,8 @@ function App() {
 
       <aside className={`sidebar ${isSidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
-          <h2 className="brand" style={{ cursor: 'pointer' }} onClick={() => setAppMode('website')}>
-            <span className="brand-accent">MASTER</span> FIT Admin
+          <h2 className="brand" style={{ cursor: 'pointer', fontSize: '1.25rem', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }} onClick={() => setAppMode('website')}>
+            <span className="brand-accent">MASTER</span> FIT <span style={{ fontSize: '0.85rem', opacity: 0.8, fontWeight: 500, marginLeft: '2px' }}>Admin</span>
           </h2>
           <button className="mobile-menu-btn" onClick={() => setIsSidebarOpen(false)}>
             <X size={24} />
@@ -12711,7 +13809,7 @@ function App() {
               <TrendingUp className="nav-icon" /> <span>Performance</span>
             </a>
           )}
-          {(userRole === 'superadmin' || userRole === 'developer' || userRole === 'branchadmin') && (
+          {(userRole === 'superadmin' || userRole === 'developer' || userRole === 'branchadmin' || userRole === 'trainer') && (
             <a className={`nav-item ${currentView === 'grading' ? 'active' : ''}`} onClick={() => { setCurrentView('grading'); fetchGradingStudents(); }}>
               <Award className="nav-icon" /> <span>Grading</span>
             </a>
@@ -12787,7 +13885,7 @@ function App() {
             </div>
           </div>
 
-          {!(currentView === 'grading' || currentView === 'settings' || currentView === 'credentials-list' || currentView === 'performance') && (
+          {!(currentView === 'grading' || currentView === 'settings' || currentView === 'credentials-list' || currentView === 'performance' || currentView === 'attendance') && (
             <div className="header-actions">
               {/* Branch Filter Selector */}
               <div style={{ position: 'relative' }}>
@@ -13025,67 +14123,83 @@ function App() {
           {currentView === 'dashboard' && (
             lockDashboardPage && userRole !== 'developer' ? renderSectionMaintenance('Dashboard') : (
               <>
-                <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', marginBottom: '2rem' }}>
-                  <div className="stat-card">
-                    <div className="stat-icon-wrapper"><Users className="stat-icon" /></div>
+                <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
+                  {/* Card 1: Active Students */}
+                  <div className="stat-card" style={{ borderTop: '3px solid #E50914' }}>
+                    <div className="stat-icon-wrapper" style={{ background: 'rgba(229, 9, 20, 0.12)', borderColor: 'rgba(229, 9, 20, 0.25)' }}>
+                      <Users className="stat-icon" style={{ color: '#E50914' }} />
+                    </div>
                     <div className="stat-details">
                       <h3>Active Students</h3>
                       <p className="stat-value">{metrics.totalStudents}</p>
-                    </div>
-                  </div>
-                  <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setCurrentView('attendance')}>
-                    <div className="stat-icon-wrapper" style={{ background: 'rgba(76, 175, 80, 0.1)' }}><Activity className="stat-icon" style={{ color: '#4CAF50' }} /></div>
-                    <div className="stat-details">
-                      <h3>Today's Attendance</h3>
-                      <p className="stat-value" style={{ color: '#4CAF50' }}>
-                        {metrics.presentToday} P / {metrics.absentToday} A
-                      </p>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                        Attendance Rate: {metrics.attendancePercentage}%
+                      <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                        Across all enrolled batches
                       </span>
                     </div>
                   </div>
-                  <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setCurrentView('reminders')}>
-                    <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 215, 0, 0.1)' }}>
+
+                  {/* Card 2: Today's Attendance */}
+                  <div className="stat-card" style={{ cursor: 'pointer', borderTop: '3px solid #4CAF50' }} onClick={() => setCurrentView('attendance')}>
+                    <div className="stat-icon-wrapper" style={{ background: 'rgba(76, 175, 80, 0.12)', borderColor: 'rgba(76, 175, 80, 0.25)' }}>
+                      <Activity className="stat-icon" style={{ color: '#4CAF50' }} />
+                    </div>
+                    <div className="stat-details">
+                      <h3>Today's Attendance</h3>
+                      <p className="stat-value" style={{ color: '#4CAF50' }}>
+                        {metrics.presentToday} <span style={{ fontSize: '1rem', color: 'var(--color-text-muted)', fontWeight: 500 }}>/ {metrics.presentToday + metrics.absentToday}</span>
+                      </p>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px' }}>
+                        <span className="badge badge-green" style={{ fontSize: '0.72rem', padding: '1px 6px' }}>{metrics.attendancePercentage}% Rate</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{metrics.absentToday} Absent</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card 3: Fee Collection */}
+                  <div className="stat-card" style={{ cursor: 'pointer', borderTop: '3px solid #FFD700' }} onClick={() => setCurrentView('reminders')}>
+                    <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 215, 0, 0.12)', borderColor: 'rgba(255, 215, 0, 0.25)' }}>
                       <Wallet className="stat-icon" style={{ color: '#FFD700' }} />
                     </div>
                     <div className="stat-details">
                       <h3>Fee Collection</h3>
                       <p className="stat-value" style={{ color: '#FFD700' }}>
-                        ₹{metrics.feeCollection} / ₹{metrics.pendingFees}
+                        ₹{metrics.feeCollection}
                       </p>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                      <span style={{ fontSize: '0.78rem', color: metrics.pendingFees > 0 ? '#ff9f0a' : 'var(--color-text-muted)' }}>
                         Pending: ₹{metrics.pendingFees}
                       </span>
                     </div>
                   </div>
-                  <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => {
+
+                  {/* Card 4: Live Classes */}
+                  <div className="stat-card" style={{ cursor: 'pointer', borderTop: '3px solid #9C27B0' }} onClick={() => {
                     const classesEl = document.getElementById('today-classes-panel');
                     if (classesEl) classesEl.scrollIntoView({ behavior: 'smooth' });
                   }}>
-                    <div className="stat-icon-wrapper" style={{ background: 'rgba(156, 39, 176, 0.1)' }}>
-                      <CalendarDays className="stat-icon" style={{ color: '#9C27B0' }} />
+                    <div className="stat-icon-wrapper" style={{ background: 'rgba(156, 39, 176, 0.12)', borderColor: 'rgba(156, 39, 176, 0.25)' }}>
+                      <CalendarDays className="stat-icon" style={{ color: '#c084fc' }} />
                     </div>
                     <div className="stat-details">
                       <h3>Live Classes Today</h3>
-                      <p className="stat-value" style={{ color: '#9C27B0' }}>
-                        {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length} {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length === 1 ? 'Class' : 'Classes'}
+                      <p className="stat-value" style={{ color: '#c084fc' }}>
+                        {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length} <span style={{ fontSize: '0.95rem', color: 'var(--color-text-muted)', fontWeight: 500 }}>Scheduled</span>
                       </p>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px', display: 'inline-block' }}>
-                        {metrics.filteredClasses.filter(c => c.status === 'cancelled').length > 0 ? (
-                          <span style={{ color: '#ff453a', marginRight: '6px', fontWeight: 'bold' }}>{metrics.filteredClasses.filter(c => c.status === 'cancelled').length} Cancelled</span>
-                        ) : null}
+                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
                         {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length > 0
                           ? `Next: ${metrics.filteredClasses.filter(c => c.status !== 'cancelled')[0].className} (${metrics.filteredClasses.filter(c => c.status !== 'cancelled')[0].startTime})`
-                          : 'No active classes'}
+                          : 'No active classes remaining'}
                       </span>
                     </div>
                   </div>
                 </div>
 
-                <div className="panel">
-                  <div className="panel-header">
-                    <h3 className="panel-title">Student Details</h3>
+                {/* Student Details Panel */}
+                <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '16px', overflow: 'hidden', padding: 0 }}>
+                  <div style={{ padding: '1.25rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', flexWrap: 'wrap', gap: '10px' }}>
+                    <div>
+                      <h3 className="panel-title" style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.1rem', color: '#fff' }}>Student Roster</h3>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>Total {searchedStudents.length} Students Listed</span>
+                    </div>
                     <button className="btn-primary" onClick={() => {
                       const defaultBranch = getLoggedInUserBranch();
                       const initialBranch = (defaultBranch === 'All' || !defaultBranch) ? (branches[0] || 'Kuttiady') : defaultBranch;
@@ -13107,93 +14221,142 @@ function App() {
                       });
                       setIsAddModalOpen(true);
                     }}>
-                      <UserPlus size={16} /> Add Student
+                      <UserPlus size={15} /> Add Student
                     </button>
                   </div>
+
                   {searchedStudents.length > 0 ? (
-                    <div className="table-responsive">
-                      <table className="data-table responsive-table-cards">
+                    <div className="premium-table-container" style={{ border: 'none', background: 'transparent' }}>
+                      <table className="premium-table responsive-table-cards">
                         <thead>
                           <tr>
-                            <th>Name</th>
+                            <th>Student</th>
                             <th>Batch Schedule</th>
-                            <th>Present Grad</th>
-                            <th>Phone</th>
-                            <th>Actions</th>
+                            <th>Belt Rank</th>
+                            <th>Contact</th>
+                            <th style={{ textAlign: 'center' }}>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {searchedStudents.map(student => (
-                            <tr key={student.id}>
-                              <td data-label="Name">
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={() => handleSelectStudent(student)}>
-                                  {student.photo ? (
-                                    <img src={student.photo} alt="" style={{ width: '30px', height: '40px', borderRadius: '4px', objectFit: 'cover' }} />
-                                  ) : (
-                                    <div style={{ width: '30px', height: '40px', borderRadius: '4px', background: 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem', color: 'white', textDecoration: 'none' }}>
-                                      {(student.studentName || student.name).charAt(0)}
+                          {searchedStudents.map(student => {
+                            const initials = (student.studentName || student.name || 'S').split(' ').map(n => n[0]).slice(0, 2).join('');
+
+                            return (
+                              <tr key={student.id}>
+                                <td data-label="Student">
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    {student.photo ? (
+                                      <img src={student.photo} alt="" style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover', border: '1px solid rgba(255, 255, 255, 0.15)' }} />
+                                    ) : (
+                                      <div className="student-avatar-badge">{initials}</div>
+                                    )}
+                                    <div>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSelectStudent(student)}
+                                        style={{
+                                          background: 'none',
+                                          border: 'none',
+                                          padding: 0,
+                                          fontWeight: 700,
+                                          color: student.status === 'Inactive' ? 'var(--color-text-muted)' : '#ffffff',
+                                          cursor: 'pointer',
+                                          fontFamily: 'inherit',
+                                          fontSize: '0.9rem',
+                                          textAlign: 'left',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '4px'
+                                        }}
+                                      >
+                                        {student.studentName || student.name}
+                                        {student.isPriority && (
+                                          <Star size={13} fill="#FFD700" color="#FFD700" title="Priority Student" />
+                                        )}
+                                      </button>
+                                      {student.status === 'Inactive' && (
+                                        <span className="badge" style={{ background: 'rgba(244, 67, 54, 0.15)', color: '#F44336', border: '1px solid rgba(244, 67, 54, 0.3)', marginLeft: '6px', fontSize: '0.7rem', padding: '1px 5px' }}>
+                                          Inactive
+                                        </span>
+                                      )}
                                     </div>
-                                  )}
-                                  <span style={{
-                                    fontWeight: 700,
-                                    color: student.status === 'Inactive' ? 'var(--color-text-muted)' : '#E50914',
-                                    textDecoration: 'underline'
-                                  }}>
-                                    {student.studentName || student.name}
-                                  </span>
-                                  {student.isPriority && (
-                                    <Star size={14} fill="#FFD700" color="#FFD700" style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
-                                  )}
-                                  {student.status === 'Inactive' && (
-                                    <span className="badge" style={{ background: 'rgba(244, 67, 54, 0.15)', color: '#F44336', border: '1px solid rgba(244, 67, 54, 0.3)', marginLeft: '8px' }}>
-                                      Inactive
+                                  </div>
+                                </td>
+                                <td data-label="Batch Schedule">
+                                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+                                    <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', fontSize: '0.72rem', padding: '2px 6px' }}>
+                                      {student.branch}
                                     </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td data-label="Batch Schedule">
-                                <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', marginRight: '8px' }}>{student.branch}</span>
-                                <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}</span>
-                              </td>
-                              <td data-label="Present Grad"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
-                              <td data-label="Phone" style={{ color: 'var(--color-text-muted)' }}>{student.phone}</td>
-                              <td data-label="Actions">
-                                <div className="actions-flex-container">
-                                  <button className="btn-icon" onClick={() => handleDeleteStudent(student.id)} style={{ color: '#F44336' }} title="Delete">
-                                    <Trash2 size={18} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
+                                    <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: '0.72rem', padding: '2px 6px' }}>
+                                      {getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td data-label="Belt Rank">
+                                  <span className={`badge ${getBeltColorClass(student.belt)}`} style={{ fontSize: '0.75rem', padding: '3px 8px' }}>
+                                    {student.belt}
+                                  </span>
+                                </td>
+                                <td data-label="Contact" style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                                  {student.phone || '—'}
+                                </td>
+                                <td data-label="Actions">
+                                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                                    <button
+                                      type="button"
+                                      className="btn-icon"
+                                      onClick={() => handleSelectStudent(student)}
+                                      style={{ color: '#38bdf8', padding: '6px' }}
+                                      title="View Details"
+                                    >
+                                      <Eye size={16} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn-icon"
+                                      onClick={() => handleDeleteStudent(student.id)}
+                                      style={{ color: '#F44336', padding: '6px' }}
+                                      title="Delete Student"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
                   ) : (
-                    <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>No students found.</div>
+                    <div style={{ textAlign: 'center', padding: '3.5rem 2rem', color: 'var(--color-text-muted)' }}>
+                      <Users size={32} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
+                      <div style={{ fontSize: '0.95rem', color: '#fff', fontWeight: 600 }}>No Students Found</div>
+                      <p style={{ fontSize: '0.8rem', margin: 0, marginTop: '4px' }}>No student records match the active criteria.</p>
+                    </div>
                   )}
                 </div>
 
                 {/* Scheduled Classes Panel */}
-                <div id="today-classes-panel" className="panel" style={{ marginTop: '2rem' }}>
-                  <div className="panel-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <CalendarDays size={20} color="var(--color-primary)" /> Today's Scheduled Classes
+                <div id="today-classes-panel" className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '16px', overflow: 'hidden', padding: 0, marginTop: '2rem' }}>
+                  <div style={{ padding: '1.25rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', flexWrap: 'wrap', gap: '10px' }}>
+                    <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.1rem', color: '#fff' }}>
+                      <CalendarDays size={18} color="var(--color-primary)" /> Today's Scheduled Classes
                     </h3>
-                    <button className="btn-primary btn-small" onClick={handleOpenAddClass}>
+                    <button className="btn-primary btn-small" onClick={handleOpenAddClass} style={{ fontSize: '0.8rem', padding: '6px 12px' }}>
                       + Schedule Class
                     </button>
                   </div>
                   {metrics.filteredClasses.length > 0 ? (
-                    <div className="table-responsive">
-                      <table className="data-table responsive-table-cards">
+                    <div className="premium-table-container" style={{ border: 'none', background: 'transparent' }}>
+                      <table className="premium-table responsive-table-cards">
                         <thead>
                           <tr>
                             <th>Class Name</th>
                             <th>Branch / Batch / Slot</th>
                             <th>Trainer</th>
                             <th>Status</th>
-                            <th>Actions</th>
+                            <th style={{ textAlign: 'center' }}>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -13692,15 +14855,15 @@ function App() {
                   </div>
 
                   {/* Monthly Attendance Summary */}
-                  <div style={{ marginBottom: '1.5rem', background: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '10px' }}>
-                      <h4 style={{ margin: 0, color: 'var(--color-secondary)', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Monthly Attendance</h4>
+                  <div style={{ marginBottom: '1.25rem', background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', padding: '1.15rem', borderRadius: '14px', border: '1px solid rgba(255, 255, 255, 0.08)', boxSizing: 'border-box', overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '10px', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
+                      <h4 style={{ margin: 0, color: 'var(--color-secondary)', fontSize: '0.88rem', textTransform: 'uppercase', letterSpacing: '0.8px', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>Monthly Attendance</h4>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>Month:</span>
+                        <span style={{ color: 'var(--color-text-muted)', fontSize: '0.78rem' }}>Month:</span>
                         <input
                           type="month"
                           className="form-control"
-                          style={{ width: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.85rem', height: '30px', background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                          style={{ width: 'auto', padding: '0 8px', fontSize: '0.82rem', height: '32px', minHeight: '32px', background: 'rgba(0,0,0,0.4)', color: 'white', borderRadius: '6px', cursor: 'pointer' }}
                           value={profileAttendanceMonth}
                           onChange={(e) => setProfileAttendanceMonth(e.target.value)}
                         />
@@ -13726,19 +14889,23 @@ function App() {
                       const totalMarked = present + absent;
                       const attendanceRate = totalMarked > 0 ? Math.round((present / totalMarked) * 100) : 0;
                       return (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}>
-                          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                            <div style={{ flex: 1, minWidth: '100px', background: 'rgba(76, 175, 80, 0.08)', border: '1px solid rgba(76, 175, 80, 0.25)', padding: '0.5rem 0.75rem', borderRadius: '10px', textAlign: 'center' }}>
-                              <span style={{ color: '#4CAF50', display: 'block', fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>Total Present</span>
-                              <strong style={{ fontSize: '1.2rem', color: '#4CAF50' }}>{present} Days</strong>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', boxSizing: 'border-box' }}>
+                          {/* 3 Summary Badges */}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', width: '100%', boxSizing: 'border-box' }}>
+                            <div style={{ background: 'rgba(76, 175, 80, 0.08)', border: '1px solid rgba(76, 175, 80, 0.25)', padding: '0.5rem 0.3rem', borderRadius: '8px', textAlign: 'center', minWidth: 0 }}>
+                              <span style={{ color: '#4CAF50', display: 'block', fontWeight: 700, fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Present</span>
+                              <strong style={{ fontSize: '1.2rem', color: '#4CAF50', fontFamily: 'Outfit, sans-serif' }}>{present}</strong>
+                              <span style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', display: 'block' }}>Days</span>
                             </div>
-                            <div style={{ flex: 1, minWidth: '100px', background: 'rgba(244, 67, 54, 0.08)', border: '1px solid rgba(244, 67, 54, 0.25)', padding: '0.5rem 0.75rem', borderRadius: '10px', textAlign: 'center' }}>
-                              <span style={{ color: '#F44336', display: 'block', fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>Total Absent</span>
-                              <strong style={{ fontSize: '1.2rem', color: '#F44336' }}>{absent} Days</strong>
+                            <div style={{ background: 'rgba(244, 67, 54, 0.08)', border: '1px solid rgba(244, 67, 54, 0.25)', padding: '0.5rem 0.3rem', borderRadius: '8px', textAlign: 'center', minWidth: 0 }}>
+                              <span style={{ color: '#F44336', display: 'block', fontWeight: 700, fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Absent</span>
+                              <strong style={{ fontSize: '1.2rem', color: '#F44336', fontFamily: 'Outfit, sans-serif' }}>{absent}</strong>
+                              <span style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', display: 'block' }}>Days</span>
                             </div>
-                            <div style={{ flex: 1, minWidth: '100px', background: 'rgba(94, 92, 230, 0.08)', border: '1px solid rgba(94, 92, 230, 0.25)', padding: '0.5rem 0.75rem', borderRadius: '10px', textAlign: 'center' }}>
-                              <span style={{ color: '#5e5ce6', display: 'block', fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>Attendance Rate</span>
-                              <strong style={{ fontSize: '1.2rem', color: '#5e5ce6' }}>{attendanceRate}%</strong>
+                            <div style={{ background: 'rgba(94, 92, 230, 0.08)', border: '1px solid rgba(94, 92, 230, 0.25)', padding: '0.5rem 0.3rem', borderRadius: '8px', textAlign: 'center', minWidth: 0 }}>
+                              <span style={{ color: '#818cf8', display: 'block', fontWeight: 700, fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Rate</span>
+                              <strong style={{ fontSize: '1.2rem', color: '#818cf8', fontFamily: 'Outfit, sans-serif' }}>{attendanceRate}%</strong>
+                              <span style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', display: 'block' }}>Score</span>
                             </div>
                           </div>
 
@@ -13750,15 +14917,15 @@ function App() {
                             const firstDayIndex = new Date(year, month - 1, 1).getDay();
 
                             return (
-                              <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '1rem' }}>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', textAlign: 'center', fontWeight: 600, fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem' }}>
+                              <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '0.85rem', width: '100%', boxSizing: 'border-box' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: '3px', textAlign: 'center', fontWeight: 700, fontSize: '0.72rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem', width: '100%', boxSizing: 'border-box' }}>
                                   {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => (
-                                    <div key={d}>{d}</div>
+                                    <div key={d} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d}</div>
                                   ))}
                                 </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: '3px', width: '100%', boxSizing: 'border-box' }}>
                                   {Array.from({ length: firstDayIndex }).map((_, idx) => (
-                                    <div key={`empty-${idx}`} style={{ aspectRatio: '1', borderRadius: '6px', background: 'transparent' }}></div>
+                                    <div key={`empty-${idx}`} style={{ aspectRatio: '1', width: '100%', minWidth: 0 }}></div>
                                   ))}
                                   {Array.from({ length: daysInMonth }).map((_, idx) => {
                                     const dayNum = idx + 1;
@@ -13775,20 +14942,20 @@ function App() {
                                     let cellColor = 'var(--color-text-light)';
 
                                     if (statusLower === 'present') {
-                                      cellBg = 'rgba(76, 175, 80, 0.15)';
-                                      cellBorder = '1px solid rgba(76, 175, 80, 0.4)';
+                                      cellBg = 'rgba(76, 175, 80, 0.18)';
+                                      cellBorder = '1px solid rgba(76, 175, 80, 0.5)';
                                       cellColor = '#4CAF50';
                                     } else if (statusLower === 'absent') {
-                                      cellBg = 'rgba(244, 67, 54, 0.15)';
-                                      cellBorder = '1px solid rgba(244, 67, 54, 0.4)';
+                                      cellBg = 'rgba(244, 67, 54, 0.18)';
+                                      cellBorder = '1px solid rgba(244, 67, 54, 0.5)';
                                       cellColor = '#F44336';
                                     } else if (statusLower === 'holiday') {
-                                      cellBg = 'rgba(33, 150, 243, 0.15)';
-                                      cellBorder = '1px solid rgba(33, 150, 243, 0.4)';
+                                      cellBg = 'rgba(33, 150, 243, 0.18)';
+                                      cellBorder = '1px solid rgba(33, 150, 243, 0.5)';
                                       cellColor = '#2196F3';
                                     } else if (statusLower === 'leave') {
-                                      cellBg = 'rgba(255, 152, 0, 0.15)';
-                                      cellBorder = '1px solid rgba(255, 152, 0, 0.4)';
+                                      cellBg = 'rgba(255, 152, 0, 0.18)';
+                                      cellBorder = '1px solid rgba(255, 152, 0, 0.5)';
                                       cellColor = '#FF9800';
                                     }
 
@@ -13822,19 +14989,23 @@ function App() {
                                         }}
                                         style={{
                                           aspectRatio: '1',
-                                          borderRadius: '6px',
+                                          width: '100%',
+                                          minWidth: 0,
+                                          padding: 0,
+                                          margin: 0,
+                                          boxSizing: 'border-box',
+                                          borderRadius: '5px',
                                           background: cellBg,
                                           border: cellBorder,
                                           color: cellColor,
-                                          fontWeight: 600,
-                                          fontSize: '0.8rem',
+                                          fontWeight: 700,
+                                          fontSize: 'clamp(0.68rem, 2.2vw, 0.82rem)',
                                           cursor: 'pointer',
                                           display: 'flex',
                                           alignItems: 'center',
                                           justifyContent: 'center',
                                           position: 'relative'
                                         }}
-                                        className="calendar-day-btn"
                                         title={`${dateStr} - ${status || 'No Record'}`}
                                       >
                                         {dayNum}
@@ -13844,16 +15015,16 @@ function App() {
                                 </div>
 
                                 {selectedCalendarDate && selectedCalendarDetail && (
-                                  <div style={{ marginTop: '1rem', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--glass-border)', padding: '0.85rem', borderRadius: '10px', position: 'relative' }}>
+                                  <div style={{ marginTop: '0.85rem', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--glass-border)', padding: '0.75rem', borderRadius: '8px', position: 'relative' }}>
                                     <button
                                       type="button"
                                       style={{ position: 'absolute', top: '8px', right: '8px', background: 'transparent', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer' }}
                                       onClick={() => { setSelectedCalendarDate(null); setSelectedCalendarDetail(null); }}
                                     >
-                                      <X size={16} />
+                                      <X size={15} />
                                     </button>
-                                    <h5 style={{ margin: '0 0 0.5rem 0', fontSize: '0.85rem', color: 'var(--color-secondary)' }}>Attendance: {selectedCalendarDetail.date}</h5>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.8rem' }}>
+                                    <h5 style={{ margin: '0 0 0.4rem 0', fontSize: '0.82rem', color: 'var(--color-secondary)' }}>Attendance: {selectedCalendarDetail.date}</h5>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', fontSize: '0.78rem' }}>
                                       <div>
                                         <span style={{ color: 'var(--color-text-muted)' }}>Status: </span>
                                         <strong style={{
@@ -13892,63 +15063,89 @@ function App() {
                   {(() => {
                     const feeDetails = calculateStudentFees(selectedStudent, profileFeeMonth);
                     return (
-                      <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '10px' }}>
-                          <h4 style={{ margin: 0, color: 'var(--color-secondary)', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Financial Summary</h4>
+                      <div style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', padding: '1.25rem', borderRadius: '14px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '10px', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
+                          <h4 style={{ margin: 0, color: 'var(--color-secondary)', fontSize: '0.88rem', textTransform: 'uppercase', letterSpacing: '0.8px', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>Financial Summary</h4>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>Calculate up to:</span>
+                            <span style={{ color: 'var(--color-text-muted)', fontSize: '0.78rem' }}>Calculate up to:</span>
                             <input
                               type="month"
                               className="form-control"
-                              style={{ width: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.85rem', height: '30px', background: 'rgba(0,0,0,0.4)', color: 'white', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                              style={{ width: 'auto', padding: '0 8px', fontSize: '0.82rem', height: '32px', minHeight: '32px', background: 'rgba(0,0,0,0.4)', color: 'white', borderRadius: '6px', cursor: 'pointer' }}
                               value={profileFeeMonth}
                               onChange={(e) => setProfileFeeMonth(e.target.value)}
                             />
                           </div>
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
-                          <span>Admission Fee:</span>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {/* Admission Fee Row */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.65rem', flexWrap: 'wrap', gap: '8px' }}>
+                          <span style={{ fontSize: '0.88rem', color: '#B0B0B0', fontWeight: 500 }}>Admission Fee:</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
                             {selectedStudent.admissionPaid ? (
                               <>
-                                <span className="badge badge-green">Paid ({selectedStudent.admissionPaid})</span>
-                                <button className="btn-small btn-secondary" style={{ padding: '2px 6px', fontSize: '0.75rem' }} onClick={() => unmarkFeePaid(selectedStudent.id, 'admissionPaid')}>Undo</button>
+                                <span className="badge badge-green" style={{ fontSize: '0.75rem', padding: '3px 8px' }}>✓ Paid ({selectedStudent.admissionPaid})</span>
+                                <button
+                                  type="button"
+                                  className="btn-small btn-secondary"
+                                  style={{ padding: '3px 10px', fontSize: '0.75rem', whiteSpace: 'nowrap', borderRadius: '6px', cursor: 'pointer', height: '26px' }}
+                                  onClick={() => unmarkFeePaid(selectedStudent.id, 'admissionPaid')}
+                                >
+                                  Undo
+                                </button>
                               </>
                             ) : (
                               <>
-                                <span className="badge badge-red" style={{ marginRight: '4px' }}>
-                                  Pending (₹{feeDetails.admissionDue}){selectedStudent.appliedAdmissionCoupon ? ` [Coupon: ${selectedStudent.appliedAdmissionCoupon}]` : ''}
+                                <span className="badge badge-red" style={{ fontSize: '0.75rem', padding: '3px 8px' }}>
+                                  Pending (₹{feeDetails.admissionDue}){selectedStudent.appliedAdmissionCoupon ? ` [${selectedStudent.appliedAdmissionCoupon}]` : ''}
                                 </span>
-                                <button className="btn-small btn-primary" style={{ padding: '2px 6px', fontSize: '0.75rem' }} onClick={() => markFeePaid(selectedStudent.id, 'admissionPaid')}>Pay</button>
+                                <button
+                                  type="button"
+                                  className="btn-small btn-primary"
+                                  style={{ padding: '3px 12px', fontSize: '0.75rem', whiteSpace: 'nowrap', borderRadius: '6px', cursor: 'pointer', height: '26px' }}
+                                  onClick={() => markFeePaid(selectedStudent.id, 'admissionPaid')}
+                                >
+                                  Pay
+                                </button>
                               </>
                             )}
                           </div>
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                          <span>Outstanding Monthly Fees:</span>
-                          <span style={{ fontWeight: 600, color: feeDetails.monthlyDue > 0 ? '#E50914' : '#4CAF50' }}>₹{feeDetails.monthlyDue}</span>
+                        {/* Outstanding Monthly Fees */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', fontSize: '0.88rem' }}>
+                          <span style={{ color: '#B0B0B0' }}>Outstanding Monthly Fees:</span>
+                          <span style={{ fontWeight: 700, color: feeDetails.monthlyDue > 0 ? '#ff453a' : '#4CAF50', fontSize: '1rem', fontFamily: 'Outfit, sans-serif' }}>₹{feeDetails.monthlyDue}</span>
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', fontWeight: 'bold', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '0.75rem' }}>
-                          <span>Total Dues:</span>
-                          <span style={{ fontSize: '1.2rem', color: feeDetails.totalDue > 0 ? '#E50914' : '#4CAF50' }}>₹{feeDetails.totalDue}</span>
+                        {/* Total Dues */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '0.75rem' }}>
+                          <span style={{ color: '#fff', fontSize: '0.95rem', fontWeight: 700 }}>Total Dues:</span>
+                          <span style={{ fontSize: '1.35rem', color: feeDetails.totalDue > 0 ? '#ff453a' : '#4CAF50', fontFamily: 'Outfit, sans-serif', fontWeight: 800 }}>₹{feeDetails.totalDue}</span>
                         </div>
 
-                        {/* Unpaid Months List */}
+                        {/* Unpaid Months Grid */}
                         {feeDetails.unpaidMonths.length > 0 && (
-                          <div style={{ marginBottom: '1rem' }}>
-                            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>UNPAID MONTHS ({feeDetails.unpaidMonths.length})</div>
-                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          <div style={{ marginBottom: '1.25rem' }}>
+                            <div style={{ fontSize: '0.75rem', color: '#ff9f0a', marginBottom: '0.6rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                              Unpaid Months ({feeDetails.unpaidMonths.length})
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px' }}>
                               {feeDetails.unpaidMonths.map(m => {
                                 const info = getFeeInfoForMonth(selectedStudent, m);
                                 return (
-                                  <div key={m} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(229, 9, 20, 0.1)', border: '1px solid rgba(229, 9, 20, 0.2)', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>
-                                    <span style={{ color: 'white' }}>
-                                      {formatMonthName(m)}: <strong>₹{info.finalRate}</strong> {info.coupon ? `(${info.coupon.couponCode})` : ''}
-                                    </span>
-                                    <button style={{ border: 'none', background: 'var(--color-primary)', color: 'white', borderRadius: '3px', cursor: 'pointer', padding: '2px 6px', fontSize: '0.7rem', fontWeight: 'bold' }} onClick={() => markFeePaidCustomMonth(selectedStudent.id, m)}>Pay</button>
+                                  <div key={m} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(244, 67, 54, 0.08)', border: '1px solid rgba(244, 67, 54, 0.25)', padding: '6px 10px', borderRadius: '8px', gap: '6px' }}>
+                                    <div style={{ minWidth: 0 }}>
+                                      <div style={{ color: '#fff', fontWeight: 600, fontSize: '0.78rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatMonthName(m)}</div>
+                                      <div style={{ color: '#ff453a', fontWeight: 800, fontSize: '0.85rem', fontFamily: 'Outfit, sans-serif' }}>₹{info.finalRate}</div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      style={{ border: 'none', background: 'linear-gradient(135deg, #E50914, #b91c1c)', color: 'white', borderRadius: '6px', cursor: 'pointer', padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700, boxShadow: '0 2px 6px rgba(229,9,20,0.3)', whiteSpace: 'nowrap', flexShrink: 0 }}
+                                      onClick={() => markFeePaidCustomMonth(selectedStudent.id, m)}
+                                    >
+                                      Pay
+                                    </button>
                                   </div>
                                 );
                               })}
@@ -13956,19 +15153,28 @@ function App() {
                           </div>
                         )}
 
-                        {/* Paid Months List */}
+                        {/* Paid Months Grid */}
                         {feeDetails.paidMonthsList.length > 0 && (
                           <div>
-                            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>PAID MONTHS ({feeDetails.paidMonthsList.length})</div>
-                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            <div style={{ fontSize: '0.75rem', color: '#4CAF50', marginBottom: '0.6rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                              Paid Months ({feeDetails.paidMonthsList.length})
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px' }}>
                               {feeDetails.paidMonthsList.map(m => {
                                 const info = getFeeInfoForMonth(selectedStudent, m);
                                 return (
-                                  <div key={m} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(76, 175, 80, 0.1)', border: '1px solid rgba(76, 175, 80, 0.2)', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>
-                                    <span style={{ color: 'white' }}>
-                                      {formatMonthName(m)}: <strong>₹{info.finalRate}</strong> {info.coupon ? `(${info.coupon.couponCode})` : ''}
-                                    </span>
-                                    <button style={{ border: 'none', background: 'rgba(255,255,255,0.1)', color: 'white', borderRadius: '3px', cursor: 'pointer', padding: '2px 6px', fontSize: '0.7rem' }} onClick={() => unmarkFeePaidCustomMonth(selectedStudent.id, m)}>Undo</button>
+                                  <div key={m} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(76, 175, 80, 0.08)', border: '1px solid rgba(76, 175, 80, 0.25)', padding: '6px 10px', borderRadius: '8px', gap: '6px' }}>
+                                    <div style={{ minWidth: 0 }}>
+                                      <div style={{ color: '#fff', fontWeight: 600, fontSize: '0.78rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatMonthName(m)}</div>
+                                      <div style={{ color: '#4CAF50', fontWeight: 800, fontSize: '0.85rem', fontFamily: 'Outfit, sans-serif' }}>₹{info.finalRate}</div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      style={{ border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', color: '#B0B0B0', borderRadius: '6px', cursor: 'pointer', padding: '3px 8px', fontSize: '0.7rem', whiteSpace: 'nowrap', flexShrink: 0 }}
+                                      onClick={() => unmarkFeePaidCustomMonth(selectedStudent.id, m)}
+                                    >
+                                      Undo
+                                    </button>
                                   </div>
                                 );
                               })}
@@ -13979,14 +15185,14 @@ function App() {
                     );
                   })()}
                 </div>
-                <div className="modal-actions">
+                <div className="modal-actions" style={{ display: 'flex', gap: '10px', marginTop: '1.25rem' }}>
+                  <button className="btn-secondary" style={{ flex: 1, padding: '0.75rem', borderRadius: '10px', fontWeight: 600 }} onClick={() => setSelectedStudent(null)}>Close</button>
                   {loggedInUser && (
-                    <button className="btn-primary" onClick={() => {
+                    <button className="btn-primary" style={{ flex: 1, padding: '0.75rem', borderRadius: '10px', fontWeight: 600 }} onClick={() => {
                       setEditingStudentData(selectedStudent);
                       setIsEditingStudent(true);
                     }}>Edit Student</button>
                   )}
-                  <button className="btn-secondary" onClick={() => setSelectedStudent(null)}>Close</button>
                 </div>
               </>
             )}

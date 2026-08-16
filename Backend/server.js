@@ -2656,30 +2656,97 @@ app.delete('/api/students/:id', authenticateSession, async (req, res) => {
 // ==========================================
 
 // 1. Get all students with grading fields (scoped by user permissions)
-app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
   try {
-    const { role, branch } = req.user;
+    const { role, branch, batch } = req.user;
     let filter = {};
 
-    if (role === 'branchadmin') {
+    if (role === 'branchadmin' || role === 'trainer') {
       filter.branch = new RegExp(`^${branch}$`, 'i');
     } else if (req.query.branch && req.query.branch.toLowerCase() !== 'all') {
       filter.branch = new RegExp(`^${req.query.branch}$`, 'i');
     }
 
-    const students = await Student.find(filter).select('-photo').lean();
+    const baseStudents = await Student.find(filter).select('-photo').lean();
+
+    // Resolve batch details if targetBatch is selected
+    let targetBatchCode = '';
+    let allowedTrainerBatches = [];
+    if (role === 'trainer') {
+      allowedTrainerBatches = (batch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+      if (req.query.batch && req.query.batch.toLowerCase() !== 'all') {
+        if (allowedTrainerBatches.includes(req.query.batch.toLowerCase().trim())) {
+          targetBatchCode = req.query.batch;
+        } else {
+          targetBatchCode = 'none'; // unauthorized batch selection
+        }
+      } else {
+        targetBatchCode = batch; // all trainer's batches
+      }
+    } else {
+      targetBatchCode = req.query.batch;
+    }
+
+    let selectedBatchObj = null;
+    let selectedBatchObjs = [];
+    if (targetBatchCode && targetBatchCode.toLowerCase() !== 'all') {
+      const BatchModel = mongoose.model('Batch');
+      const codes = targetBatchCode.split(',').map(c => c.trim()).filter(Boolean);
+      selectedBatchObjs = await BatchModel.find({
+        code: { $in: codes.map(c => new RegExp(`^${c}$`, 'i')) }
+      }).lean();
+      selectedBatchObj = selectedBatchObjs[0] || null;
+    }
+
+    const decryptedStudents = baseStudents.map(decryptStudent);
+
+    const filteredStudents = decryptedStudents.filter(s => {
+      if (!targetBatchCode || targetBatchCode.toLowerCase() === 'all') return true;
+      if (targetBatchCode === 'none') return false;
+
+      const studentBatchLower = (s.batch || '').toLowerCase().trim();
+      const codes = targetBatchCode.toLowerCase().split(',').map(c => c.trim()).filter(Boolean);
+
+      // Check if student's batch is in the selected batch list
+      if (codes.includes(studentBatchLower)) return true;
+
+      // Check direct match with selectedBatchObjs code or name
+      for (const obj of selectedBatchObjs) {
+        if (studentBatchLower === obj.code.toLowerCase().trim()) return true;
+        if (studentBatchLower === obj.name.toLowerCase().trim()) return true;
+        if (mongoose.Types.ObjectId.isValid(targetBatchCode) && String(obj._id) === targetBatchCode) {
+          if (studentBatchLower === obj.code.toLowerCase().trim() || studentBatchLower === obj.name.toLowerCase().trim()) return true;
+        }
+      }
+
+      // Fallback for legacy students using schedule
+      if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
+        return false;
+      }
+
+      for (const obj of selectedBatchObjs) {
+        if (schedulesMatch(s.schedule, obj.schedule)) return true;
+      }
+
+      for (const c of codes) {
+        if (c.includes('-') || c.includes(',')) {
+          if (schedulesMatch(s.schedule, c)) return true;
+        }
+      }
+
+      return false;
+    });
+
+    const todayStr = new Date().toISOString().split('T')[0];
     
     // Process and decrypt students, resolve dynamic nextEligibleGradingDate if empty
-    const processedStudents = students.map(s => {
-      const dec = decryptStudent(s);
-      
+    const processedStudents = filteredStudents.map(dec => {
       // Compute next eligible date dynamically if not set
       if (!dec.nextEligibleGradingDate) {
         dec.nextEligibleGradingDate = calculateNextEligibleDate(dec.joinDate);
       }
       
       // Calculate eligibility status based on next eligible date
-      const todayStr = new Date().toISOString().split('T')[0];
       dec.eligibilityStatus = (dec.nextEligibleGradingDate && todayStr >= dec.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
       
       // Next belt auto computation
@@ -2695,10 +2762,10 @@ app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin
 });
 
 // 2. Submit grading result (Pass/Fail)
-app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { role, branch, username } = req.user;
+    const { role, branch, batch, username } = req.user;
     const { result, gradingDate } = req.body;
 
     if (!result || !['Pass', 'Fail'].includes(result)) {
@@ -2713,9 +2780,28 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
       return res.status(404).json({ error: 'Student not found.' });
     }
 
-    // Scoped branch check for branch admins
-    if (role === 'branchadmin' && student.branch.toLowerCase().trim() !== branch.toLowerCase().trim()) {
+    // Scoped branch check for branch admins and trainers
+    if ((role === 'branchadmin' || role === 'trainer') && student.branch.toLowerCase().trim() !== branch.toLowerCase().trim()) {
       return res.status(403).json({ error: 'Unauthorized: cannot grade student in another branch.' });
+    }
+
+    // Scoped batch check for trainers
+    if (role === 'trainer') {
+      const allowedBatches = (batch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+      const studentBatch = (student.batch || '').toLowerCase().trim();
+      if (!allowedBatches.includes(studentBatch)) {
+        const BatchModel = mongoose.model('Batch');
+        const allowedBatchDocs = await BatchModel.find({
+          code: { $in: allowedBatches.map(c => new RegExp(`^${c}$`, 'i')) }
+        }).lean();
+        const matchesDoc = allowedBatchDocs.some(doc => 
+          doc.name.toLowerCase().trim() === studentBatch || 
+          schedulesMatch(doc.schedule, student.schedule)
+        );
+        if (!matchesDoc) {
+          return res.status(403).json({ error: 'Unauthorized: cannot grade student outside your assigned batch.' });
+        }
+      }
     }
 
     const beltBefore = student.belt;
@@ -2762,10 +2848,10 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
 });
 
 // 3. Edit grading details / info (manual override)
-app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { role, branch } = req.user;
+    const { role, branch, batch } = req.user;
     const { joinDate, lastGradingDate, belt } = req.body;
 
     const student = await Student.findOne({ id: Number(id) });
@@ -2773,22 +2859,41 @@ app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('s
       return res.status(404).json({ error: 'Student not found.' });
     }
 
-    // Scoped branch check for branch admins
-    if (role === 'branchadmin' && student.branch.toLowerCase().trim() !== branch.toLowerCase().trim()) {
+    // Scoped branch check for branch admins and trainers
+    if ((role === 'branchadmin' || role === 'trainer') && student.branch.toLowerCase().trim() !== branch.toLowerCase().trim()) {
       return res.status(403).json({ error: 'Unauthorized: cannot edit student in another branch.' });
     }
 
-    // Check branchadmin limitations: cannot edit joinDate or belt level unless allowBranchAdminChangeBelt is true
-    if (role === 'branchadmin') {
+    // Scoped batch check for trainers
+    if (role === 'trainer') {
+      const allowedBatches = (batch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+      const studentBatch = (student.batch || '').toLowerCase().trim();
+      if (!allowedBatches.includes(studentBatch)) {
+        const BatchModel = mongoose.model('Batch');
+        const allowedBatchDocs = await BatchModel.find({
+          code: { $in: allowedBatches.map(c => new RegExp(`^${c}$`, 'i')) }
+        }).lean();
+        const matchesDoc = allowedBatchDocs.some(doc => 
+          doc.name.toLowerCase().trim() === studentBatch || 
+          schedulesMatch(doc.schedule, student.schedule)
+        );
+        if (!matchesDoc) {
+          return res.status(403).json({ error: 'Unauthorized: cannot edit student outside your assigned batch.' });
+        }
+      }
+    }
+
+    // Check branchadmin / trainer limitations: cannot edit joinDate or belt level unless allowBranchAdminChangeBelt is true
+    if (role === 'branchadmin' || role === 'trainer') {
       const systemSettingsObj = await SystemSetting.findOne({ configKey: 'main' });
       const allowChange = systemSettingsObj ? systemSettingsObj.allowBranchAdminChangeBelt : false;
       
       if (!allowChange) {
         if (joinDate !== undefined && joinDate !== student.joinDate) {
-          return res.status(403).json({ error: 'Unauthorized: Branch Admin does not have permission to manually change Join Date.' });
+          return res.status(403).json({ error: 'Unauthorized: You do not have permission to manually change Join Date.' });
         }
         if (belt !== undefined && belt !== student.belt) {
-          return res.status(403).json({ error: 'Unauthorized: Branch Admin does not have permission to manually change student Belt level.' });
+          return res.status(403).json({ error: 'Unauthorized: You do not have permission to manually change student Belt level.' });
         }
       }
     }
@@ -3036,18 +3141,29 @@ app.put('/api/help-reports/:id/seen', authenticateSession, async (req, res) => {
 });
 
 // Notifications API Endpoints
-// Retrieve notifications (scoped for regular users, supports ?all=true for developer/superadmin)
+// Retrieve notifications (scoped for regular users, supports ?all=true for developer/superadmin/admin)
 app.get('/api/notifications', authenticateSession, async (req, res) => {
   try {
     const { role, username, branch, batch } = req.user;
     const showAll = req.query.all === 'true';
 
-    if (showAll && (role === 'developer' || role === 'superadmin')) {
+    if (showAll && (role === 'developer' || role === 'superadmin' || role === 'admin')) {
       const notifications = await Notification.find().sort({ createdAt: -1 }).lean();
       return res.json(notifications);
     }
 
     const now = new Date();
+    const userRoleLower = (role || '').toLowerCase().trim();
+    const userClean = (username || '').toLowerCase().trim();
+
+    const allowedTargetUsers = ['all', userClean, userRoleLower];
+    if (userRoleLower === 'trainer') {
+      allowedTargetUsers.push('trainers', 'all_trainers');
+    }
+    if (userRoleLower === 'admin' || userRoleLower === 'branch_admin') {
+      allowedTargetUsers.push('branches', 'all_branches', 'branch_admins');
+    }
+
     const filter = {
       $and: [
         {
@@ -3065,18 +3181,17 @@ app.get('/api/notifications', authenticateSession, async (req, res) => {
         {
           $or: [
             { branch: 'all' },
-            { branch: new RegExp(`^${branch}$`, 'i') }
+            { branch: { $exists: false } },
+            { branch: null },
+            ...(branch && branch !== 'All' ? [{ branch: new RegExp(`^${branch}$`, 'i') }] : [])
           ]
         },
         {
           $or: [
-            { batch: 'all' },
-            { batch: new RegExp(`^${batch}$`, 'i') }
-          ]
-        },
-        {
-          $or: [
+            { targetUser: { $in: allowedTargetUsers } },
             { targetUser: 'all' },
+            { targetUser: { $exists: false } },
+            { targetUser: null },
             { targetUser: new RegExp(`^${username}$`, 'i') }
           ]
         }
@@ -3090,8 +3205,8 @@ app.get('/api/notifications', authenticateSession, async (req, res) => {
   }
 });
 
-// Create a new notification (restricted to developer/superadmin)
-app.post('/api/notifications', authenticateSession, authorizeRoles('developer', 'superadmin'), async (req, res) => {
+// Create a new notification (allowed for developer, superadmin, admin)
+app.post('/api/notifications', authenticateSession, authorizeRoles('developer', 'superadmin', 'admin'), async (req, res) => {
   try {
     const { title, message, type, priority, branch, batch, targetUser, expiryDate, scheduledAt, isScheduled } = req.body;
     if (!title || !title.trim()) {
@@ -3105,7 +3220,7 @@ app.post('/api/notifications', authenticateSession, authorizeRoles('developer', 
       title: title.trim(),
       message: message.trim(),
       type: type || 'general',
-      sender: req.user.username,
+      sender: req.user.username || req.user.name || 'Admin',
       priority: priority || 'medium',
       branch: branch || 'all',
       batch: batch || 'all',
@@ -3116,15 +3231,15 @@ app.post('/api/notifications', authenticateSession, authorizeRoles('developer', 
     });
     
     const saved = await notification.save();
-    console.log(`[Notification] Created new notification: "${saved.title}" by ${saved.sender}`);
+    console.log(`[Notification] Created new notification: "${saved.title}" by ${saved.sender} (target: ${saved.targetUser}, branch: ${saved.branch})`);
     res.status(201).json(saved);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-// Edit an existing notification (restricted to developer/superadmin)
-app.put('/api/notifications/:id', authenticateSession, authorizeRoles('developer', 'superadmin'), async (req, res) => {
+// Edit an existing notification (allowed for developer, superadmin, admin)
+app.put('/api/notifications/:id', authenticateSession, authorizeRoles('developer', 'superadmin', 'admin'), async (req, res) => {
   try {
     const { title, message, type, priority, branch, batch, targetUser, expiryDate, scheduledAt, isScheduled } = req.body;
     if (title !== undefined && !title.trim()) {
@@ -3192,8 +3307,8 @@ app.put('/api/notifications/:id/unread', authenticateSession, async (req, res) =
   }
 });
 
-// Delete a notification (restricted to developer/superadmin)
-app.delete('/api/notifications/:id', authenticateSession, authorizeRoles('developer', 'superadmin'), async (req, res) => {
+// Delete a notification (allowed for developer, superadmin, admin)
+app.delete('/api/notifications/:id', authenticateSession, authorizeRoles('developer', 'superadmin', 'admin'), async (req, res) => {
   try {
     const deleted = await Notification.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Notification not found' });
