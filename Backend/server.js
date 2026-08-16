@@ -253,7 +253,7 @@ function verifyPassword(password, storedHash) {
 
 // --- Secure Field-Level Database Encryption ---
 const ENCRYPTION_ALGORITHM = 'aes-256-cbc';
-const ENCRYPTION_KEY = process.env.DB_ENCRYPTION_KEY || 'masterfit_db_encryption_key_32ch'; // Must be 32 bytes
+const ENCRYPTION_KEY = process.env.DB_ENCRYPTION_KEY || 'a4ff7c70ba5265696e63c032264660dc'; // Must be 32 bytes
 const IV_LENGTH = 16;
 
 function getKeyBuffer(keyStr) {
@@ -290,6 +290,7 @@ function decrypt(text) {
 
   const rawCandidateKeys = Array.from(new Set([
     process.env.DB_ENCRYPTION_KEY,
+    'a4ff7c70ba5265696e63c032264660dc',
     'masterfit_db_encryption_key_32ch',
     'mf_enc_key_32_chars_long_2026_07',
     'masterfit_db_encryption_key_2026',
