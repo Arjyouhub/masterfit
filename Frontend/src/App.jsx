@@ -201,14 +201,7 @@ window.fetch = function (url, options = {}) {
 };
 
 
-const ART_OPTIONS = ['Pro Boxing', 'Karate', 'Kickboxing', 'Kung Fu', 'MMA', 'Muay Thai', 'Taekwondo', 'Yoga', 'Kalaripayattu'];
-
-const getLocalMonthString = () => {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  return `${year}-${month}`;
-};
+const ART_OPTIONS = ['Karate', 'Kickboxing', 'Kung Fu', 'MMA', 'Muay Thai', 'Taekwondo', 'Yoga', 'Kalaripayattu'];
 
 function App() {
   const navigate = useNavigate();
@@ -240,12 +233,16 @@ function App() {
   };
 
   const [appMode, setAppMode] = useState(() => {
-    let path = window.location.pathname;
-    if (window.location.hash && window.location.hash.startsWith('#/')) {
-      path = window.location.hash.substring(1);
-      window.history.replaceState(null, '', path + window.location.search);
+    // Handle path-based routing (e.g. /developer/login) by redirecting to hash routing
+    if (window.location.pathname !== '/' && window.location.pathname !== '/index.html') {
+      const cleanPath = window.location.pathname;
+      if (cleanPath.startsWith('/developer') || cleanPath === '/superadmin' || cleanPath === '/login' || cleanPath === '/admin') {
+        window.location.replace('/#' + cleanPath + window.location.search);
+        return 'website';
+      }
     }
 
+    const hash = window.location.hash;
     const hasSession = getSessionUser();
 
     if (hasSession) {
@@ -256,13 +253,13 @@ function App() {
       return 'admin'; // Always restore admin dashboard if session exists!
     }
 
-    if (path === '/developer/login') {
+    if (hash === '#/developer/login') {
       return 'developer-login';
-    } else if (path === '/superadmin') {
+    } else if (hash === '#/superadmin') {
       return 'superadmin-login';
-    } else if (path === '/login' || path === '/branch' || path === '/batch') {
+    } else if (hash === '#/login' || hash === '#/branch' || hash === '#/batch') {
       return 'login';
-    } else if (path === '/admin') {
+    } else if (hash === '#/admin') {
       return 'login'; // No session? Force login
     }
     return 'website';
@@ -412,7 +409,7 @@ function App() {
   const [gradingFilterBranch, setGradingFilterBranch] = useState('All');
   const [gradingFilterBatch, setGradingFilterBatch] = useState('All');
   const [gradingFilterBelt, setGradingFilterBelt] = useState('All');
-  const [gradingFilterEligibility, setGradingFilterEligibility] = useState('Eligible');
+  const [gradingFilterEligibility, setGradingFilterEligibility] = useState('All');
   const [gradingFilterResult, setGradingFilterResult] = useState('All');
   const [gradingFilterStartDate, setGradingFilterStartDate] = useState('');
   const [gradingFilterEndDate, setGradingFilterEndDate] = useState('');
@@ -433,25 +430,11 @@ function App() {
   const [isEditGradingModalOpen, setIsEditGradingModalOpen] = useState(false);
   const [selectedEditGradingStudent, setSelectedEditGradingStudent] = useState(null);
   const [editGradingForm, setEditGradingForm] = useState({ joinDate: '', lastGradingDate: '', belt: '' });
-
-  // Grading Announcement Modal State
-  const [isAnnounceGradingModalOpen, setIsAnnounceGradingModalOpen] = useState(false);
-  const [announceGradingForm, setAnnounceGradingForm] = useState({
-    date: new Date().toISOString().split('T')[0],
-    branch: 'all',
-    title: '🥋 Belt Grading Test Announced!',
-    message: ''
-  });
-  const [announceGradingSuccess, setAnnounceGradingSuccess] = useState('');
-  const [announceGradingError, setAnnounceGradingError] = useState('');
-  const [announceGradingLoading, setAnnounceGradingLoading] = useState(false);
   const [classFormSlotType, setClassFormSlotType] = useState('Morning');
 
   // Financial Performance / Profit Filters States
   const [perfFilterBranch, setPerfFilterBranch] = useState('All');
   const [perfFilterBatch, setPerfFilterBatch] = useState('All');
-  const [perfSelectedMonth, setPerfSelectedMonth] = useState(getLocalMonthString());
-  const [selectedPerfStudent, setSelectedPerfStudent] = useState(null);
 
   const handleOpenAddClass = () => {
     setClassForm({
@@ -1555,7 +1538,7 @@ function App() {
     if (!token) return;
 
     const activeRole = getCookieValue('umai_session_role') || userRole;
-    if (currentView === 'grading' && (activeRole === 'superadmin' || activeRole === 'developer' || activeRole === 'branchadmin' || activeRole === 'trainer' || activeRole === 'coordinator')) {
+    if (currentView === 'grading' && (activeRole === 'superadmin' || activeRole === 'developer' || activeRole === 'branchadmin')) {
       fetchGradingStudents();
     }
   }, [gradingFilterBranch, currentView, loggedInUser]);
@@ -2018,60 +2001,6 @@ function App() {
         setAnnouncementError(err.message);
       })
       .finally(() => setDevActionLoading(false));
-  };
-
-  const handleAnnounceGradingDate = (e) => {
-    if (e) e.preventDefault();
-    setAnnounceGradingSuccess('');
-    setAnnounceGradingError('');
-
-    if (!announceGradingForm.date) {
-      setAnnounceGradingError('Please select a valid grading test date.');
-      return;
-    }
-
-    setAnnounceGradingLoading(true);
-    const token = getSessionToken();
-    const branchText = announceGradingForm.branch === 'all' ? 'All Branches' : announceGradingForm.branch;
-    const defaultMsg = `Attention Trainers & Students! The upcoming Belt Grading Test is scheduled for ${announceGradingForm.date} (${branchText}). Please ensure all eligible students are prepared and their attendance records are updated.`;
-    const finalMsg = announceGradingForm.message.trim() || defaultMsg;
-
-    fetch(`${API_BASE_URL}/notifications`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        title: announceGradingForm.title.trim() || `🥋 Belt Grading Test Announced - ${announceGradingForm.date}`,
-        message: finalMsg,
-        type: 'grading',
-        priority: 'high',
-        branch: announceGradingForm.branch,
-        batch: 'all',
-        targetUser: 'trainer'
-      })
-    })
-      .then(res => {
-        if (!res.ok) return res.json().then(errData => { throw new Error(errData.error || 'Failed to announce grading date'); });
-        return res.json();
-      })
-      .then(data => {
-        setAnnounceGradingSuccess('Grading date announcement published successfully! All trainers will receive a login notification popup.');
-        setAnnounceGradingForm({
-          date: new Date().toISOString().split('T')[0],
-          branch: 'all',
-          title: '🥋 Belt Grading Test Announced!',
-          message: ''
-        });
-        loadNotifications();
-        setTimeout(() => {
-          setIsAnnounceGradingModalOpen(false);
-          setAnnounceGradingSuccess('');
-        }, 2200);
-      })
-      .catch(err => setAnnounceGradingError(err.message))
-      .finally(() => setAnnounceGradingLoading(false));
   };
 
   const handleDeleteNotification = (id) => {
@@ -3557,92 +3486,75 @@ function App() {
     };
   }, [appMode]);
 
-  // Path-based routing without URL hash (#)
+  // Hash-based routing to support separate page navigation
   useEffect(() => {
-    const handlePopState = () => {
-      let path = window.location.pathname;
-      if (window.location.hash && window.location.hash.startsWith('#/')) {
-        path = window.location.hash.substring(1);
-        window.history.replaceState(null, '', path + window.location.search);
-      }
+    const handleHashChange = () => {
+      const hash = window.location.hash;
       const hasSession = getSessionUser();
       const isDevSession = hasSession && (hasSession.toLowerCase() === 'developer' || hasSession.toLowerCase().startsWith('developer@'));
 
-      if (path === '/developer/login') {
+      if (hash === '#/developer/login') {
         if (hasSession) {
           if (isDevSession) {
-            window.history.replaceState(null, '', '/developer/dashboard');
-            setAppMode('developer');
-            setDevView('dashboard');
+            window.location.hash = '#/developer/dashboard';
           } else {
-            window.history.replaceState(null, '', '/admin');
-            setAppMode('admin');
+            window.location.hash = '#/admin';
           }
         } else {
           setAppMode('developer-login');
         }
-      } else if (path.startsWith('/developer')) {
+      } else if (hash.startsWith('#/developer')) {
         if (isDevSession) {
           setAppMode('developer');
-          const subview = path.split('/')[2] || 'dashboard';
+          const subview = hash.split('/')[2] || 'dashboard';
           setDevView(subview);
         } else {
+          // If a session exists but it's not developer, go to admin dashboard
           if (hasSession) {
-            window.history.replaceState(null, '', '/admin');
-            setAppMode('admin');
+            window.location.hash = '#/admin';
           } else {
-            window.history.replaceState(null, '', '/login');
-            setAppMode('login');
+            window.location.hash = '#/login';
           }
         }
-      } else if (path === '/superadmin') {
+      } else if (hash === '#/superadmin') {
         if (hasSession) {
           if (isDevSession) {
-            window.history.replaceState(null, '', '/developer/dashboard');
-            setAppMode('developer');
-            setDevView('dashboard');
+            window.location.hash = '#/developer/dashboard';
           } else {
-            window.history.replaceState(null, '', '/admin');
-            setAppMode('admin');
+            window.location.hash = '#/admin';
           }
         } else {
           setAppMode('superadmin-login');
         }
-      } else if (path === '/login' || path === '/branch' || path === '/batch') {
+      } else if (hash === '#/login' || hash === '#/branch' || hash === '#/batch') {
         if (hasSession) {
           if (isDevSession) {
-            window.history.replaceState(null, '', '/developer/dashboard');
-            setAppMode('developer');
-            setDevView('dashboard');
+            window.location.hash = '#/developer/dashboard';
           } else {
-            window.history.replaceState(null, '', '/admin');
+            window.location.hash = '#/admin';
+          }
+        } else {
+          setAppMode('login');
+        }
+      } else if (hash === '#/admin') {
+        if (hasSession) {
+          if (isDevSession) {
+            window.location.hash = '#/developer/dashboard';
+          } else {
             setAppMode('admin');
           }
         } else {
           setAppMode('login');
         }
-      } else if (path === '/admin') {
-        if (hasSession) {
-          if (isDevSession) {
-            window.history.replaceState(null, '', '/developer/dashboard');
-            setAppMode('developer');
-            setDevView('dashboard');
-          } else {
-            setAppMode('admin');
-          }
-        } else {
-          window.history.replaceState(null, '', '/login');
-          setAppMode('login');
-        }
-      } else if (path === '/' || path === '/home') {
+      } else if (hash === '' || hash === '#/' || hash === '#/home') {
         setAppMode('website');
       }
       setIsMobileMenuOpen(false);
       setIsSidebarOpen(false);
     };
-    window.addEventListener('popstate', handlePopState);
-    handlePopState(); // Run on initial load
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener('hashchange', handleHashChange);
+    handleHashChange(); // Run on initial load
+    return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
   // Close sidebar on view changes
@@ -3650,28 +3562,24 @@ function App() {
     setIsSidebarOpen(false);
   }, [currentView, devView]);
 
-  // Sync state changes back to clean URL path (without hash)
+  // Sync state changes back to URL hash
   useEffect(() => {
-    let currentPath = window.location.pathname;
-    if (window.location.hash && window.location.hash.startsWith('#/')) {
-      currentPath = window.location.hash.substring(1);
-    }
-
-    let targetPath = currentPath;
+    const currentHash = window.location.hash;
     if (appMode === 'website') {
-      targetPath = '/';
-    } else if (appMode === 'login') {
-      targetPath = '/login';
-    } else if (appMode === 'superadmin-login') {
-      targetPath = '/superadmin';
-    } else if (appMode === 'admin') {
-      targetPath = '/admin';
+      if (currentHash !== '' && currentHash !== '#/' && currentHash !== '#/home') {
+        window.location.hash = '#/';
+      }
+    } else if (appMode === 'login' && currentHash !== '#/login') {
+      window.location.hash = '#/login';
+    } else if (appMode === 'superadmin-login' && currentHash !== '#/superadmin') {
+      window.location.hash = '#/superadmin';
+    } else if (appMode === 'admin' && currentHash !== '#/admin') {
+      window.location.hash = '#/admin';
     } else if (appMode === 'developer') {
-      targetPath = `/developer/${devView}`;
-    }
-
-    if (window.location.hash || currentPath !== targetPath) {
-      window.history.replaceState(null, '', targetPath);
+      const targetHash = `#/developer/${devView}`;
+      if (currentHash !== targetHash) {
+        window.location.hash = targetHash;
+      }
     }
   }, [appMode, devView]);
 
@@ -3690,7 +3598,12 @@ function App() {
     return `${year}-${month}-${day}`;
   };
 
-
+  const getLocalMonthString = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  };
 
   const getDynamicMetrics = () => {
     const activeBranch = branchFilter;
@@ -4065,9 +3978,7 @@ function App() {
   }));
 
   const getBeltColorClass = (belt) => {
-    if (!belt) return 'badge-white';
-    const clean = String(belt).toLowerCase().trim();
-    switch (clean) {
+    switch (belt.toLowerCase()) {
       case 'white': return 'badge-white';
       case 'yellow': return 'badge-yellow';
       case 'orange': return 'badge-orange';
@@ -4077,16 +3988,6 @@ function App() {
       case 'brown': return 'badge-brown';
       case 'red': return 'badge-red';
       case 'black': return 'badge-black';
-      // Pro Boxing Levels & Coaches
-      case 'level 6': return 'badge-blue';
-      case 'level 5': return 'badge-green';
-      case 'level 4': return 'badge-yellow';
-      case 'level 3': return 'badge-orange';
-      case 'level 2': return 'badge-purple';
-      case 'level 1': return 'badge-brown';
-      case 'coach c': return 'badge-red';
-      case 'coach b': return 'badge-orange';
-      case 'coach a': return 'badge-black';
       default: return 'badge-white';
     }
   };
@@ -4312,13 +4213,10 @@ function App() {
     const updatedStudentsList = students.map(s => {
       if (s.id === id) {
         let updated = { ...s };
-        const todayStr = new Date().toISOString().split('T')[0];
         if (feeType === 'currentMonthPaid') {
           updated.paidMonths = { ...(s.paidMonths || {}), [feeMonth]: true };
-          updated.paidMonthsDates = { ...(s.paidMonthsDates || {}), [feeMonth]: todayStr };
         } else if (feeType === 'admissionPaid') {
           updated.admissionPaid = feeMonth;
-          updated.admissionPaidDate = todayStr;
         } else {
           updated[feeType] = true;
         }
@@ -4385,9 +4283,7 @@ function App() {
     const updatedStudentsList = students.map(s => {
       if (s.id === id) {
         let updated = { ...s };
-        const todayStr = new Date().toISOString().split('T')[0];
         updated.paidMonths = { ...(s.paidMonths || {}), [targetMonth]: true };
-        updated.paidMonthsDates = { ...(s.paidMonthsDates || {}), [targetMonth]: todayStr };
         updatedStudent = updated;
         return updated;
       }
@@ -4417,10 +4313,7 @@ function App() {
         let updated = { ...s };
         const newPaidMonths = { ...s.paidMonths };
         delete newPaidMonths[targetMonth];
-        const newPaidMonthsDates = { ...(s.paidMonthsDates || {}) };
-        delete newPaidMonthsDates[targetMonth];
         updated.paidMonths = newPaidMonths;
-        updated.paidMonthsDates = newPaidMonthsDates;
         updatedStudent = updated;
         return updated;
       }
@@ -4447,21 +4340,12 @@ function App() {
     let updatedStudent = null;
     const updatedStudentsList = students.map(s => {
       if (s.id === id) {
-        const todayStr = new Date().toISOString().split('T')[0];
         const fees = calculateStudentFees(s);
         const newPaidMonths = { ...(s.paidMonths || {}) };
-        const newPaidMonthsDates = { ...(s.paidMonthsDates || {}) };
         fees.unpaidMonths.forEach(m => {
           newPaidMonths[m] = true;
-          newPaidMonthsDates[m] = todayStr;
         });
-        let updated = {
-          ...s,
-          admissionPaid: s.admissionPaid || true,
-          admissionPaidDate: s.admissionPaid ? (s.admissionPaidDate || todayStr) : todayStr,
-          paidMonths: newPaidMonths,
-          paidMonthsDates: newPaidMonthsDates
-        };
+        let updated = { ...s, paidMonths: newPaidMonths };
         updatedStudent = updated;
         return updated;
       }
@@ -5027,7 +4911,7 @@ function App() {
                 <div className="dev-card" style={{ padding: '1rem' }}>
                   <h4 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Student Profile Summary</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem' }}>
-                    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Present Grade: <strong style={{ color: '#fff', float: 'right' }}>{student.belt}</strong></div>
+                    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Present Grad: <strong style={{ color: '#fff', float: 'right' }}>{student.belt}</strong></div>
                     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Admission Number: <strong style={{ color: '#fff', float: 'right' }}>{student.admissionNumber || student.admissionNo || student.id}</strong></div>
                     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Attendance: <strong style={{ float: 'right' }}><span style={{ color: '#30d158' }}>{attendanceSummary.present}P</span> / <span style={{ color: '#ff453a' }}>{attendanceSummary.absent}A</span> ({attendanceSummary.total} Total)</strong></div>
                     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '4px' }}>Fees Paid: <strong style={{ color: '#30d158', float: 'right' }}>₹{feeSummary.totalPaid}</strong></div>
@@ -6221,6 +6105,15 @@ function App() {
                   />
                   Lock Branch & Batch Mapping Page
                 </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#fff' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!devSettings.allowBranchAdminChangeBelt}
+                    onChange={(e) => setDevSettings({ ...devSettings, allowBranchAdminChangeBelt: e.target.checked })}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Allow Branch Admin to manually change Present Grad
+                </label>
               </div>
             </div>
 
@@ -6632,7 +6525,7 @@ function App() {
                 clearSession();
                 setLoggedInUser('');
                 setAppMode('developer-login');
-                window.history.replaceState(null, '', '/developer/login');
+                window.location.hash = '#/developer/login';
               }}
             >
               <LogOut size={20} />
@@ -6683,7 +6576,7 @@ function App() {
               clearSession();
               setLoggedInUser('');
               setAppMode('developer-login');
-              window.history.replaceState(null, '', '/developer/login');
+              window.location.hash = '#/developer/login';
             }}>
               <LogOut className="dev-nav-icon" style={{ color: '#ff453a' }} /> <span>Console Logout</span>
             </a>
@@ -7196,17 +7089,6 @@ function App() {
                       value={markingDate}
                       onChange={(e) => setMarkingDate(e.target.value)}
                     />
-                    {(() => {
-                      if (!markingDate) return null;
-                      const dayNamesFull = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-                      const [y, m, d] = markingDate.split('-').map(Number);
-                      const dayIdx = new Date(y, m - 1, d).getDay();
-                      return (
-                        <span className="badge" style={{ background: 'rgba(255, 215, 0, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', padding: '4px 10px', fontSize: '0.8rem', fontWeight: 600 }}>
-                          📅 {dayNamesFull[dayIdx]}
-                        </span>
-                      );
-                    })()}
                   </div>
                 </div>
               </div>
@@ -7252,14 +7134,7 @@ function App() {
                         }
                         return schedulesMatch(s.schedule, selectedBatchObj.schedule);
                       })();
-                      const dayKeys = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                      const [y, m, d] = markingDate.split('-').map(Number);
-                      const markingDayKey = dayKeys[new Date(y, m - 1, d).getDay()];
-                      const parsedDays = parseScheduleToDays(s.schedule);
-                      const hasRecord = !!attendanceRecords[markingDate]?.[s.id];
-                      const hasClassOnSelectedDate = parsedDays[markingDayKey] || hasRecord;
-
-                      return matchBatch && matchSchedule && hasClassOnSelectedDate;
+                      return matchBatch && matchSchedule;
                     }).map(student => {
                       const status = attendanceRecords[markingDate]?.[student.id];
                       return (
@@ -7270,7 +7145,7 @@ function App() {
                             onClick={() => handleSelectStudent(student)}
                           >
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              {getCleanStudentName(student)}
+                              {student.studentName || student.name}
                               {student.isPriority && (
                                 <Star size={14} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
                               )}
@@ -7562,7 +7437,7 @@ function App() {
                               style={{ fontWeight: 700, color: '#E50914', cursor: 'pointer', textDecoration: 'underline', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                               onClick={() => handleSelectStudent(student)}
                             >
-                              {getCleanStudentName(student)}
+                              {student.studentName || student.name}
                               {student.isPriority && (
                                 <Star size={14} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
                               )}
@@ -8038,15 +7913,8 @@ function App() {
   };
 
   // Grading Module Actions and Handlers
-  const STANDARD_BELTS = ['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'];
-  const PRO_BOXING_BELTS = ['Level 6', 'Level 5', 'Level 4', 'Level 3', 'Level 2', 'Level 1', 'Coach C', 'Coach B', 'Coach A'];
-
-  const getNextBelt = (currentBelt, art = '') => {
-    const cleanArt = String(art || '').toLowerCase().trim();
-    const beltList = (cleanArt === 'pro boxing' || cleanArt === 'proboxing' || cleanArt.includes('boxing'))
-      ? PRO_BOXING_BELTS
-      : STANDARD_BELTS;
-
+  const getNextBelt = (currentBelt) => {
+    const beltList = ['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'];
     const index = beltList.findIndex(b => b.toLowerCase() === String(currentBelt || '').toLowerCase().trim());
     if (index === -1 || index === beltList.length - 1) return 'None';
     return beltList[index + 1];
@@ -8174,36 +8042,6 @@ function App() {
         {gradingError && <div style={{ color: '#E50914', marginBottom: '1.5rem', background: 'rgba(229, 9, 20, 0.1)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(229, 9, 20, 0.3)', fontWeight: 500 }}>{gradingError}</div>}
         {gradingSuccess && <div style={{ color: '#4CAF50', marginBottom: '1.5rem', background: 'rgba(76, 175, 80, 0.1)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(76, 175, 80, 0.3)', fontWeight: 500 }}>{gradingSuccess}</div>}
 
-        {/* Page Title & Announcement Action Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '12px' }}>
-          <div>
-            <h2 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, textTransform: 'uppercase', color: '#fff', fontSize: '1.35rem', margin: 0, letterSpacing: '0.5px' }}>Student Belt Grading</h2>
-            <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', margin: '4px 0 0 0' }}>Evaluate student belt levels, test eligibility, and announce grading dates.</p>
-          </div>
-          {(isSuper || isBranchAdmin(loggedInUser)) && (
-            <button
-              className="btn-primary"
-              style={{
-                padding: '0.6rem 1.25rem',
-                borderRadius: '8px',
-                fontSize: '0.85rem',
-                fontWeight: 700,
-                background: 'linear-gradient(135deg, #FFD700, #FF9800)',
-                color: '#000',
-                border: 'none',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                boxShadow: '0 4px 15px rgba(255, 215, 0, 0.25)',
-                cursor: 'pointer'
-              }}
-              onClick={() => setIsAnnounceGradingModalOpen(true)}
-            >
-              <Award size={18} /> Announce Grading Date
-            </button>
-          )}
-        </div>
-
         {/* Dashboard Stats Cards */}
         <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: '2rem' }}>
           <div className="stat-card glow-card-blue">
@@ -8238,7 +8076,7 @@ function App() {
 
         {/* Belt Distribution Bar */}
         <div className="panel" style={{ marginBottom: '2rem', background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
-          <h3 className="panel-title" style={{ marginBottom: '1.25rem', fontSize: '0.85rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Present Grade Distribution</h3>
+          <h3 className="panel-title" style={{ marginBottom: '1.25rem', fontSize: '0.85rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Present Grad Distribution</h3>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
             {Object.entries(beltCounts).map(([beltName, count]) => (
               <div key={beltName} style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255, 255, 255, 0.02)', padding: '6px 14px', borderRadius: '20px', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
@@ -8276,10 +8114,10 @@ function App() {
               </select>
             </div>
             <div className="form-group">
-              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Present Grade</label>
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Present Grad</label>
               <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={gradingFilterBelt} onChange={(e) => setGradingFilterBelt(e.target.value)}>
-                <option value="All">All Belts / Levels</option>
-                {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black', 'Level 6', 'Level 5', 'Level 4', 'Level 3', 'Level 2', 'Level 1', 'Coach C', 'Coach B', 'Coach A'].map(b => (
+                <option value="All">All Belts</option>
+                {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
                   <option key={b} value={b}>{b}</option>
                 ))}
               </select>
@@ -8301,15 +8139,21 @@ function App() {
                 <option value="No History">No History / N/A</option>
               </select>
             </div>
+            <div className="form-group">
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Grading Date Range</label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input type="date" className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', flex: 1 }} value={gradingFilterStartDate} onChange={(e) => setGradingFilterStartDate(e.target.value)} placeholder="Start" />
+                <input type="date" className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', flex: 1 }} value={gradingFilterEndDate} onChange={(e) => setGradingFilterEndDate(e.target.value)} placeholder="End" />
+              </div>
+            </div>
           </div>
-        </div>
 
           <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', alignItems: 'center', marginTop: '1.25rem', flexWrap: 'wrap' }}>
             <button className="btn-secondary" style={{ padding: '6px 16px', fontSize: '0.85rem', height: '38px', borderRadius: '8px' }} onClick={() => {
               setGradingFilterBranch('All');
               setGradingFilterBatch('All');
               setGradingFilterBelt('All');
-              setGradingFilterEligibility('Eligible');
+              setGradingFilterEligibility('All');
               setGradingFilterResult('All');
               setGradingFilterStartDate('');
               setGradingFilterEndDate('');
@@ -8325,6 +8169,7 @@ function App() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
+            </div>
           </div>
         </div>
 
@@ -8341,80 +8186,84 @@ function App() {
               <table className="premium-table responsive-table-cards">
                 <thead>
                   <tr>
-                    <th style={{ whiteSpace: 'nowrap' }}>Student Name</th>
-                    <th style={{ whiteSpace: 'nowrap' }}>Branch & Batch</th>
-                    <th style={{ whiteSpace: 'nowrap' }}>Present Grade</th>
-                    <th style={{ whiteSpace: 'nowrap' }}>Next Belt</th>
-                    <th style={{ whiteSpace: 'nowrap' }}>Last Grading</th>
-                    <th style={{ whiteSpace: 'nowrap' }}>Next Eligible</th>
-                    <th style={{ whiteSpace: 'nowrap' }}>Eligibility</th>
-                    <th style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>Actions</th>
+                    <th>Student Name</th>
+                    <th>Branch</th>
+                    <th>Batch</th>
+                    <th>Trainer Name</th>
+                    <th>Present Grad</th>
+                    <th>Next Belt</th>
+                    <th>Join Date</th>
+                    <th>Last Grading</th>
+                    <th>Next Eligible</th>
+                    <th>Eligibility</th>
+                    <th>Result</th>
+                    <th style={{ textAlign: 'center' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map(student => (
                     <tr key={student.id}>
-                      <td style={{ fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }} data-label="Student Name">
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                          {getCleanStudentName(student)}
+                      <td style={{ fontWeight: 700, color: '#fff' }} data-label="Student Name">
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          {student.name}
                           {student.isPriority && (
                             <Star size={14} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
                           )}
                         </span>
                       </td>
-                      <td data-label="Branch & Batch" style={{ whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          <span className="badge" style={{ background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: '0.75rem', width: 'fit-content' }}>{student.branch}</span>
-                          <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>{getBatchNameFromCode(student.batch, student.branch)}</span>
-                        </div>
+                      <td data-label="Branch">{student.branch}</td>
+                      <td data-label="Batch">{getBatchNameFromCode(student.batch, student.branch)}</td>
+                      <td data-label="Trainer Name">{student.trainer || 'N/A'}</td>
+                      <td data-label="Present Grad">
+                        <span className={`badge ${getBeltColorClass(student.belt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem', borderRadius: '4px' }}>{student.belt}</span>
                       </td>
-                      <td data-label="Present Grade" style={{ whiteSpace: 'nowrap' }}>
-                        <span className={`badge ${getBeltColorClass(student.belt)}`} style={{ padding: '4px 10px', fontSize: '0.8rem', borderRadius: '6px', fontWeight: 600 }}>{student.belt}</span>
-                      </td>
-                      <td data-label="Next Belt" style={{ whiteSpace: 'nowrap' }}>
+                      <td data-label="Next Belt">
                         {student.nextBelt !== 'None' ? (
-                          <span className={`badge ${getBeltColorClass(student.nextBelt)}`} style={{ opacity: 0.9, padding: '4px 10px', fontSize: '0.8rem', borderRadius: '6px', fontWeight: 600 }}>{student.nextBelt}</span>
+                          <span className={`badge ${getBeltColorClass(student.nextBelt)}`} style={{ opacity: 0.85, padding: '3px 8px', fontSize: '0.75rem', borderRadius: '4px' }}>{student.nextBelt}</span>
                         ) : (
                           <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>None (Max)</span>
                         )}
                       </td>
-                      <td data-label="Last Grading" style={{ whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span>{student.lastGradingDate || 'N/A'}</span>
-                          {student.lastGradingResult === 'Pass' && <span className="badge-outline-green" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Pass</span>}
-                          {student.lastGradingResult === 'Fail' && <span className="badge-outline-red" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Fail</span>}
-                        </div>
-                      </td>
-                      <td data-label="Next Eligible" style={{ whiteSpace: 'nowrap' }}>{student.nextEligibleGradingDate || 'N/A'}</td>
-                      <td data-label="Eligibility" style={{ whiteSpace: 'nowrap' }}>
-                        <span className={student.eligibilityStatus === 'Eligible' ? 'badge-outline-green' : 'badge-outline-red'} style={{ padding: '4px 10px', fontSize: '0.75rem', borderRadius: '6px', fontWeight: 700 }}>
+                      <td data-label="Join Date">{student.joinDate}</td>
+                      <td data-label="Last Grading">{student.lastGradingDate || 'N/A'}</td>
+                      <td data-label="Next Eligible">{student.nextEligibleGradingDate || 'N/A'}</td>
+                      <td data-label="Eligibility">
+                        <span className={student.eligibilityStatus === 'Eligible' ? 'badge-outline-green' : 'badge-outline-red'}>
                           {student.eligibilityStatus}
                         </span>
                       </td>
-                      <td data-label="Actions" style={{ whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', alignItems: 'center', flexWrap: 'nowrap' }}>
-                          <button className="btn-secondary action-btn-pill" style={{ padding: '5px 12px', fontSize: '0.75rem', whiteSpace: 'nowrap' }} onClick={() => {
+                      <td data-label="Result">
+                        {student.lastGradingResult === 'Pass' ? (
+                          <span className="badge-outline-green">Pass</span>
+                        ) : student.lastGradingResult === 'Fail' ? (
+                          <span className="badge-outline-red">Fail</span>
+                        ) : (
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>N/A</span>
+                        )}
+                      </td>
+                      <td data-label="Actions">
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', alignItems: 'center' }}>
+                          <button className="btn-secondary action-btn-pill" onClick={() => {
                             setSelectedHistoryStudent(student);
                             setIsHistoryModalOpen(true);
                           }}>History</button>
 
-                          <button className="btn-primary action-btn-pill" style={{ background: 'linear-gradient(135deg, #FFD700, #FF9800)', color: '#000', fontWeight: 700, border: 'none', padding: '5px 14px', fontSize: '0.75rem', whiteSpace: 'nowrap', cursor: 'pointer' }} onClick={() => {
+                          <button className="btn-primary action-btn-pill" style={{ background: 'var(--color-accent-primary)' }} onClick={() => {
                             setSelectedGradeStudent(student);
                             setGradeResult('Pass');
                             setGradeDate(new Date().toISOString().split('T')[0]);
                             setIsGradeModalOpen(true);
                           }}>Grade</button>
 
-                          <button className="btn-icon" style={{ color: '#2196F3', background: 'rgba(33, 150, 243, 0.1)', border: '1px solid rgba(33, 150, 243, 0.2)', width: '30px', height: '30px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }} onClick={() => {
+                          <button className="btn-icon" style={{ color: '#2196F3', background: 'rgba(33, 150, 243, 0.1)', border: '1px solid rgba(33, 150, 243, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => {
                             setSelectedEditGradingStudent(student);
                             setEditGradingForm({
                               joinDate: student.joinDate,
                               lastGradingDate: student.lastGradingDate || 'N/A',
-                              nextEligibleGradingDate: student.nextEligibleGradingDate || '',
                               belt: student.belt
                             });
                             setIsEditGradingModalOpen(true);
-                          }} title="Grading Settings"><Settings size={14} /></button>
+                          }}><Settings size={12} /></button>
                         </div>
                       </td>
                     </tr>
@@ -8442,7 +8291,7 @@ function App() {
               <div style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '1rem', marginBottom: '1rem', display: 'flex', gap: '15px', fontSize: '0.9rem', color: 'var(--color-text-main)' }}>
                 <div>Branch: <strong>{selectedHistoryStudent.branch}</strong></div>
                 <div>Batch: <strong>{selectedHistoryStudent.batch}</strong></div>
-                <div>Present Grade: <span className={`badge ${getBeltColorClass(selectedHistoryStudent.belt)}`}>{selectedHistoryStudent.belt}</span></div>
+                <div>Present Grad: <span className={`badge ${getBeltColorClass(selectedHistoryStudent.belt)}`}>{selectedHistoryStudent.belt}</span></div>
               </div>
 
               {selectedHistoryStudent.gradingHistory && selectedHistoryStudent.gradingHistory.length > 0 ? (
@@ -8519,7 +8368,7 @@ function App() {
                     <span>Join Date:</span> <strong style={{ color: '#fff' }}>{selectedGradeStudent.joinDate || 'N/A'}</strong>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span>Present Grade:</span> <span className={`badge ${getBeltColorClass(selectedGradeStudent.belt)}`}>{selectedGradeStudent.belt}</span>
+                    <span>Present Grad:</span> <span className={`badge ${getBeltColorClass(selectedGradeStudent.belt)}`}>{selectedGradeStudent.belt}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>Target Promotion Belt:</span>
@@ -8614,19 +8463,8 @@ function App() {
                   <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Enter N/A if student has not taken a grading test yet. Recalculates eligibility date.</span>
                 </div>
 
-                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                  <label>Next Eligible Grading Date (Override)</label>
-                  <input
-                    type="date"
-                    className="form-control"
-                    value={editGradingForm.nextEligibleGradingDate || ''}
-                    onChange={(e) => setEditGradingForm({ ...editGradingForm, nextEligibleGradingDate: e.target.value })}
-                  />
-                  <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Default is 4 months after Join/Last Grading Date. Set custom date if classes are completed early.</span>
-                </div>
-
                 <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                  <label>Present Grade</label>
+                  <label>Present Grad</label>
                   <select
                     className="form-control"
                     value={editGradingForm.belt}
@@ -8634,14 +8472,9 @@ function App() {
                     required
                     disabled={!isSuper && !allowBranchAdminChangeBelt}
                   >
-                    {(() => {
-                      const isProBoxing = selectedEditGradingStudent && selectedEditGradingStudent.art &&
-                        (selectedEditGradingStudent.art.toLowerCase().includes('boxing'));
-                      const options = isProBoxing ? PRO_BOXING_BELTS : STANDARD_BELTS;
-                      return options.map(b => (
-                        <option key={b} value={b}>{b}</option>
-                      ));
-                    })()}
+                    {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
                   </select>
                   {!isSuper && !allowBranchAdminChangeBelt && (
                     <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Requires Super Admin permission to edit.</span>
@@ -8903,104 +8736,42 @@ function App() {
             <h3 className="panel-title" style={{ fontSize: '0.9rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Performance Filters</h3>
           </div>
           <div className="grid-filters-layout" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-            {userRole === 'trainer' ? (
-              <>
-                <div className="form-group">
-                  <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Branch</label>
-                  <div style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '0 12px', border: '1px solid rgba(255,255,255,0.06)', color: '#fff', fontWeight: 600 }}>
-                    {userBranch}
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Batch</label>
-                  <div style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '0 12px', border: '1px solid rgba(255,255,255,0.06)', color: '#fff', fontWeight: 600 }}>
-                    {getBatchNameFromCode(userBatch, userBranch) || userBatch}
-                  </div>
-                </div>
-              </>
+            {isSuper ? (
+              <div className="form-group">
+                <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Branch</label>
+                <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={perfFilterBranch} onChange={(e) => {
+                  setPerfFilterBranch(e.target.value);
+                  setPerfFilterBatch('All');
+                }}>
+                  <option value="All">All Branches</option>
+                  {branches.map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </div>
             ) : (
-              <>
-                {isSuper ? (
-                  <div className="form-group">
-                    <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Branch</label>
-                    <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={perfFilterBranch} onChange={(e) => {
-                      setPerfFilterBranch(e.target.value);
-                      setPerfFilterBatch('All');
-                    }}>
-                      <option value="All">All Branches</option>
-                      {branches.map(b => (
-                        <option key={b} value={b}>{b}</option>
-                      ))}
-                    </select>
-                  </div>
-                ) : (
-                  <div className="form-group">
-                    <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Branch</label>
-                    <input type="text" className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={userBranch} disabled />
-                  </div>
-                )}
-                <div className="form-group">
-                  <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Batch</label>
-                  <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={perfFilterBatch} onChange={(e) => setPerfFilterBatch(e.target.value)}>
-                    <option value="All">All Batches</option>
-                    {getFilteredBatchOptions(isSuper ? perfFilterBranch : undefined).map(opt => (
-                      <option key={opt.id} value={opt.id}>{opt.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </>
+              <div className="form-group">
+                <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Branch</label>
+                <input type="text" className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={userBranch} disabled />
+              </div>
             )}
             <div className="form-group">
-              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Target Month</label>
-              <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  style={{ height: '38px', padding: '0 8px', fontSize: '0.8rem', borderRadius: '8px' }}
-                  title="Previous Month"
-                  onClick={() => {
-                    const [y, m] = perfSelectedMonth.split('-').map(Number);
-                    const prevDate = new Date(y, m - 2, 1);
-                    const py = prevDate.getFullYear();
-                    const pm = String(prevDate.getMonth() + 1).padStart(2, '0');
-                    setPerfSelectedMonth(`${py}-${pm}`);
-                  }}
-                >
-                  ◀
-                </button>
-                <input
-                  type="month"
-                  className="form-control"
-                  style={{ height: '38px', borderRadius: '8px', fontSize: '0.825rem', flex: 1, padding: '0 6px' }}
-                  value={perfSelectedMonth}
-                  onChange={(e) => setPerfSelectedMonth(e.target.value || getLocalMonthString())}
-                />
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  style={{ height: '38px', padding: '0 8px', fontSize: '0.8rem', borderRadius: '8px' }}
-                  title="Next Month"
-                  onClick={() => {
-                    const [y, m] = perfSelectedMonth.split('-').map(Number);
-                    const nextDate = new Date(y, m, 1);
-                    const ny = nextDate.getFullYear();
-                    const nm = String(nextDate.getMonth() + 1).padStart(2, '0');
-                    setPerfSelectedMonth(`${ny}-${nm}`);
-                  }}
-                >
-                  ▶
-                </button>
-              </div>
+              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Batch</label>
+              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem' }} value={perfFilterBatch} onChange={(e) => setPerfFilterBatch(e.target.value)}>
+                <option value="All">All Batches</option>
+                {getFilteredBatchOptions(isSuper ? perfFilterBranch : undefined).map(opt => (
+                  <option key={opt.id} value={opt.id}>{opt.name}</option>
+                ))}
+              </select>
             </div>
             <div className="form-group" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-              <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
-                <button className="btn-secondary" style={{ padding: '6px 12px', fontSize: '0.8rem', height: '38px', borderRadius: '8px', flex: 1 }} onClick={() => {
+              <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+                <button className="btn-secondary" style={{ padding: '6px 16px', fontSize: '0.85rem', height: '38px', borderRadius: '8px', flex: 1 }} onClick={() => {
                   if (isSuper) setPerfFilterBranch('All');
                   setPerfFilterBatch('All');
-                  setPerfSelectedMonth(getLocalMonthString());
                   setSearchQuery('');
                 }}>Reset Filters</button>
-                <div style={{ position: 'relative', flex: 1.4 }}>
+                <div style={{ position: 'relative', flex: 1.5 }}>
                   <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
                   <input
                     type="text"
@@ -9098,263 +8869,106 @@ function App() {
           </div>
         </div>
 
-        {/* Student-wise Selected Month Table */}
-        {(() => {
-          const safeMonth = perfSelectedMonth || getLocalMonthString();
-          const parts = safeMonth.split('-').map(Number);
-          const pYear = parts[0] || new Date().getFullYear();
-          const pMonth = parts[1] || (new Date().getMonth() + 1);
-          const perfDateObj = new Date(pYear, pMonth - 1, 1);
-          const monthFullLabel = perfDateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-          const monthShortLabel = perfDateObj.toLocaleDateString('en-US', { month: 'short' });
-          const isCurrentMonthActive = safeMonth === getLocalMonthString();
-
-          return (
-            <div className="panel" style={{ background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
-              <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: 'none', paddingBottom: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                <div>
-                  <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Fee Status ({monthFullLabel})
-                  </h3>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Click any student or button to view complete multi-month fee breakdown & payment dates</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {!isCurrentMonthActive && (
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      style={{ padding: '4px 10px', fontSize: '0.75rem', borderRadius: '6px', background: 'rgba(255, 215, 0, 0.1)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', cursor: 'pointer', fontWeight: 600 }}
-                      onClick={() => setPerfSelectedMonth(getLocalMonthString())}
-                    >
-                      Go to Current Month
-                    </button>
-                  )}
-                  <span className="badge" style={{ background: 'rgba(76, 175, 80, 0.12)', color: '#4CAF50', border: '1px solid rgba(76, 175, 80, 0.3)', padding: '4px 10px', fontSize: '0.8rem', fontWeight: 600 }}>
-                    📅 {monthFullLabel}
-                  </span>
-                </div>
-              </div>
-
-              {filtered.length > 0 ? (
-                <div className="premium-table-container">
-                  <table className="premium-table responsive-table-cards">
-                    <thead>
-                      <tr>
-                        <th style={{ whiteSpace: 'nowrap' }}>Student Name</th>
-                        <th style={{ whiteSpace: 'nowrap' }}>Branch & Batch</th>
-                        <th style={{ whiteSpace: 'nowrap' }}>{monthShortLabel} Status</th>
-                        <th style={{ whiteSpace: 'nowrap' }}>Admission Fee</th>
-                        <th style={{ whiteSpace: 'nowrap' }}>Total Paid</th>
-                        <th style={{ whiteSpace: 'nowrap' }}>Total Pending</th>
-                        <th style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>Full Details</th>
+        {/* Student-wise detailed table */}
+        <div className="panel" style={{ background: 'rgba(20, 20, 20, 0.3)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+          <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: 'none', paddingBottom: 0 }}>
+            <h3 className="panel-title" style={{ fontSize: '1rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Detailed Student Profit Breakdown ({filtered.length} Students)</h3>
+          </div>
+          {filtered.length > 0 ? (
+            <div className="premium-table-container">
+              <table className="premium-table responsive-table-cards">
+                <thead>
+                  <tr>
+                    <th>Student Name</th>
+                    <th>Batch</th>
+                    <th>Admission Fee</th>
+                    <th>Monthly Fees</th>
+                    <th>Total Paid (Profit)</th>
+                    <th>Total Pending</th>
+                    <th>Collection Progress</th>
+                    <th style={{ textAlign: 'center' }}>Contact Outreach</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(student => {
+                    const stats = getStudentFeeStats(student);
+                    const rate = stats.expected > 0 ? Math.round((stats.totalCollected / stats.expected) * 100) : 0;
+                    return (
+                      <tr key={student.id}>
+                        <td data-label="Student Name">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectStudent(student)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              fontWeight: 700,
+                              color: 'var(--color-primary)',
+                              cursor: 'pointer',
+                              textDecoration: 'underline',
+                              fontFamily: 'inherit',
+                              fontSize: 'inherit',
+                              textAlign: 'left',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            {student.studentName || student.name}
+                            {student.isPriority && (
+                              <Star size={14} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
+                            )}
+                          </button>
+                        </td>
+                        <td data-label="Batch">
+                          <span className="badge" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--color-text-light)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                            {getBatchNameFromSchedule(student.schedule, student.branch)}
+                          </span>
+                        </td>
+                        <td data-label="Admission Fee">
+                          {student.admissionPaid ? (
+                            <span className="badge-outline-green">Paid</span>
+                          ) : (
+                            <span className="badge-outline-red">Pending (₹{stats.pendingAdmission})</span>
+                          )}
+                        </td>
+                        <td data-label="Monthly Fees" style={{ fontSize: '0.825rem' }}>
+                          <span style={{ color: '#4CAF50', fontWeight: 600 }}>{stats.paidCount} Paid</span> • <span style={{ color: '#ff453a', fontWeight: 600 }}>{stats.pendingCount} Pending</span>
+                        </td>
+                        <td style={{ fontWeight: 600, color: '#4CAF50' }} data-label="Total Paid (Profit)">₹{stats.totalCollected.toLocaleString()}</td>
+                        <td style={{ fontWeight: 600, color: stats.totalPending > 0 ? '#ff453a' : 'var(--color-text-muted)' }} data-label="Total Pending">₹{stats.totalPending.toLocaleString()}</td>
+                        <td style={{ width: '15%' }} data-label="Collection Progress">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div className="progress-container" style={{ flex: 1, height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px' }}>
+                              <div className="progress-bar" style={{ width: `${rate}%`, background: 'var(--color-primary)', height: '100%', borderRadius: '4px' }}></div>
+                            </div>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>{rate}%</span>
+                          </div>
+                        </td>
+                        <td data-label="Contact Outreach">
+                          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', alignItems: 'center' }}>
+                            <a href={`tel:${student.phone}`} style={{ color: '#2196F3', background: 'rgba(33, 150, 243, 0.1)', border: '1px solid rgba(33, 150, 243, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="Call Student">
+                              <Phone size={13} />
+                            </a>
+                            <a href={`https://wa.me/${student.phone}`} target="_blank" rel="noreferrer" style={{ color: '#25D366', background: 'rgba(37, 211, 102, 0.1)', border: '1px solid rgba(37, 211, 102, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="WhatsApp Student">
+                              <MessageCircle size={13} />
+                            </a>
+                            <a href={`sms:${student.phone}`} style={{ color: '#FF9800', background: 'rgba(255, 152, 0, 0.1)', border: '1px solid rgba(255, 152, 0, 0.2)', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }} title="SMS Message Student">
+                              <MessageSquare size={13} />
+                            </a>
+                          </div>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {filtered.map(student => {
-                        const isMonthPaid = student.paidMonths && student.paidMonths[perfSelectedMonth];
-                        const monthPaidDate = student.paidMonthsDates && student.paidMonthsDates[perfSelectedMonth];
-                        const stats = getStudentFeeStats(student);
-
-                        return (
-                          <tr key={student.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedPerfStudent(student)}>
-                            <td data-label="Student Name" style={{ whiteSpace: 'nowrap' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <span style={{ fontWeight: 700, color: 'var(--color-primary)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                  {getCleanStudentName(student)}
-                                  {student.isPriority && (
-                                    <Star size={14} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
-                                  )}
-                                </span>
-                                <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Joined: {student.joinDate || 'N/A'}</span>
-                              </div>
-                            </td>
-                            <td data-label="Branch & Batch" style={{ whiteSpace: 'nowrap' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                <span className="badge" style={{ background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: '0.75rem', width: 'fit-content' }}>{student.branch}</span>
-                                <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>{getBatchNameFromSchedule(student.schedule, student.branch)}</span>
-                              </div>
-                            </td>
-                            <td data-label={`${monthShortLabel} Status`} style={{ whiteSpace: 'nowrap' }}>
-                              {isMonthPaid ? (
-                                <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '2px' }}>
-                                  <span className="badge-outline-green" style={{ padding: '3px 8px', fontSize: '0.75rem', fontWeight: 600 }}>Paid</span>
-                                  <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.65)' }}>📅 {monthPaidDate || 'Paid'}</span>
-                                </div>
-                              ) : (
-                                <span className="badge-outline-red" style={{ padding: '3px 8px', fontSize: '0.75rem', fontWeight: 600 }}>Pending</span>
-                              )}
-                            </td>
-                            <td data-label="Admission Fee" style={{ whiteSpace: 'nowrap' }}>
-                              {student.admissionPaid ? (
-                                <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '2px' }}>
-                                  <span className="badge-outline-green" style={{ padding: '3px 8px', fontSize: '0.75rem', fontWeight: 600 }}>Paid</span>
-                                  <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.65)' }}>📅 {student.admissionPaidDate || 'Paid'}</span>
-                                </div>
-                              ) : (
-                                <span className="badge-outline-red" style={{ padding: '3px 8px', fontSize: '0.75rem', fontWeight: 600 }}>Pending</span>
-                              )}
-                            </td>
-                            <td style={{ fontWeight: 700, color: '#4CAF50', whiteSpace: 'nowrap' }} data-label="Total Paid">₹{stats.totalCollected.toLocaleString()}</td>
-                            <td style={{ fontWeight: 700, color: stats.totalPending > 0 ? '#ff453a' : 'var(--color-text-muted)', whiteSpace: 'nowrap' }} data-label="Total Pending">₹{stats.totalPending.toLocaleString()}</td>
-                            <td data-label="Full Details" style={{ whiteSpace: 'nowrap', textAlign: 'center' }}>
-                              <button
-                                className="btn-primary action-btn-pill"
-                                style={{ background: 'linear-gradient(135deg, #2196F3, #1E88E5)', border: 'none', padding: '5px 14px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedPerfStudent(student);
-                                }}
-                              >
-                                View Full Details ➔
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--color-text-muted)' }}>No student matching the current filters.</div>
-              )}
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          );
-        })()}
-
-        {/* Modal: Full Student Fee Breakdown Details */}
-        {selectedPerfStudent && (() => {
-          const stats = getStudentFeeStats(selectedPerfStudent);
-          const feeDetails = calculateStudentFees(selectedPerfStudent);
-          const paidMonthsDates = selectedPerfStudent.paidMonthsDates || {};
-
-          return (
-            <div className="modal-overlay" style={{ zIndex: 1000 }}>
-              <div className="modal-content" style={{ maxWidth: '650px', background: 'var(--color-bg-surface)', padding: '1.5rem', borderRadius: '12px', maxHeight: '90vh', overflowY: 'auto' }}>
-                <div className="panel-header" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 className="panel-title" style={{ fontSize: '1.1rem', color: '#fff', margin: 0 }}>Student Complete Fee Breakdown</h3>
-                  <button
-                    className="btn-icon"
-                    onClick={() => setSelectedPerfStudent(null)}
-                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-
-                {/* Student Info Card Header */}
-                <div style={{ background: 'rgba(255,255,255,0.03)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)', marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                  <div>
-                    <h4 style={{ fontSize: '1.1rem', color: '#fff', margin: 0, fontWeight: 700 }}>{getCleanStudentName(selectedPerfStudent)}</h4>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                      Branch: <strong style={{ color: '#fff' }}>{selectedPerfStudent.branch}</strong> • Batch: <strong style={{ color: '#fff' }}>{getBatchNameFromSchedule(selectedPerfStudent.schedule, selectedPerfStudent.branch)}</strong>
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <span className="badge" style={{ background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: '0.75rem' }}>ID: #{selectedPerfStudent.id}</span>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>Joined: {selectedPerfStudent.joinDate || 'N/A'}</div>
-                  </div>
-                </div>
-
-                {/* Summary Financial Cards */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '1.25rem' }}>
-                  <div style={{ background: 'rgba(76, 175, 80, 0.1)', border: '1px solid rgba(76, 175, 80, 0.25)', padding: '0.75rem', borderRadius: '8px', textAlign: 'center' }}>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Total Paid (Revenue)</span>
-                    <h4 style={{ color: '#4CAF50', margin: '4px 0 0 0', fontSize: '1.1rem', fontWeight: 700 }}>₹{stats.totalCollected.toLocaleString()}</h4>
-                  </div>
-                  <div style={{ background: 'rgba(229, 9, 20, 0.1)', border: '1px solid rgba(229, 9, 20, 0.25)', padding: '0.75rem', borderRadius: '8px', textAlign: 'center' }}>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Total Pending</span>
-                    <h4 style={{ color: '#ff453a', margin: '4px 0 0 0', fontSize: '1.1rem', fontWeight: 700 }}>₹{stats.totalPending.toLocaleString()}</h4>
-                  </div>
-                  <div style={{ background: 'rgba(54, 162, 235, 0.1)', border: '1px solid rgba(54, 162, 235, 0.25)', padding: '0.75rem', borderRadius: '8px', textAlign: 'center' }}>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Paid Progress</span>
-                    <h4 style={{ color: '#36A2EB', margin: '4px 0 0 0', fontSize: '1.1rem', fontWeight: 700 }}>
-                      {stats.expected > 0 ? Math.round((stats.totalCollected / stats.expected) * 100) : 0}%
-                    </h4>
-                  </div>
-                </div>
-
-                {/* Admission Fee Status */}
-                <div style={{ marginBottom: '1.25rem', background: 'rgba(255,255,255,0.02)', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#fff' }}>Admission Fee</span>
-                    {selectedPerfStudent.appliedAdmissionCoupon && (
-                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginLeft: '8px' }}>
-                        (Coupon: {selectedPerfStudent.appliedAdmissionCoupon})
-                      </span>
-                    )}
-                  </div>
-                  <div>
-                    {selectedPerfStudent.admissionPaid ? (
-                      <span className="badge-outline-green" style={{ padding: '4px 10px', fontSize: '0.8rem', fontWeight: 600 }}>
-                        Paid {selectedPerfStudent.admissionPaidDate ? `(📅 ${selectedPerfStudent.admissionPaidDate})` : ''}
-                      </span>
-                    ) : (
-                      <span className="badge-outline-red" style={{ padding: '4px 10px', fontSize: '0.8rem', fontWeight: 600 }}>
-                        Pending (₹{stats.pendingAdmission})
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Paid Months List with Dates */}
-                <div style={{ marginBottom: '1.25rem' }}>
-                  <h4 style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: '0.65rem', letterSpacing: '0.5px' }}>
-                    Paid Months & Payment Dates
-                  </h4>
-                  {feeDetails.paidMonthsList && feeDetails.paidMonthsList.length > 0 ? (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '10px' }}>
-                      {feeDetails.paidMonthsList.map(m => (
-                        <div key={m} style={{ background: 'rgba(76, 175, 80, 0.08)', border: '1px solid rgba(76, 175, 80, 0.25)', padding: '10px 14px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                            <span style={{ color: '#fff', fontWeight: 700, fontSize: '0.85rem' }}>{m} Fee</span>
-                            <span style={{ fontSize: '0.725rem', color: '#4CAF50', fontWeight: 600 }}>Status: Paid</span>
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <span style={{ fontSize: '0.775rem', color: '#FFD700', fontWeight: 700, display: 'block' }}>
-                              📅 {paidMonthsDates[m] || 'Recorded'}
-                            </span>
-                            <span style={{ fontSize: '0.675rem', color: 'var(--color-text-muted)' }}>Payment Date</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '6px' }}>No months paid yet.</div>
-                  )}
-                </div>
-
-                {/* Unpaid Months List */}
-                {feeDetails.unpaidMonths && feeDetails.unpaidMonths.length > 0 && (
-                  <div style={{ marginBottom: '1.5rem' }}>
-                    <h4 style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: '0.65rem', letterSpacing: '0.5px' }}>
-                      Unpaid Pending Months ({feeDetails.unpaidMonths.length})
-                    </h4>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      {feeDetails.unpaidMonths.map(m => (
-                        <span key={m} className="badge-outline-red" style={{ padding: '4px 10px', fontSize: '0.8rem', fontWeight: 600 }}>
-                          {m} (Pending)
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Outreach & Actions */}
-                <div style={{ display: 'flex', gap: '10px', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <a href={`tel:${selectedPerfStudent.phone}`} style={{ color: '#2196F3', background: 'rgba(33, 150, 243, 0.1)', border: '1px solid rgba(33, 150, 243, 0.2)', padding: '6px 12px', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
-                      <Phone size={14} /> Call
-                    </a>
-                    <a href={`https://wa.me/${selectedPerfStudent.phone}`} target="_blank" rel="noreferrer" style={{ color: '#25D366', background: 'rgba(37, 211, 102, 0.1)', border: '1px solid rgba(37, 211, 102, 0.2)', padding: '6px 12px', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
-                      <MessageCircle size={14} /> WhatsApp
-                    </a>
-                  </div>
-                  <button className="btn-secondary" onClick={() => setSelectedPerfStudent(null)}>Close Breakdown</button>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
+          ) : (
+            <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--color-text-muted)' }}>No student matching the current filters.</div>
+          )}
+        </div>
       </div>
     );
   };
@@ -9410,7 +9024,7 @@ function App() {
                       <tr key={student.id}>
                         <td data-label="Student Name" onClick={() => handleSelectStudent(student)} style={{ cursor: 'pointer', color: '#E50914', textDecoration: 'underline', fontWeight: 700 }}>
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                            {getCleanStudentName(student)}
+                            {student.studentName || student.name}
                             {student.isPriority && (
                               <Star size={14} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
                             )}
@@ -11775,28 +11389,22 @@ function App() {
           <>
             {/* Grading System Settings */}
             <div className="panel" style={{ marginBottom: '2rem' }}>
-              <div className="panel-header" style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="panel-header" style={{ marginBottom: '1rem' }}>
                 <h3 className="panel-title">Grading System Settings</h3>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  style={{
-                    padding: '0.5rem 1rem',
-                    borderRadius: '8px',
-                    fontSize: '0.825rem',
-                    fontWeight: 700,
-                    background: 'linear-gradient(135deg, #FFD700, #FF9800)',
-                    color: '#000',
-                    border: 'none',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    cursor: 'pointer'
-                  }}
-                  onClick={() => setIsAnnounceGradingModalOpen(true)}
-                >
-                  <Award size={16} /> Announce Grading Date
-                </button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', color: 'var(--color-text-main)', fontSize: '0.95rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={allowBranchAdminChangeBelt}
+                    onChange={(e) => handleToggleAllowBranchAdminChangeBelt(e.target.checked)}
+                    style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                  />
+                  <span>Allow Branch Admins to manually change student Present Grad level and Join Date</span>
+                </label>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                  By default, Branch Admins can only change a student's grade level by conducting grading tests (marking Pass). When this option is enabled, Branch Admins can also manually override the Present Grad level and Join Date inside the Student Grading Edit form.
+                </p>
               </div>
             </div>
 
@@ -12849,7 +12457,7 @@ function App() {
             setUserBatch(data.batch || '');
             setUserLoginCount(data.loginCount);
             setLoginData({ username: '', password: '' });
-            window.history.replaceState(null, '', '/developer/dashboard');
+            window.location.hash = '#/developer/dashboard';
           } else {
             setLoginError('Access denied: You are not authorized as a developer.');
             setIsLoggingIn(false);
@@ -13098,12 +12706,12 @@ function App() {
           <a className={`nav-item ${currentView === 'reminders' ? 'active' : ''}`} onClick={() => setCurrentView('reminders')}>
             <Bell className="nav-icon" /> <span>Reminders</span>
           </a>
-          {(userRole === 'superadmin' || userRole === 'developer' || userRole === 'branchadmin' || userRole === 'trainer' || userRole === 'coordinator') && (
+          {(userRole === 'superadmin' || userRole === 'developer' || userRole === 'branchadmin') && (
             <a className={`nav-item ${currentView === 'performance' ? 'active' : ''}`} onClick={() => setCurrentView('performance')}>
               <TrendingUp className="nav-icon" /> <span>Performance</span>
             </a>
           )}
-          {(userRole === 'superadmin' || userRole === 'developer' || userRole === 'branchadmin' || userRole === 'trainer' || userRole === 'coordinator') && (
+          {(userRole === 'superadmin' || userRole === 'developer' || userRole === 'branchadmin') && (
             <a className={`nav-item ${currentView === 'grading' ? 'active' : ''}`} onClick={() => { setCurrentView('grading'); fetchGradingStudents(); }}>
               <Award className="nav-icon" /> <span>Grading</span>
             </a>
@@ -13509,7 +13117,7 @@ function App() {
                           <tr>
                             <th>Name</th>
                             <th>Batch Schedule</th>
-                            <th>Present Grade</th>
+                            <th>Present Grad</th>
                             <th>Phone</th>
                             <th>Actions</th>
                           </tr>
@@ -13531,7 +13139,7 @@ function App() {
                                     color: student.status === 'Inactive' ? 'var(--color-text-muted)' : '#E50914',
                                     textDecoration: 'underline'
                                   }}>
-                                    {getCleanStudentName(student)}
+                                    {student.studentName || student.name}
                                   </span>
                                   {student.isPriority && (
                                     <Star size={14} fill="#FFD700" color="#FFD700" style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
@@ -13547,7 +13155,7 @@ function App() {
                                 <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', marginRight: '8px' }}>{student.branch}</span>
                                 <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}</span>
                               </td>
-                              <td data-label="Present Grade"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
+                              <td data-label="Present Grad"><span className={`badge ${getBeltColorClass(student.belt)}`}>{student.belt}</span></td>
                               <td data-label="Phone" style={{ color: 'var(--color-text-muted)' }}>{student.phone}</td>
                               <td data-label="Actions">
                                 <div className="actions-flex-container">
@@ -13658,7 +13266,16 @@ function App() {
           {currentView === 'fees' && (lockFeesPage && userRole !== 'developer' ? renderSectionMaintenance('Fees Portal') : renderFees())}
           {currentView === 'student-fees' && (lockFeesPage && userRole !== 'developer' ? renderSectionMaintenance('Fees Portal') : renderStudentFees())}
           {currentView === 'reminders' && (lockRemindersPage && userRole !== 'developer' ? renderSectionMaintenance('Alerts & Reminders') : renderReminders())}
-          {currentView === 'performance' && (lockPerformancePage && userRole !== 'developer' ? renderSectionMaintenance('Performance Portal') : renderPerformance())}
+          {currentView === 'performance' && (
+            (userRole === 'trainer' || userRole === 'coordinator') ? (
+              <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
+                <h3 className="panel-title" style={{ color: '#E50914' }}>Access Denied</h3>
+                <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Trainers do not have permission to view financial performance details.</p>
+              </div>
+            ) : (
+              lockPerformancePage && userRole !== 'developer' ? renderSectionMaintenance('Performance Portal') : renderPerformance()
+            )
+          )}
           {currentView === 'settings' && renderSettings()}
           {currentView === 'credentials-list' && (lockBranchBatchMappingPage && userRole !== 'developer' ? renderSectionMaintenance('Branch & Batch Mapping') : renderCredentialsList())}
           {currentView === 'grading' && (lockGradingPage && userRole !== 'developer' ? renderSectionMaintenance('Student Belt Grading') : renderGrading())}
@@ -13896,33 +13513,21 @@ function App() {
                       </select>
                     </div>
                     <div className="form-group">
-                      <label>Present Grade</label>
+                      <label>Present Grad</label>
                       <select
                         className="form-control"
                         value={editingStudentData.belt}
                         onChange={(e) => setEditingStudentData({ ...editingStudentData, belt: e.target.value })}
                       >
-                        {(() => {
-                          const isBoxing = editingStudentData.art && editingStudentData.art.toLowerCase().includes('boxing');
-                          if (isBoxing) {
-                            return ['Level 6', 'Level 5', 'Level 4', 'Level 3', 'Level 2', 'Level 1', 'Coach C', 'Coach B', 'Coach A'].map(lvl => (
-                              <option key={lvl} value={lvl}>{lvl}</option>
-                            ));
-                          }
-                          return [
-                            { value: 'White', label: 'White Belt' },
-                            { value: 'Yellow', label: 'Yellow Belt' },
-                            { value: 'Orange', label: 'Orange Belt' },
-                            { value: 'Green', label: 'Green Belt' },
-                            { value: 'Blue', label: 'Blue Belt' },
-                            { value: 'Purple', label: 'Purple Belt' },
-                            { value: 'Brown', label: 'Brown Belt' },
-                            { value: 'Red', label: 'Red Belt' },
-                            { value: 'Black', label: 'Black Belt' }
-                          ].map(b => (
-                            <option key={b.value} value={b.value}>{b.label}</option>
-                          ));
-                        })()}
+                        <option value="White">White Belt</option>
+                        <option value="Yellow">Yellow Belt</option>
+                        <option value="Orange">Orange Belt</option>
+                        <option value="Green">Green Belt</option>
+                        <option value="Blue">Blue Belt</option>
+                        <option value="Purple">Purple Belt</option>
+                        <option value="Brown">Brown Belt</option>
+                        <option value="Red">Red Belt</option>
+                        <option value="Black">Black Belt</option>
                       </select>
                     </div>
                   </div>
@@ -14036,7 +13641,7 @@ function App() {
                           {(selectedStudent.studentName || selectedStudent.name).charAt(0)}
                         </div>
                       )}
-                      <h3 style={{ margin: 0, fontSize: '1.5rem' }}>{getCleanStudentName(selectedStudent)}</h3>
+                      <h3 style={{ margin: 0, fontSize: '1.5rem' }}>{selectedStudent.studentName || selectedStudent.name}</h3>
                     </div>
                     <span className={`badge ${getBeltColorClass(selectedStudent.belt)}`}>{selectedStudent.belt}</span>
                   </div>
@@ -14866,12 +14471,7 @@ function App() {
                   <select
                     className="form-control"
                     value={newStudent.art || ''}
-                    onChange={(e) => {
-                      const selectedArt = e.target.value;
-                      const isBoxing = selectedArt.toLowerCase().includes('boxing');
-                      const defaultGrade = isBoxing ? 'Level 6' : 'White';
-                      setNewStudent({ ...newStudent, art: selectedArt, belt: defaultGrade });
-                    }}
+                    onChange={(e) => setNewStudent({ ...newStudent, art: e.target.value })}
                   >
                     <option value="">Select Art</option>
                     {ART_OPTIONS.map(art => (
@@ -14905,28 +14505,16 @@ function App() {
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Present Grade</label>
+                  <label>Present Grad</label>
                   <select className="form-control" value={newStudent.belt} onChange={(e) => setNewStudent({ ...newStudent, belt: e.target.value })}>
-                    {(() => {
-                      const isBoxing = newStudent.art && newStudent.art.toLowerCase().includes('boxing');
-                      if (isBoxing) {
-                        return ['Level 6', 'Level 5', 'Level 4', 'Level 3', 'Level 2', 'Level 1', 'Coach C', 'Coach B', 'Coach A'].map(lvl => (
-                          <option key={lvl} value={lvl}>{lvl}</option>
-                        ));
-                      }
-                      return [
-                        { value: 'White', label: 'White Belt' },
-                        { value: 'Yellow', label: 'Yellow Belt' },
-                        { value: 'Orange', label: 'Orange Belt' },
-                        { value: 'Green', label: 'Green Belt' },
-                        { value: 'Blue', label: 'Blue Belt' },
-                        { value: 'Purple', label: 'Purple Belt' },
-                        { value: 'Brown', label: 'Brown Belt' },
-                        { value: 'Black', label: 'Black Belt' }
-                      ].map(b => (
-                        <option key={b.value} value={b.value}>{b.label}</option>
-                      ));
-                    })()}
+                    <option value="White">White Belt</option>
+                    <option value="Yellow">Yellow Belt</option>
+                    <option value="Orange">Orange Belt</option>
+                    <option value="Green">Green Belt</option>
+                    <option value="Blue">Blue Belt</option>
+                    <option value="Purple">Purple Belt</option>
+                    <option value="Brown">Brown Belt</option>
+                    <option value="Black">Black Belt</option>
                   </select>
                 </div>
               </div>
@@ -15224,130 +14812,14 @@ function App() {
         </div>
       )}
 
-      {/* Modal: Admin Announce Grading Date */}
-      {isAnnounceGradingModalOpen && (
-        <div className="modal-overlay" style={{ zIndex: 12000 }}>
-          <div className="modal-content glass-panel" style={{ maxWidth: '550px', padding: '2rem', background: 'rgba(10, 10, 20, 0.96)', border: '1px solid rgba(255, 215, 0, 0.35)', borderRadius: '16px', backdropFilter: 'blur(25px)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '0.75rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Award size={24} style={{ color: '#FFD700' }} />
-                <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px', fontFamily: 'Outfit, sans-serif' }}>Announce Belt Grading Date</h3>
-              </div>
-              <button className="btn-icon" onClick={() => setIsAnnounceGradingModalOpen(false)} style={{ border: 'none', background: 'transparent', color: '#fff', cursor: 'pointer' }}><X size={20} /></button>
-            </div>
-
-            {announceGradingError && <div style={{ color: '#ff453a', marginBottom: '1rem', background: 'rgba(255, 69, 58, 0.1)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid rgba(255, 69, 58, 0.3)', fontSize: '0.85rem' }}>{announceGradingError}</div>}
-            {announceGradingSuccess && <div style={{ color: '#30d158', marginBottom: '1rem', background: 'rgba(48, 209, 88, 0.1)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid rgba(48, 209, 88, 0.3)', fontSize: '0.85rem' }}>{announceGradingSuccess}</div>}
-
-            <form onSubmit={handleAnnounceGradingDate}>
-              <div className="grid-2-col" style={{ marginBottom: '1rem' }}>
-                <div className="form-group">
-                  <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '6px', display: 'block' }}>Grading Test Date *</label>
-                  <input
-                    type="date"
-                    className="form-control"
-                    style={{ height: '40px', borderRadius: '8px', fontSize: '0.9rem' }}
-                    required
-                    value={announceGradingForm.date}
-                    onChange={(e) => setAnnounceGradingForm({ ...announceGradingForm, date: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '6px', display: 'block' }}>Target Branch</label>
-                  <select
-                    className="form-control"
-                    style={{ height: '42px', borderRadius: '8px', fontSize: '0.9rem', background: '#1c1c28', color: '#ffffff', border: '1px solid rgba(255, 255, 255, 0.15)', cursor: 'pointer' }}
-                    value={announceGradingForm.branch}
-                    onChange={(e) => setAnnounceGradingForm({ ...announceGradingForm, branch: e.target.value })}
-                  >
-                    <option value="all" style={{ background: '#1c1c28', color: '#ffffff' }}>All Branches</option>
-                    {(() => {
-                      const rawBranches = [
-                        ...(Array.isArray(branches) ? branches.map(b => typeof b === 'string' ? b : (b?.name || b?.branchName)) : []),
-                        ...(Array.isArray(customBranches) ? customBranches.map(b => typeof b === 'string' ? b : (b?.name || b?.branchName)) : []),
-                        ...(branchCredentials && typeof branchCredentials === 'object' ? Object.keys(branchCredentials) : []),
-                        ...(Array.isArray(students) ? students.map(s => s?.branch) : [])
-                      ];
-
-                      const branchMap = new Map();
-                      rawBranches.forEach(b => {
-                        if (b && typeof b === 'string' && b.trim()) {
-                          const trimmed = b.trim();
-                          const formatted = trimmed.split(' ').map(w => w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : '').join(' ');
-                          const lower = formatted.toLowerCase();
-                          if (!branchMap.has(lower)) {
-                            branchMap.set(lower, formatted);
-                          }
-                        }
-                      });
-
-                      const existingBranches = Array.from(branchMap.values()).sort((a, b) => a.localeCompare(b));
-
-                      return existingBranches.map(bName => (
-                        <option key={bName} value={bName} style={{ background: '#1c1c28', color: '#ffffff' }}>
-                          {bName}
-                        </option>
-                      ));
-                    })()}
-                  </select>
-                </div>
-              </div>
-
-              <div className="form-group" style={{ marginBottom: '1rem' }}>
-                <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '6px', display: 'block' }}>Announcement Title</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  style={{ height: '40px', borderRadius: '8px', fontSize: '0.9rem' }}
-                  placeholder="Title (e.g., 🥋 Belt Grading Test Announced!)"
-                  value={announceGradingForm.title}
-                  onChange={(e) => setAnnounceGradingForm({ ...announceGradingForm, title: e.target.value })}
-                />
-              </div>
-
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '6px', display: 'block' }}>Announcement Message / Instructions</label>
-                <textarea
-                  className="form-control"
-                  rows="4"
-                  style={{ borderRadius: '8px', fontSize: '0.85rem', lineHeight: '1.5' }}
-                  placeholder="Leave blank for automatic default message or enter custom instructions for trainers..."
-                  value={announceGradingForm.message}
-                  onChange={(e) => setAnnounceGradingForm({ ...announceGradingForm, message: e.target.value })}
-                ></textarea>
-              </div>
-
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                <button type="button" className="btn-secondary" style={{ borderRadius: '8px', padding: '8px 16px' }} onClick={() => setIsAnnounceGradingModalOpen(false)}>Cancel</button>
-                <button type="submit" className="btn-primary" style={{ borderRadius: '8px', padding: '8px 20px', background: 'linear-gradient(135deg, #FFD700, #FF9800)', color: '#000', fontWeight: '700', border: 'none', cursor: 'pointer' }} disabled={announceGradingLoading}>
-                  {announceGradingLoading ? 'Publishing...' : '📢 Publish Announcement'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Unread Global / Grading Announcement Login Popup Modal */}
+      {/* Unread Global Announcement Login Popup Modal */}
       {activeAnnouncementPopup && (
         <div className="modal-overlay" style={{ zIndex: 12000 }}>
-          <div className="modal-content" style={{
-            maxWidth: '520px',
-            padding: '2.25rem 2rem',
-            background: activeAnnouncementPopup.type === 'grading' ? 'rgba(15, 12, 5, 0.96)' : 'rgba(10, 10, 20, 0.95)',
-            border: activeAnnouncementPopup.type === 'grading' ? '1px solid rgba(255, 215, 0, 0.45)' : '1px solid rgba(94, 92, 230, 0.25)',
-            borderRadius: '16px',
-            boxShadow: activeAnnouncementPopup.type === 'grading' ? '0 16px 45px rgba(255, 215, 0, 0.2)' : '0 16px 40px rgba(0, 0, 0, 0.75)',
-            backdropFilter: 'blur(25px)'
-          }}>
+          <div className="modal-content" style={{ maxWidth: '500px', padding: '2.25rem 2rem', background: 'rgba(10, 10, 20, 0.95)', border: '1px solid rgba(94, 92, 230, 0.25)', borderRadius: '16px', boxShadow: '0 16px 40px rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(25px)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
-              {activeAnnouncementPopup.type === 'grading' ? (
-                <Award size={28} color="#FFD700" className="pulse-icon" />
-              ) : (
-                <Bell size={24} color="#ff9f0a" className="shake-icon" />
-              )}
-              <h2 style={{ fontSize: '1.25rem', fontWeight: '800', color: activeAnnouncementPopup.type === 'grading' ? '#FFD700' : '#fff', margin: 0, fontFamily: 'Outfit, sans-serif', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                {activeAnnouncementPopup.type === 'grading' ? '🥋 Belt Grading Announcement' : 'New System Announcement'}
+              <Bell size={24} color="#ff9f0a" className="shake-icon" />
+              <h2 style={{ fontSize: '1.25rem', fontWeight: '800', color: '#fff', margin: 0, fontFamily: 'Outfit, sans-serif', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                New System Announcement
               </h2>
             </div>
 
@@ -15359,39 +14831,17 @@ function App() {
               {activeAnnouncementPopup.message}
             </p>
 
-            <div
-              style={{
-                background: activeAnnouncementPopup.type === 'grading' ? 'rgba(255, 215, 0, 0.08)' : 'rgba(255, 255, 255, 0.05)',
-                padding: '0.9rem 1.25rem',
-                borderRadius: '10px',
-                border: activeAnnouncementPopup.type === 'grading' ? '1px solid rgba(255, 215, 0, 0.25)' : '1px solid rgba(255, 255, 255, 0.1)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '1.5rem'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1rem', fontWeight: 700, color: activeAnnouncementPopup.type === 'grading' ? '#FFD700' : '#ffffff' }}>
-                <CalendarDays size={20} color={activeAnnouncementPopup.type === 'grading' ? '#FFD700' : '#4CAF50'} />
-                <span>
-                  {new Date(activeAnnouncementPopup.createdAt).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-                </span>
-              </div>
+            <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)', fontSize: '0.725rem', color: '#8e8e93', display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '8px' }}>
+              <span>Published by: <strong style={{ color: '#e2e2ee' }}>{activeAnnouncementPopup.sender}</strong></span>
+              <span>
+                {new Date(activeAnnouncementPopup.createdAt).toLocaleDateString()} at {new Date(activeAnnouncementPopup.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 className="btn-primary"
-                style={{
-                  padding: '0.6rem 1.85rem',
-                  borderRadius: '8px',
-                  fontSize: '0.85rem',
-                  fontWeight: 700,
-                  background: activeAnnouncementPopup.type === 'grading' ? 'linear-gradient(135deg, #FFD700, #FF9800)' : undefined,
-                  color: activeAnnouncementPopup.type === 'grading' ? '#000' : undefined,
-                  border: 'none',
-                  cursor: 'pointer'
-                }}
+                style={{ padding: '0.55rem 1.75rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 600 }}
                 onClick={() => {
                   handleMarkAsRead(activeAnnouncementPopup._id);
                   setActiveAnnouncementPopup(null);
