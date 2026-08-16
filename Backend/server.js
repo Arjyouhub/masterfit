@@ -365,14 +365,24 @@ function calculateNextEligibleDate(baseDateStr) {
   }
 }
 
-const BELT_ORDER = ['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'];
+const STANDARD_BELT_ORDER = ['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'];
+const PRO_BOXING_BELT_ORDER = ['Level 6', 'Level 5', 'Level 4', 'Level 3', 'Level 2', 'Level 1', 'Coach C', 'Coach B', 'Coach A'];
 
-function getNextBelt(currentBelt) {
-  const index = BELT_ORDER.findIndex(b => b.toLowerCase() === String(currentBelt || '').toLowerCase().trim());
-  if (index === -1 || index === BELT_ORDER.length - 1) {
+function getBeltOrderForArt(art) {
+  const cleanArt = String(art || '').toLowerCase().trim();
+  if (cleanArt === 'pro boxing' || cleanArt === 'proboxing' || cleanArt.includes('boxing')) {
+    return PRO_BOXING_BELT_ORDER;
+  }
+  return STANDARD_BELT_ORDER;
+}
+
+function getNextBelt(currentBelt, art = '') {
+  const order = getBeltOrderForArt(art);
+  const index = order.findIndex(b => b.toLowerCase() === String(currentBelt || '').toLowerCase().trim());
+  if (index === -1 || index === order.length - 1) {
     return 'None';
   }
-  return BELT_ORDER[index + 1];
+  return order[index + 1];
 }
 
 // Attendance field helpers
@@ -2656,13 +2666,15 @@ app.delete('/api/students/:id', authenticateSession, async (req, res) => {
 // ==========================================
 
 // 1. Get all students with grading fields (scoped by user permissions)
-app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer', 'coordinator'), async (req, res) => {
   try {
     const { role, branch } = req.user;
     let filter = {};
 
-    if (role === 'branchadmin') {
-      filter.branch = new RegExp(`^${branch}$`, 'i');
+    if (role === 'branchadmin' || role === 'trainer' || role === 'coordinator') {
+      if (branch) {
+        filter.branch = new RegExp(`^${branch}$`, 'i');
+      }
     } else if (req.query.branch && req.query.branch.toLowerCase() !== 'all') {
       filter.branch = new RegExp(`^${req.query.branch}$`, 'i');
     }
@@ -2683,7 +2695,7 @@ app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin
       dec.eligibilityStatus = (dec.nextEligibleGradingDate && todayStr >= dec.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
       
       // Next belt auto computation
-      dec.nextBelt = getNextBelt(dec.belt);
+      dec.nextBelt = getNextBelt(dec.belt, dec.art);
       
       return dec;
     });
@@ -2695,7 +2707,7 @@ app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin
 });
 
 // 2. Submit grading result (Pass/Fail)
-app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer', 'coordinator'), async (req, res) => {
   try {
     const { id } = req.params;
     const { role, branch, username } = req.user;
@@ -2713,8 +2725,8 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
       return res.status(404).json({ error: 'Student not found.' });
     }
 
-    // Scoped branch check for branch admins
-    if (role === 'branchadmin' && student.branch.toLowerCase().trim() !== branch.toLowerCase().trim()) {
+    // Scoped branch check for branch admins and trainers
+    if ((role === 'branchadmin' || role === 'trainer' || role === 'coordinator') && student.branch.toLowerCase().trim() !== branch.toLowerCase().trim()) {
       return res.status(403).json({ error: 'Unauthorized: cannot grade student in another branch.' });
     }
 
@@ -2722,7 +2734,7 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
     let beltAfter = beltBefore;
 
     if (result === 'Pass') {
-      const nextBelt = getNextBelt(beltBefore);
+      const nextBelt = getNextBelt(beltBefore, student.art);
       if (nextBelt !== 'None') {
         beltAfter = nextBelt;
         student.belt = nextBelt;
@@ -2751,7 +2763,7 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
     addLog('api', `Graded student ${decrypt(student.name)} (ID: ${student.id}) - Result: ${result}, Belt After: ${beltAfter}`);
 
     const returnedStudent = decryptStudent(student);
-    returnedStudent.nextBelt = getNextBelt(returnedStudent.belt);
+    returnedStudent.nextBelt = getNextBelt(returnedStudent.belt, returnedStudent.art);
     const todayStr = new Date().toISOString().split('T')[0];
     returnedStudent.eligibilityStatus = (returnedStudent.nextEligibleGradingDate && todayStr >= returnedStudent.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
 
@@ -2762,19 +2774,19 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
 });
 
 // 3. Edit grading details / info (manual override)
-app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer', 'coordinator'), async (req, res) => {
   try {
     const { id } = req.params;
     const { role, branch } = req.user;
-    const { joinDate, lastGradingDate, belt } = req.body;
+    const { joinDate, lastGradingDate, belt, nextEligibleGradingDate } = req.body;
 
     const student = await Student.findOne({ id: Number(id) });
     if (!student) {
       return res.status(404).json({ error: 'Student not found.' });
     }
 
-    // Scoped branch check for branch admins
-    if (role === 'branchadmin' && student.branch.toLowerCase().trim() !== branch.toLowerCase().trim()) {
+    // Scoped branch check for branch admins, trainers, coordinators
+    if (['branchadmin', 'trainer', 'coordinator'].includes(role) && student.branch.toLowerCase().trim() !== branch.toLowerCase().trim()) {
       return res.status(403).json({ error: 'Unauthorized: cannot edit student in another branch.' });
     }
 
@@ -2822,9 +2834,18 @@ app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('s
       modified = true;
     }
 
+    if (nextEligibleGradingDate !== undefined && nextEligibleGradingDate !== student.nextEligibleGradingDate) {
+      if (nextEligibleGradingDate && nextEligibleGradingDate !== 'N/A' && !/^\d{4}-\d{2}-\d{2}$/.test(nextEligibleGradingDate)) {
+        return res.status(400).json({ error: 'Valid next eligible grading date (YYYY-MM-DD) is required.' });
+      }
+      student.nextEligibleGradingDate = nextEligibleGradingDate;
+      modified = true;
+    }
+
     if (belt !== undefined && belt !== student.belt) {
-      if (!BELT_ORDER.includes(belt)) {
-        return res.status(400).json({ error: `Invalid belt level. Choose from: ${BELT_ORDER.join(', ')}` });
+      const allowedBelts = [...STANDARD_BELT_ORDER, ...PRO_BOXING_BELT_ORDER];
+      if (!allowedBelts.some(b => b.toLowerCase() === String(belt).toLowerCase().trim())) {
+        return res.status(400).json({ error: `Invalid grade level. Choose from: ${allowedBelts.join(', ')}` });
       }
       student.belt = belt;
       modified = true;
@@ -2836,7 +2857,7 @@ app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('s
     }
 
     const returnedStudent = decryptStudent(student);
-    returnedStudent.nextBelt = getNextBelt(returnedStudent.belt);
+    returnedStudent.nextBelt = getNextBelt(returnedStudent.belt, returnedStudent.art);
     const todayStr = new Date().toISOString().split('T')[0];
     returnedStudent.eligibilityStatus = (returnedStudent.nextEligibleGradingDate && todayStr >= returnedStudent.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
 
@@ -3077,7 +3098,8 @@ app.get('/api/notifications', authenticateSession, async (req, res) => {
         {
           $or: [
             { targetUser: 'all' },
-            { targetUser: new RegExp(`^${username}$`, 'i') }
+            { targetUser: new RegExp(`^${username}$`, 'i') },
+            { targetUser: new RegExp(`^${role}$`, 'i') }
           ]
         }
       ]
