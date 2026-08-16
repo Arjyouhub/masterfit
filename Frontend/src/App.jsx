@@ -137,24 +137,26 @@ const parseScheduleToDays = (schedule) => {
 
 const getCleanStudentName = (student) => {
   if (!student) return 'Student';
-  let rawName = student.studentName || student.name || '';
+  let rawName = student.studentName || student.name || student.fullName || student.student_name || '';
   if (!rawName || typeof rawName !== 'string') return `Student #${student.id || student.admissionNumber || ''}`;
   rawName = rawName.trim();
 
-  // If contains replacement character or corrupted bytes or hex hash
+  // If contains replacement character or corrupted bytes
   if (rawName.includes('') || /\uFFFD/.test(rawName) || rawName.includes('%r') || rawName.includes('')) {
     return `Student #${student.id || student.admissionNumber || ''}`;
   }
+  // If rawName is encrypted hex hash (32 hex chars : hex chars)
   if (rawName.includes(':') && rawName.split(':').length === 2 && /^[0-9a-fA-F]{32}:[0-9a-fA-F]+$/.test(rawName)) {
     return `Student #${student.id || student.admissionNumber || ''}`;
   }
 
-  const cleanAscii = rawName.replace(/[^a-zA-Z0-9\s._-]/g, '').trim();
-  if (rawName.length > 4 && cleanAscii.length < 2) {
+  // Strip invalid control characters while preserving Malayalam/Unicode characters
+  const cleanName = rawName.replace(/[\x00-\x1F\x7F]/g, '').trim();
+  if (!cleanName) {
     return `Student #${student.id || student.admissionNumber || ''}`;
   }
 
-  return rawName;
+  return cleanName;
 };
 
 const schedulesMatch = (s1, s2) => {

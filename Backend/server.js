@@ -256,11 +256,19 @@ const ENCRYPTION_ALGORITHM = 'aes-256-cbc';
 const ENCRYPTION_KEY = process.env.DB_ENCRYPTION_KEY || 'masterfit_db_encryption_key_32ch'; // Must be 32 bytes
 const IV_LENGTH = 16;
 
+function getKeyBuffer(keyStr) {
+  if (!keyStr) return null;
+  const buf = Buffer.alloc(32);
+  buf.write(String(keyStr), 'utf8');
+  return buf;
+}
+
 function encrypt(text) {
   if (!text) return text;
   const textStr = String(text);
   const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, Buffer.from(ENCRYPTION_KEY), iv);
+  const keyBuf = getKeyBuffer(ENCRYPTION_KEY);
+  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, keyBuf, iv);
   let encrypted = cipher.update(textStr, 'utf8', 'hex');
   encrypted += cipher.final('hex');
   return iv.toString('hex') + ':' + encrypted;
@@ -280,18 +288,19 @@ function decrypt(text) {
   const iv = Buffer.from(parts[0], 'hex');
   const encryptedText = Buffer.from(parts[1], 'hex');
 
-  const possibleKeys = Array.from(new Set([
+  const rawCandidateKeys = Array.from(new Set([
     process.env.DB_ENCRYPTION_KEY,
     'masterfit_db_encryption_key_32ch',
     'mf_enc_key_32_chars_long_2026_07',
     'masterfit_db_encryption_key_2026',
     'masterfit_encryption_key_32bytes',
     '12345678901234567890123456789012'
-  ])).filter(k => k && typeof k === 'string' && k.length === 32);
+  ])).filter(Boolean);
 
-  for (const key of possibleKeys) {
+  for (const rawKey of rawCandidateKeys) {
     try {
-      const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, Buffer.from(key), iv);
+      const keyBuf = getKeyBuffer(rawKey);
+      const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, keyBuf, iv);
       let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
       decrypted += decipher.final('utf8');
       if (decrypted) return decrypted;
@@ -323,6 +332,12 @@ function decryptStudent(student) {
   if (doc.parentPhone) doc.parentPhone = decrypt(doc.parentPhone);
   if (doc.dob) doc.dob = decrypt(doc.dob);
   if (doc.photo) doc.photo = decrypt(doc.photo);
+
+  // If doc.name is still an un-decrypted encrypted hex string, fallback doc.name to clean label
+  if (doc.name && typeof doc.name === 'string' && doc.name.includes(':') && doc.name.split(':').length === 2 && /^[0-9a-fA-F]{32}:[0-9a-fA-F]+$/.test(doc.name)) {
+    doc.name = `Student #${doc.id || doc.admissionNumber || ''}`;
+  }
+
   return doc;
 }
 
@@ -4420,6 +4435,7 @@ developerRouter.get('/users/:id/details', async (req, res) => {
     }).lean();
 
     if (student) {
+      student = decryptStudent(student);
       // Calculate attendance
       const attendance = await Attendance.find({ 'records.studentId': student.id }).lean();
       let present = 0;
@@ -5937,6 +5953,7 @@ app.get('/api/admins/:id/details', authenticateSession, authorizeRoles('superadm
     }).lean();
 
     if (student) {
+      student = decryptStudent(student);
       // Calculate attendance
       const attendance = await Attendance.find({ 'records.studentId': student.id }).lean();
       let present = 0;
