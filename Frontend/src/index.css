@@ -1,18 +1,45 @@
 :root {
+  /* Brand Primary & Accents (Preserved Existing Red & Gold) */
   --color-primary: #E50914;
-  /* Cinematic Red */
+  --color-primary-hover: #c10712;
+  --color-primary-glow: rgba(229, 9, 20, 0.4);
+  --color-primary-bg: rgba(229, 9, 20, 0.12);
   --color-secondary: #FFD700;
-  /* Gold */
+  --color-secondary-hover: #e6c200;
+  --color-secondary-glow: rgba(255, 215, 0, 0.35);
+
+  /* Deep Black & Glass Surfaces */
   --color-bg-dark: #050505;
-  /* Deep Black */
-  --color-surface-dark: rgba(20, 20, 20, 0.6);
-  /* Glass surface */
+  --color-surface-dark: rgba(18, 18, 22, 0.75);
+  --color-surface-card: rgba(24, 24, 30, 0.7);
+  --color-surface-card-hover: rgba(34, 34, 44, 0.85);
+  --color-surface-sidebar: rgba(12, 12, 16, 0.95);
+  --color-surface-header: rgba(10, 10, 14, 0.85);
+  --color-surface-input: rgba(14, 14, 18, 0.85);
+
+  /* Glass Borders & Shadows */
+  --glass-border: rgba(255, 255, 255, 0.09);
+  --glass-border-hover: rgba(255, 255, 255, 0.2);
+  --glass-border-red: rgba(229, 9, 20, 0.3);
+  --glass-border-gold: rgba(255, 215, 0, 0.3);
+  --glass-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.8), 0 0 20px rgba(229, 9, 20, 0.15);
+  --glass-shadow-gold: 0 10px 30px -10px rgba(0, 0, 0, 0.8), 0 0 20px rgba(255, 215, 0, 0.15);
+
+  /* Typography & Status */
   --color-text-light: #F5F5F5;
-  --color-text-muted: #B0B0B0;
+  --color-text-muted: #A0A0A0;
+  --color-text-dim: #707070;
   --font-main: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-heading: 'Outfit', 'Inter', sans-serif;
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+
+  --status-success: #10b981;
+  --status-success-bg: rgba(16, 185, 129, 0.15);
+  --status-warning: #f59e0b;
+  --status-warning-bg: rgba(245, 158, 11, 0.15);
+  --status-danger: #E50914;
+  --status-danger-bg: rgba(229, 9, 20, 0.15);
+  --status-info: #3b82f6;
+  --status-info-bg: rgba(59, 130, 246, 0.15);
 }
 
 body {
@@ -489,6 +516,9 @@ body.admin-body {
 }
 
 .header {
+  position: relative;
+  z-index: 10000;
+  overflow: visible !important;
   min-height: 70px;
   height: auto;
   padding: 10px 3rem;
@@ -524,6 +554,9 @@ body.admin-body {
 }
 
 .header-profile-section {
+  position: relative;
+  z-index: 10001;
+  overflow: visible !important;
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -871,6 +904,17 @@ input.form-control {
   font-size: 0.88rem;
   box-sizing: border-box;
   transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+textarea.form-control {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  height: auto !important;
+  min-height: 150px !important;
+  padding: 0.75rem 0.85rem !important;
+  line-height: 1.5 !important;
+  resize: vertical;
 }
 
 select.form-control,
@@ -1393,6 +1437,40 @@ select option {
     display: none !important;
     /* Hide profile in actions row on mobile to save space */
   }
+
+/* Responsive Notification Center Dropdown */
+.notifications-dropdown-menu {
+  position: absolute;
+  right: 0;
+  top: 50px;
+  width: 340px;
+  max-width: 90vw;
+  background: linear-gradient(145deg, rgba(22, 26, 40, 0.98) 0%, rgba(15, 17, 26, 0.98) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 16px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  z-index: 100000;
+  display: flex;
+  flex-direction: column;
+  max-height: 440px;
+  overflow: hidden;
+}
+
+@media (max-width: 600px) {
+  .notifications-dropdown-menu {
+    position: fixed !important;
+    top: 64px !important;
+    left: 12px !important;
+    right: 12px !important;
+    width: auto !important;
+    max-width: calc(100vw - 24px) !important;
+    margin: 0 auto !important;
+    z-index: 100000 !important;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9) !important;
+  }
+}
 
   .user-profile-mobile {
     display: flex;
@@ -2123,7 +2201,7 @@ select option {
 }
 
 .dev-sidebar-logo span {
-  color: #5e5ce6;
+  color: var(--color-primary);
 }
 
 .dev-mobile-logout-btn {
@@ -2144,7 +2222,7 @@ select option {
   display: flex;
   align-items: center;
   gap: 14px;
-  color: #8e8e93;
+  color: var(--color-text-muted);
   text-decoration: none;
   font-size: 0.9rem;
   font-weight: 500;
@@ -2156,12 +2234,12 @@ select option {
 .dev-nav-item:hover,
 .dev-nav-item.active {
   color: #fff;
-  background: linear-gradient(90deg, rgba(94, 92, 230, 0.12) 0%, transparent 100%);
-  border-left-color: #5e5ce6;
+  background: linear-gradient(90deg, rgba(229, 9, 20, 0.15) 0%, transparent 100%);
+  border-left-color: var(--color-primary);
 }
 
 .dev-nav-item.active .dev-nav-icon {
-  color: #5e5ce6;
+  color: var(--color-primary);
 }
 
 .dev-nav-icon {
@@ -2221,7 +2299,7 @@ select option {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #5e5ce6, #3634a7);
+  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2317,7 +2395,7 @@ select option {
 }
 
 .fill-purple {
-  background: linear-gradient(90deg, #5e5ce6, #bf5af2);
+  background: linear-gradient(90deg, var(--color-primary), var(--color-secondary));
 }
 
 .fill-blue {
@@ -2416,8 +2494,8 @@ select option {
 
 .dev-input:focus {
   outline: none;
-  border-color: #5e5ce6;
-  box-shadow: 0 0 8px rgba(94, 92, 230, 0.25);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 8px var(--color-primary-glow);
   background: rgba(0, 0, 0, 0.5);
 }
 
@@ -2441,12 +2519,12 @@ select option {
 }
 
 .dev-btn-primary {
-  background: #5e5ce6;
+  background: var(--color-primary);
   color: #fff;
 }
 
 .dev-btn-primary:hover:not(:disabled) {
-  background: #4b49c0;
+  background: var(--color-primary-hover);
 }
 
 .dev-btn-secondary {
@@ -2574,7 +2652,7 @@ select option {
 }
 
 .terminal-badge.info {
-  background: #5e5ce6;
+  background: var(--color-primary);
   color: #fff;
 }
 
@@ -2996,8 +3074,8 @@ select option {
   }
 
   .dev-nav-item.active {
-    border-bottom-color: #5e5ce6 !important;
-    background: rgba(94, 92, 230, 0.1) !important;
+    border-bottom-color: var(--color-primary) !important;
+    background: rgba(229, 9, 20, 0.15) !important;
   }
 
   .dev-sidebar-footer {
@@ -3250,8 +3328,8 @@ a {
   }
 
   .dev-nav-item.active {
-    border-bottom-color: #5e5ce6 !important;
-    background: rgba(94, 92, 230, 0.1) !important;
+    border-bottom-color: var(--color-primary) !important;
+    background: rgba(229, 9, 20, 0.15) !important;
   }
 
   .dev-sidebar-footer {
@@ -3934,13 +4012,53 @@ body::-webkit-scrollbar {
 /* Belt Distribution Bar */
 .belt-distribution-strip {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
   align-items: center;
-  padding: 1rem 1.25rem;
+  flex-wrap: nowrap;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
   background: rgba(18, 20, 28, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.belt-pill-list-desktop {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(229, 9, 20, 0.35) transparent;
+}
+
+.belt-pill-list-desktop::-webkit-scrollbar {
+  height: 4px;
+}
+
+.belt-pill-list-desktop::-webkit-scrollbar-thumb {
+  background: rgba(229, 9, 20, 0.35);
+  border-radius: 4px;
+}
+
+.belt-select-mobile-wrapper {
+  display: none;
+  flex: 1;
+  width: 100%;
+}
+
+.belt-select-mobile {
+  width: 100%;
+  height: 38px;
+  border-radius: 8px;
+  background: var(--color-surface-input);
+  color: var(--color-text-light);
+  border: 1px solid var(--glass-border);
+  padding: 0 10px;
+  font-size: 0.85rem;
 }
 
 .belt-pill-btn {
@@ -3955,6 +4073,8 @@ body::-webkit-scrollbar {
   transition: all 0.2s ease;
   color: #fff;
   font-size: 0.8rem;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .belt-pill-btn:hover, .belt-pill-btn.active {
@@ -3980,14 +4100,27 @@ body::-webkit-scrollbar {
   -webkit-overflow-scrolling: touch;
   gap: 0.5rem;
   align-items: center;
-  padding-bottom: 0.75rem;
+  padding-bottom: 0.65rem;
   margin-bottom: 1rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  scrollbar-width: none;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(229, 9, 20, 0.35) transparent;
 }
 
 .grading-quick-chips::-webkit-scrollbar {
-  display: none;
+  height: 4px;
+}
+
+.grading-quick-chips::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.grading-quick-chips::-webkit-scrollbar-thumb {
+  background: rgba(229, 9, 20, 0.35);
+  border-radius: 4px;
 }
 
 .quick-chip {
@@ -4132,14 +4265,28 @@ body::-webkit-scrollbar {
   .stat-card {
     padding: 0.85rem !important;
     border-radius: 12px !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  .stat-details {
+    min-width: 0 !important;
+    flex: 1 !important;
+    overflow: hidden !important;
   }
 
   .stat-card .stat-value {
     font-size: 1.35rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
   }
 
   .stat-card .stat-details h3 {
     font-size: 0.68rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
   }
 
   .stat-icon-wrapper {
@@ -4169,34 +4316,45 @@ body::-webkit-scrollbar {
     overflow-x: auto !important;
     flex-wrap: nowrap !important;
     -webkit-overflow-scrolling: touch !important;
-    padding-bottom: 0.5rem !important;
-    scrollbar-width: none !important;
+    padding-bottom: 0.65rem !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    scrollbar-width: thin !important;
+    scrollbar-color: rgba(229, 9, 20, 0.4) transparent !important;
   }
 
   .grading-quick-chips::-webkit-scrollbar {
-    display: none !important;
+    display: block !important;
+    height: 4px !important;
+  }
+
+  .grading-quick-chips::-webkit-scrollbar-thumb {
+    background: rgba(229, 9, 20, 0.4) !important;
+    border-radius: 4px !important;
   }
 
   .quick-chip {
     white-space: nowrap !important;
     flex-shrink: 0 !important;
-    padding: 0.35rem 0.75rem !important;
-    font-size: 0.75rem !important;
+    padding: 0.4rem 0.85rem !important;
+    font-size: 0.78rem !important;
   }
 
-  .belt-distribution-strip {
-    overflow-x: auto !important;
-    flex-wrap: nowrap !important;
-    -webkit-overflow-scrolling: touch !important;
-    scrollbar-width: none !important;
-  }
-
-  .belt-distribution-strip::-webkit-scrollbar {
+  .belt-pill-list-desktop {
     display: none !important;
   }
 
-  .belt-pill-btn {
-    flex-shrink: 0 !important;
+  .belt-select-mobile-wrapper {
+    display: block !important;
+  }
+
+  .belt-distribution-strip {
+    overflow-x: visible !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    padding: 0.65rem 0.85rem !important;
   }
 
   .grade-result-options-grid {
@@ -4252,17 +4410,49 @@ body::-webkit-scrollbar {
 
   .stat-card {
     padding: 0.7rem 0.55rem !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
   }
 
   .stat-card .stat-value {
     font-size: 1.15rem !important;
+    white-space: nowrap !important;
   }
 
   .stat-card .stat-details h3 {
     font-size: 0.65rem !important;
+    white-space: nowrap !important;
   }
 
   .content-area {
     padding: 0.5rem !important;
   }
+}
+
+/* Student Name Highlight & Search Matching Styles */
+.student-name-highlight {
+  color: #ffffff;
+  font-weight: 700;
+  font-family: var(--font-heading, 'Outfit', sans-serif);
+  font-size: 0.95rem;
+  letter-spacing: 0.3px;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.student-name-highlight:hover {
+  color: var(--color-secondary, #FFD700) !important;
+  text-shadow: 0 0 10px rgba(255, 215, 0, 0.4);
+}
+
+mark.search-highlight {
+  background: rgba(229, 9, 20, 0.4) !important;
+  color: #FFD700 !important;
+  font-weight: 800 !important;
+  padding: 1px 5px !important;
+  border-radius: 4px !important;
+  border: 1px solid rgba(255, 215, 0, 0.45) !important;
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.3) !important;
 }

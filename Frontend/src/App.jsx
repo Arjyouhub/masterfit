@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, CheckCircle, XCircle, MessageCircle, MessageSquare,
   Search, Phone, Trash2, ArrowRight, Activity, MapPin, TrendingUp, Award, Menu,
   Shield, Lock, Unlock, FileDown, FileUp, Database, Terminal, Cpu, HardDrive, Key, History,
-  Eye, EyeOff, Star
+  Eye, EyeOff, Star, Megaphone
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import './index.css';
@@ -202,6 +202,29 @@ window.fetch = function (url, options = {}) {
 
 
 const ART_OPTIONS = ['Karate', 'Kickboxing', 'Kung Fu', 'MMA', 'Muay Thai', 'Taekwondo', 'Yoga', 'Kalaripayattu'];
+
+const renderHighlightedName = (nameStr, queryStr) => {
+  const name = nameStr || '';
+  const query = (queryStr || '').trim();
+  if (!query) {
+    return <span className="student-name-highlight">{name}</span>;
+  }
+  const idx = name.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) {
+    return <span className="student-name-highlight">{name}</span>;
+  }
+  const before = name.substring(0, idx);
+  const match = name.substring(idx, idx + query.length);
+  const after = name.substring(idx + query.length);
+
+  return (
+    <span className="student-name-highlight">
+      {before}
+      <mark className="search-highlight">{match}</mark>
+      {after}
+    </span>
+  );
+};
 
 function App() {
   const navigate = useNavigate();
@@ -411,6 +434,7 @@ function App() {
   const [gradingFilterBatch, setGradingFilterBatch] = useState('All');
   const [gradingFilterBelt, setGradingFilterBelt] = useState('All');
   const [gradingFilterEligibility, setGradingFilterEligibility] = useState('All');
+  const [gradingFilterTrainerApproval, setGradingFilterTrainerApproval] = useState('All');
   const [gradingFilterResult, setGradingFilterResult] = useState('All');
   const [gradingFilterStartDate, setGradingFilterStartDate] = useState('');
   const [gradingFilterEndDate, setGradingFilterEndDate] = useState('');
@@ -419,10 +443,22 @@ function App() {
   const [gradingError, setGradingError] = useState('');
   const [gradingSuccess, setGradingSuccess] = useState('');
 
+  // Grading Date Announcement States
+  const [isGradingAnnouncementModalOpen, setIsGradingAnnouncementModalOpen] = useState(false);
+  const [gradingAnnouncementForm, setGradingAnnouncementForm] = useState({
+    gradingDate: new Date().toISOString().split('T')[0],
+    branch: 'all',
+    title: '📢 Upcoming Belt Grading Examination',
+    message: 'Please review and approve all eligible students for the upcoming belt grading exam.',
+    priority: 'high'
+  });
+  const [submittingGradingAnnouncement, setSubmittingGradingAnnouncement] = useState(false);
+
   // Modals for Grading
   const [isGradeModalOpen, setIsGradeModalOpen] = useState(false);
   const [selectedGradeStudent, setSelectedGradeStudent] = useState(null);
   const [gradeResult, setGradeResult] = useState('Pass');
+  const [gradeLetter, setGradeLetter] = useState('A');
   const [gradeDate, setGradeDate] = useState(new Date().toISOString().split('T')[0]);
 
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
@@ -3995,16 +4031,19 @@ function App() {
   }));
 
   const getBeltColorClass = (belt) => {
-    switch (belt.toLowerCase()) {
+    const b = String(belt || '').toLowerCase().trim();
+    switch (b) {
       case 'white': return 'badge-white';
-      case 'yellow': return 'badge-yellow';
-      case 'orange': return 'badge-orange';
-      case 'green': return 'badge-green';
-      case 'blue': return 'badge-blue';
-      case 'purple': return 'badge-purple';
+      case 'yellow': case 'level 1': return 'badge-yellow';
+      case 'orange': case 'level 2': return 'badge-orange';
+      case 'green': case 'level 3': return 'badge-green';
+      case 'blue': case 'level 4': return 'badge-blue';
+      case 'purple': case 'level 5': return 'badge-purple';
       case 'brown': return 'badge-brown';
-      case 'red': return 'badge-red';
-      case 'black': return 'badge-black';
+      case 'red': case 'coach c': return 'badge-purple';
+      case 'coach b': return 'badge-blue';
+      case 'coach a': return 'badge-gold';
+      case 'black': case 'pro level': return 'badge-black';
       default: return 'badge-white';
     }
   };
@@ -4551,24 +4590,24 @@ function App() {
         {/* Quick Stats Grid */}
         <div className="dev-grid">
           <div className="dev-card">
-            <div className="dev-card-title"><Users size={16} color="#5e5ce6" /> Total Users</div>
+            <div className="dev-card-title"><Users size={16} color="var(--color-primary)" /> Total Users</div>
             <div className="dev-stat-val">{users?.total || 0}</div>
             <div className="dev-stat-lbl">Registered Accounts</div>
           </div>
           <div className="dev-card">
-            <div className="dev-card-title"><Activity size={16} color="#30d158" /> Active Sessions</div>
+            <div className="dev-card-title"><Activity size={16} color="var(--status-success)" /> Active Sessions</div>
             <div className="dev-stat-val">{users?.sessions || 0}</div>
             <div className="dev-stat-lbl">{users?.active || 0} Online Users</div>
           </div>
           <div className="dev-card">
-            <div className="dev-card-title"><Database size={16} color="#bf5af2" /> Database Status</div>
-            <div className="dev-stat-val" style={{ color: database?.status === 'Connected' ? '#30d158' : '#ff453a' }}>
+            <div className="dev-card-title"><Database size={16} color="var(--color-secondary)" /> Database Status</div>
+            <div className="dev-stat-val" style={{ color: database?.status === 'Connected' ? 'var(--status-success)' : 'var(--status-danger)' }}>
               {database?.status || 'Unknown'}
             </div>
             <div className="dev-stat-lbl">{database?.studentsCount || 0} Students enrolled</div>
           </div>
           <div className="dev-card">
-            <div className="dev-card-title"><Cpu size={16} color="#0a84ff" /> Process Memory</div>
+            <div className="dev-card-title"><Cpu size={16} color="var(--color-secondary)" /> Process Memory</div>
             <div className="dev-stat-val">{system?.memoryUsage || 'N/A'}</div>
             <div className="dev-stat-lbl">Heap memory used</div>
           </div>
@@ -4579,7 +4618,7 @@ function App() {
           {/* Recent Audits */}
           <div className="dev-card">
             <div className="dev-card-header">
-              <h4 className="dev-card-title"><History size={16} color="#ff9f0a" /> Recent Operations & Audits</h4>
+              <h4 className="dev-card-title"><History size={16} color="var(--color-secondary)" /> Recent Operations & Audits</h4>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {recentActivity && recentActivity.length > 0 ? (
@@ -4604,7 +4643,7 @@ function App() {
           {/* Security alerts */}
           <div className="dev-card">
             <div className="dev-card-header">
-              <h4 className="dev-card-title"><AlertTriangle size={16} color="#ff453a" /> Intrusion alerts & Failed Logins</h4>
+              <h4 className="dev-card-title"><AlertTriangle size={16} color="var(--status-danger)" /> Intrusion alerts & Failed Logins</h4>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {securityAlerts && securityAlerts.length > 0 ? (
@@ -5105,7 +5144,7 @@ function App() {
                 const isCurrent = s.token === currentToken;
                 return (
                   <tr key={s._id} style={isCurrent ? { background: 'rgba(94, 92, 230, 0.05)' } : {}}>
-                    <td style={{ fontWeight: 600, color: isCurrent ? '#5e5ce6' : '#fff' }}>
+                    <td style={{ fontWeight: 600, color: isCurrent ? 'var(--color-primary)' : '#fff' }}>
                       {s.username} {isCurrent && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', opacity: 0.8 }}>(You)</span>}
                     </td>
                     <td>{parseClientDetails(s.userAgent, s.deviceName)}</td>
@@ -5755,7 +5794,7 @@ function App() {
             <div className="dev-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div className="dev-card-header">
                 <h4 className="dev-card-title">
-                  <Bell size={16} color="#5e5ce6" /> {editingNotificationId ? 'Edit Announcement' : 'Announcement Management'}
+                  <Bell size={16} color="var(--color-primary)" /> {editingNotificationId ? 'Edit Announcement' : 'Announcement Management'}
                 </h4>
                 {editingNotificationId && (
                   <button
@@ -6525,7 +6564,7 @@ function App() {
         <aside className="dev-sidebar">
           <div className="dev-sidebar-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
             <div className="dev-sidebar-logo">
-              <Shield size={20} color="#5e5ce6" /> <span>MASTER</span><span>FIT</span><span>•</span><span>DEV</span>
+              <Shield size={20} color="var(--color-primary)" /> <span>MASTER</span><span className="brand-accent">FIT</span><span>•</span><span>DEV</span>
             </div>
             <button
               className="dev-mobile-logout-btn"
@@ -6603,7 +6642,7 @@ function App() {
         {/* Developer Main Area */}
         <main className="dev-main">
           {isSystemUnderMaintenance && (
-            <div className="maintenance-alert-banner-static" style={{ margin: '1.25rem 1.5rem 0 1.5rem', background: 'linear-gradient(90deg, #5e5ce6, #bf5af2)', animation: 'none' }}>
+            <div className="maintenance-alert-banner-static" style={{ margin: '1.25rem 1.5rem 0 1.5rem', background: 'linear-gradient(90deg, var(--color-primary), #c10712)', animation: 'none' }}>
               <AlertTriangle size={18} className="pulse-icon" />
               <span>System Alert: Maintenance mode is active. Restricted to developers only.</span>
             </div>
@@ -7411,7 +7450,7 @@ function App() {
                                       gap: '4px'
                                     }}
                                   >
-                                    {student.studentName || student.name}
+                                    {renderHighlightedName(student.studentName || student.name, searchQuery)}
                                     {student.isPriority && (
                                       <Star size={13} fill="#FFD700" color="#FFD700" title="Priority Student" />
                                     )}
@@ -8243,10 +8282,18 @@ function App() {
 
   // Grading Module Actions and Handlers
   const getNextBelt = (currentBelt) => {
-    const beltList = ['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'];
-    const index = beltList.findIndex(b => b.toLowerCase() === String(currentBelt || '').toLowerCase().trim());
-    if (index === -1 || index === beltList.length - 1) return 'None';
-    return beltList[index + 1];
+    const belts = ['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'];
+    const levels = ['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'];
+
+    const curr = String(currentBelt || '').toLowerCase().trim();
+
+    const beltIdx = belts.findIndex(b => b.toLowerCase() === curr);
+    if (beltIdx !== -1) return beltIdx < belts.length - 1 ? belts[beltIdx + 1] : 'None';
+
+    const levelIdx = levels.findIndex(l => l.toLowerCase() === curr);
+    if (levelIdx !== -1) return levelIdx < levels.length - 1 ? levels[levelIdx + 1] : 'None';
+
+    return 'None';
   };
 
   // Helper for batch options in grading view based on logged-in user role
@@ -8269,12 +8316,16 @@ function App() {
   };
 
   const getFilteredGradingStudents = () => {
+    if (!Array.isArray(gradingStudents)) return [];
     const isTrainer = userRole === 'trainer';
     const isBranchAdm = userRole === 'branchadmin';
     const activeBranchLower = (userBranch || '').toLowerCase().trim();
     const allowedTrainerBatches = (userBatch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+    const safeBatchOptions = Array.isArray(batchOptions) ? batchOptions : [];
 
     return gradingStudents.filter(student => {
+      if (!student) return false;
+
       // Role-based client protection: restrict to trainer's branch & batch
       if (isTrainer) {
         if (activeBranchLower && (student.branch || '').toLowerCase().trim() !== activeBranchLower) {
@@ -8284,7 +8335,7 @@ function App() {
           const studentBatchLower = (student.batch || '').toLowerCase().trim();
           if (!allowedTrainerBatches.includes(studentBatchLower)) {
             const batchNameMatch = allowedTrainerBatches.some(b => {
-              const opt = batchOptions.find(o => (o.id || o.code || '').toLowerCase() === b);
+              const opt = safeBatchOptions.find(o => o && (o.id || o.code || '').toLowerCase() === b);
               return (opt && opt.name && opt.name.toLowerCase().trim() === studentBatchLower) ||
                      (opt && schedulesMatch(opt.schedule, student.schedule));
             });
@@ -8304,8 +8355,9 @@ function App() {
       }
 
       const query = (searchQuery || '').toLowerCase().trim();
+      const studentNameStr = String(student.name || student.studentName || '').toLowerCase();
       const matchesSearch = !query ||
-        student.name.toLowerCase().includes(query) ||
+        studentNameStr.includes(query) ||
         String(student.id || '').includes(query) ||
         String(student.admissionNumber || '').includes(query);
 
@@ -8315,7 +8367,7 @@ function App() {
         const filterBatchLower = gradingFilterBatch.toLowerCase().trim();
         matchesBatch = studentBatchLower === filterBatchLower;
         if (!matchesBatch) {
-          const opt = batchOptions.find(o => (o.id || o.code || '').toLowerCase() === filterBatchLower);
+          const opt = safeBatchOptions.find(o => o && (o.id || o.code || '').toLowerCase() === filterBatchLower);
           if (opt) {
             matchesBatch = (opt.name && opt.name.toLowerCase().trim() === studentBatchLower) ||
                            schedulesMatch(opt.schedule, student.schedule);
@@ -8342,8 +8394,132 @@ function App() {
         }
       }
 
+      // For Admin roles (Super Admin, Branch Admin, Developer): ONLY show trainer-approved students!
+      if (!isTrainer && !student.trainerApprovedForGrading) {
+        return false;
+      }
+
       return matchesSearch && matchesBatch && matchesBelt && matchesEligibility && matchesResult;
     });
+  };
+
+  const handleToggleTrainerApproval = (student, approvedStatus) => {
+    setGradingActionLoading(true);
+    setGradingError('');
+    setGradingSuccess('');
+
+    fetch(`${API_BASE_URL}/students/${student.id}/trainer-approval`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: approvedStatus })
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to update trainer approval status');
+        setGradingStudents(prev => prev.map(s => s.id === data.id ? data : s));
+        setGradingSuccess(`Updated trainer approval status for ${data.name}.`);
+        setTimeout(() => setGradingSuccess(''), 3500);
+      })
+      .catch(err => {
+        console.error(err);
+        setGradingError(err.message);
+      })
+      .finally(() => setGradingActionLoading(false));
+  };
+
+  const handleToggleEligibility = (student) => {
+    setGradingActionLoading(true);
+    setGradingError('');
+    setGradingSuccess('');
+
+    fetch(`${API_BASE_URL}/students/${student.id}/toggle-eligibility`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' }
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to toggle eligibility status');
+        setGradingStudents(prev => prev.map(s => s.id === data.id ? data : s));
+        setGradingSuccess(`Updated eligibility for ${data.name} to ${data.eligibilityStatus}.`);
+        setTimeout(() => setGradingSuccess(''), 3500);
+      })
+      .catch(err => {
+        console.error(err);
+        setGradingError(err.message);
+      })
+      .finally(() => setGradingActionLoading(false));
+  };
+
+  const handleRevokeGradingHistory = (student, historyIdOrIndex) => {
+    if (!window.confirm(`Are you sure you want to revoke this grading attempt for ${student.name}? Student belt rank will revert.`)) {
+      return;
+    }
+    setGradingActionLoading(true);
+    setGradingError('');
+    setGradingSuccess('');
+
+    fetch(`${API_BASE_URL}/students/${student.id}/grading-history/${historyIdOrIndex}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' }
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to revoke grading attempt');
+        setGradingStudents(prev => prev.map(s => s.id === data.id ? data : s));
+        setSelectedHistoryStudent(data);
+        setGradingSuccess(`Revoked grading entry. Student belt updated to ${data.belt}.`);
+        setTimeout(() => setGradingSuccess(''), 3500);
+      })
+      .catch(err => {
+        console.error(err);
+        setGradingError(err.message);
+      })
+      .finally(() => setGradingActionLoading(false));
+  };
+
+  const handlePublishGradingAnnouncement = (e) => {
+    e.preventDefault();
+    if (!gradingAnnouncementForm.title.trim()) {
+      alert('Please enter an announcement title.');
+      return;
+    }
+    setSubmittingGradingAnnouncement(true);
+    setGradingError('');
+    setGradingSuccess('');
+    const token = getSessionToken();
+
+    const datePrefix = gradingAnnouncementForm.gradingDate ? `📅 Date: ${gradingAnnouncementForm.gradingDate}\n\n` : '';
+    const payload = {
+      title: gradingAnnouncementForm.title.trim(),
+      message: `${datePrefix}${gradingAnnouncementForm.message.trim()}`,
+      type: 'grading',
+      priority: gradingAnnouncementForm.priority || 'high',
+      branch: gradingAnnouncementForm.branch || 'all',
+      targetUser: 'all'
+    };
+
+    fetch(`${API_BASE_URL}/notifications`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(payload)
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to publish announcement');
+        setGlobalSuccess(`Announcement "${data.title || 'Notification'}" published successfully! All Users notified.`);
+        setIsGradingAnnouncementModalOpen(false);
+        loadNotifications();
+        reloadAllAppData();
+      })
+      .catch(err => {
+        console.error('Error publishing announcement:', err);
+        setGradingError(err.message);
+        alert(`Error publishing announcement: ${err.message}`);
+      })
+      .finally(() => setSubmittingGradingAnnouncement(false));
   };
 
   const handleSubmitGrade = (e) => {
@@ -8356,7 +8532,11 @@ function App() {
     fetch(`${API_BASE_URL}/students/${selectedGradeStudent.id}/grade`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ result: gradeResult, gradingDate: gradeDate })
+      body: JSON.stringify({
+        result: gradeResult,
+        gradeLetter: gradeResult === 'Pass' ? gradeLetter : '',
+        gradingDate: gradeDate
+      })
     })
       .then(async res => {
         const data = await res.json();
@@ -8400,11 +8580,164 @@ function App() {
       .finally(() => setGradingActionLoading(false));
   };
 
+  const renderAnnouncements = () => {
+    const isCanPublish = userRole === 'developer' || userRole === 'superadmin' || userRole === 'admin' || userRole === 'branchadmin';
+    const activeList = notifications && notifications.length > 0 ? notifications : devNotifications;
+
+    return (
+      <div className="announcements-view-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        {/* Banner Header */}
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(229, 9, 20, 0.15) 0%, rgba(255, 215, 0, 0.08) 100%)',
+          border: '1px solid rgba(255, 215, 0, 0.3)',
+          borderRadius: '16px',
+          padding: '1.25rem 1.5rem',
+          display: 'flex',
+          justify: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '1rem'
+        }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Megaphone size={24} color="#FFD700" />
+              <h2 style={{ margin: 0, color: '#fff', fontSize: '1.3rem', fontWeight: 700 }}>
+                Announcements & Notifications
+              </h2>
+            </div>
+            <p style={{ margin: '4px 0 0 0', color: '#cbd5e1', fontSize: '0.85rem' }}>
+              View and publish broadcast alerts, belt grading exam dates, and system updates for all branches.
+            </p>
+          </div>
+
+          {isCanPublish && (
+            <button
+              className="btn-primary"
+              onClick={() => setIsGradingAnnouncementModalOpen(true)}
+              style={{
+                background: 'linear-gradient(135deg, #E50914, #c10712)',
+                borderRadius: '10px',
+                padding: '0.6rem 1.2rem',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 15px rgba(229, 9, 20, 0.4)'
+              }}
+            >
+              <Megaphone size={16} /> Post New Announcement
+            </button>
+          )}
+        </div>
+
+        {/* Announcements List */}
+        <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '16px', padding: '1.25rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <h3 style={{ margin: 0, color: '#fff', fontSize: '1.05rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Bell size={18} color="var(--color-primary)" />
+              Active Announcements ({activeList.length})
+            </h3>
+            <button
+              className="btn-secondary"
+              onClick={loadNotifications}
+              style={{ fontSize: '0.8rem', padding: '0.4rem 0.85rem', borderRadius: '8px' }}
+            >
+              Refresh List
+            </button>
+          </div>
+
+          {activeList.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '3.5rem 1rem', color: 'var(--color-text-muted)' }}>
+              <Megaphone size={36} style={{ opacity: 0.4, marginBottom: '0.5rem' }} />
+              <div style={{ fontSize: '1rem', color: '#fff', fontWeight: 600 }}>No Active Announcements</div>
+              <p style={{ fontSize: '0.8rem', marginTop: '4px' }}>There are currently no active system or branch announcements.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1rem' }}>
+              {activeList.map(n => {
+                const isRead = n.readBy && n.readBy.includes((loggedInUser || '').toLowerCase().trim());
+                const isGrading = n.type === 'grading' || (n.title && n.title.toLowerCase().includes('grading'));
+
+                return (
+                  <div
+                    key={n._id || n.id}
+                    style={{
+                      background: isGrading
+                        ? 'linear-gradient(145deg, rgba(30, 20, 25, 0.8) 0%, rgba(18, 20, 29, 0.9) 100%)'
+                        : 'linear-gradient(145deg, rgba(20, 24, 38, 0.7) 0%, rgba(15, 17, 26, 0.8) 100%)',
+                      border: isGrading
+                        ? '1px solid rgba(255, 215, 0, 0.35)'
+                        : '1px solid rgba(255, 255, 255, 0.1)',
+                      borderRadius: '14px',
+                      padding: '1.25rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.75rem',
+                      boxShadow: '0 4px 20px rgba(0,0,0,0.35)',
+                      position: 'relative'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        {isGrading ? (
+                          <span className="badge badge-gold" style={{ fontSize: '0.7rem', padding: '2px 8px' }}>
+                            🏆 Belt Grading
+                          </span>
+                        ) : (
+                          <span className="badge badge-blue" style={{ fontSize: '0.7rem', padding: '2px 8px' }}>
+                            📢 Announcement
+                          </span>
+                        )}
+                        <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: '0.7rem', padding: '2px 8px' }}>
+                          Branch: {n.branch || 'All'}
+                        </span>
+                      </div>
+
+                      {isCanPublish && n._id && (
+                        <button
+                          className="btn-icon"
+                          title="Delete Announcement"
+                          style={{ color: '#ff453a', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', width: '28px', height: '28px', borderRadius: '6px', cursor: 'pointer' }}
+                          onClick={() => handleDeleteNotification(n._id)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+
+                    <h4 style={{ margin: 0, color: '#fff', fontSize: '1rem', fontWeight: 700, lineHeight: '1.3' }}>
+                      {n.title}
+                    </h4>
+
+                    <p style={{ margin: 0, fontSize: '0.83rem', color: '#cbd5e1', lineHeight: '1.45', whiteSpace: 'pre-wrap', flex: 1 }}>
+                      {n.message}
+                    </p>
+
+                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '0.65rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.73rem', color: 'var(--color-text-muted)' }}>
+                      <span>Posted by {n.sender || 'Admin'} • {new Date(n.createdAt || Date.now()).toLocaleDateString()}</span>
+                      {isRead ? (
+                        <span style={{ color: '#4ade80', fontWeight: 600 }}>✓ Read</span>
+                      ) : (
+                        <span className="badge badge-red" style={{ fontSize: '0.65rem', padding: '1px 6px' }}>NEW</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderGrading = () => {
-    const isSuper = isAdminUser(loggedInUser);
-    const isTrainer = userRole === 'trainer';
-    const isBranchAdm = userRole === 'branchadmin';
-    const filtered = getFilteredGradingStudents();
+    try {
+      const isSuper = isAdminUser(loggedInUser);
+      const isTrainer = userRole === 'trainer';
+      const isBranchAdm = userRole === 'branchadmin';
+      const filtered = getFilteredGradingStudents();
 
     // Stats calculations
     const totalCount = filtered.length;
@@ -8448,15 +8781,17 @@ function App() {
             )}
           </div>
 
-          <button
-            className="btn-secondary"
-            onClick={fetchGradingStudents}
-            disabled={loadingGrading}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '0.45rem 0.95rem', fontSize: '0.8rem', borderRadius: '8px' }}
-          >
-            <History size={14} className={loadingGrading ? 'spin-icon' : ''} />
-            {loadingGrading ? 'Refreshing...' : 'Refresh'}
-          </button>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button
+              className="btn-secondary"
+              onClick={fetchGradingStudents}
+              disabled={loadingGrading}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '0.45rem 0.95rem', fontSize: '0.8rem', borderRadius: '8px' }}
+            >
+              <History size={14} className={loadingGrading ? 'spin-icon' : ''} />
+              {loadingGrading ? 'Refreshing...' : 'Refresh'}
+            </button>
+          </div>
         </div>
 
         {/* Dashboard Stats Cards */}
@@ -8504,27 +8839,46 @@ function App() {
 
         {/* Belt Distribution Bar */}
         <div className="belt-distribution-strip" style={{ padding: '0.75rem 1rem' }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, marginRight: '4px' }}>
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, marginRight: '6px', whiteSpace: 'nowrap', flexShrink: 0, display: 'inline-block' }}>
             Belts:
           </span>
-          {Object.entries(beltCounts).map(([beltName, count]) => {
-            const isSelected = gradingFilterBelt === beltName;
-            return (
-              <button
-                key={beltName}
-                type="button"
-                className={`belt-pill-btn ${isSelected ? 'active' : ''}`}
-                onClick={() => setGradingFilterBelt(isSelected ? 'All' : beltName)}
-                title={`Filter by ${beltName} belt`}
-                style={{ padding: '0.25rem 0.65rem' }}
-              >
-                <span className={`badge ${getBeltColorClass(beltName)}`} style={{ padding: '2px 6px', fontSize: '0.7rem', borderRadius: '4px', textTransform: 'uppercase' }}>
-                  {beltName}
-                </span>
-                <span className="belt-count" style={{ fontSize: '0.7rem' }}>{count}</span>
-              </button>
-            );
-          })}
+          {/* Desktop/Tablet Horizontal Button List */}
+          <div className="belt-pill-list-desktop">
+            {Object.entries(beltCounts).map(([beltName, count]) => {
+              const isSelected = gradingFilterBelt === beltName;
+              return (
+                <button
+                  key={beltName}
+                  type="button"
+                  className={`belt-pill-btn ${isSelected ? 'active' : ''}`}
+                  onClick={() => setGradingFilterBelt(isSelected ? 'All' : beltName)}
+                  title={`Filter by ${beltName} belt`}
+                  style={{ padding: '0.25rem 0.65rem' }}
+                >
+                  <span className={`badge ${getBeltColorClass(beltName)}`} style={{ padding: '2px 6px', fontSize: '0.7rem', borderRadius: '4px', textTransform: 'uppercase' }}>
+                    {beltName}
+                  </span>
+                  <span className="belt-count" style={{ fontSize: '0.7rem' }}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Mobile Select Dropdown (No Side-Scrolling) */}
+          <div className="belt-select-mobile-wrapper">
+            <select
+              className="form-control belt-select-mobile"
+              value={gradingFilterBelt}
+              onChange={(e) => setGradingFilterBelt(e.target.value)}
+            >
+              <option value="All">All Belts ({totalCount})</option>
+              {Object.entries(beltCounts).map(([beltName, count]) => (
+                <option key={beltName} value={beltName}>
+                  {beltName} Belt ({count})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Streamlined Clean Filters Panel */}
@@ -8593,22 +8947,20 @@ function App() {
               </select>
             </div>
 
-            {/* Belt Rank */}
-            <div style={{ minWidth: '120px', flex: '1 1 120px' }}>
+            {/* Belt Rank / Level */}
+            <div style={{ minWidth: '150px', flex: '1 1 150px' }}>
               <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }} value={gradingFilterBelt} onChange={(e) => setGradingFilterBelt(e.target.value)}>
-                <option value="All">All Belts</option>
-                {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
-                  <option key={b} value={b}>{b}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Eligibility */}
-            <div style={{ minWidth: '130px', flex: '1 1 130px' }}>
-              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }} value={gradingFilterEligibility} onChange={(e) => setGradingFilterEligibility(e.target.value)}>
-                <option value="All">All Eligibility</option>
-                <option value="Eligible">Eligible</option>
-                <option value="Not Eligible">Not Eligible</option>
+                <option value="All">All Belts & Levels</option>
+                <optgroup label="🥋 Traditional Belts">
+                  {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
+                    <option key={b} value={b}>{b} Belt</option>
+                  ))}
+                </optgroup>
+                <optgroup label="🥊 Kickboxing / Boxing Levels">
+                  {['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </optgroup>
               </select>
             </div>
 
@@ -8644,15 +8996,14 @@ function App() {
                   <tr>
                     <th>Student</th>
                     <th>Batch</th>
-                    <th>Present Belt</th>
-                    <th>Eligibility</th>
+                    <th>Present Belt / Level</th>
+                    {isTrainer && <th>Trainer Status</th>}
                     <th style={{ textAlign: 'center' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map(student => {
                     const initials = (student.name || 'S').split(' ').map(n => n[0]).slice(0, 2).join('');
-                    const isEligible = student.eligibilityStatus === 'Eligible';
 
                     return (
                       <tr key={student.id}>
@@ -8660,7 +9011,7 @@ function App() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <div className="student-avatar-badge">{initials}</div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                              <span>{student.name}</span>
+                              {renderHighlightedName(student.name, searchQuery)}
                               {student.isPriority && (
                                 <Star size={13} fill="#FFD700" color="#FFD700" title="Priority Student" />
                               )}
@@ -8672,21 +9023,51 @@ function App() {
                             {getBatchNameFromCode(student.batch, student.branch)}
                           </span>
                         </td>
-                        <td data-label="Present Belt">
+                        <td data-label="Present Belt / Level">
                           <span className={`badge ${getBeltColorClass(student.belt)}`} style={{ padding: '4px 10px', fontSize: '0.75rem', borderRadius: '6px', fontWeight: 600 }}>
                             {student.belt}
                           </span>
                         </td>
-                        <td data-label="Eligibility">
-                          <span className={isEligible ? 'badge-outline-green' : 'badge-outline-red'} style={{ fontSize: '0.75rem', padding: '3px 10px', borderRadius: '12px' }}>
-                            {student.eligibilityStatus || 'Not Eligible'}
-                          </span>
-                        </td>
-                        <td data-label="Actions">
-                          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', alignItems: 'center' }}>
+                        {isTrainer && (
+                          <td data-label="Trainer Status">
+                            {student.trainerApprovedForGrading ? (
+                              <span className="badge badge-green" style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '6px' }}>
+                                ✓ Approved for Test
+                              </span>
+                            ) : (
+                              <span className="badge badge-gray" style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '6px' }}>
+                                Pending Approval
+                              </span>
+                            )}
+                          </td>
+                        )}
+                        <td data-label="Actions" style={{ whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'inline-flex', justifyContent: 'center', gap: '6px', alignItems: 'center', flexWrap: 'nowrap' }}>
+                            {isTrainer && (
+                              <button
+                                className="action-btn-pill"
+                                style={{
+                                  padding: '5px 12px',
+                                  fontSize: '0.75rem',
+                                  borderRadius: '8px',
+                                  fontWeight: 600,
+                                  border: '1px solid transparent',
+                                  background: student.trainerApprovedForGrading ? 'rgba(239, 68, 68, 0.15)' : 'var(--status-success)',
+                                  color: student.trainerApprovedForGrading ? '#ef4444' : '#fff',
+                                  borderColor: student.trainerApprovedForGrading ? 'rgba(239, 68, 68, 0.3)' : 'transparent',
+                                  cursor: 'pointer',
+                                  whiteSpace: 'nowrap'
+                                }}
+                                onClick={() => handleToggleTrainerApproval(student, !student.trainerApprovedForGrading)}
+                                disabled={gradingActionLoading}
+                              >
+                                {student.trainerApprovedForGrading ? 'Revoke Test Approval' : '✓ Approve for Test'}
+                              </button>
+                            )}
+
                             <button
                               className="btn-secondary action-btn-pill"
-                              style={{ padding: '5px 12px', fontSize: '0.75rem', borderRadius: '8px' }}
+                              style={{ padding: '5px 10px', fontSize: '0.75rem', borderRadius: '8px', whiteSpace: 'nowrap' }}
                               onClick={() => {
                                 setSelectedHistoryStudent(student);
                                 setIsHistoryModalOpen(true);
@@ -8695,29 +9076,32 @@ function App() {
                               History
                             </button>
 
-                            <button
-                              className="btn-primary action-btn-pill"
-                              style={{ background: 'var(--color-accent-primary, #e50914)', padding: '5px 14px', fontSize: '0.75rem', borderRadius: '8px', fontWeight: 600 }}
-                              onClick={() => {
-                                setSelectedGradeStudent(student);
-                                setGradeResult('Pass');
-                                setGradeDate(new Date().toISOString().split('T')[0]);
-                                setIsGradeModalOpen(true);
-                              }}
-                            >
-                              Grade
-                            </button>
+                            {(!isTrainer || student.trainerApprovedForGrading) && (
+                              <button
+                                className="btn-primary action-btn-pill"
+                                style={{ background: 'var(--color-primary)', padding: '5px 12px', fontSize: '0.75rem', borderRadius: '8px', fontWeight: 600, whiteSpace: 'nowrap' }}
+                                onClick={() => {
+                                  setSelectedGradeStudent(student);
+                                  setGradeResult('Pass');
+                                  setGradeDate(new Date().toISOString().split('T')[0]);
+                                  setIsGradeModalOpen(true);
+                                }}
+                              >
+                                Grade
+                              </button>
+                            )}
 
                             <button
                               className="btn-icon"
-                              title="Edit Grading Record Override"
-                              style={{ color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.25)', width: '30px', height: '30px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                              title="Edit Student Record / Belt"
+                              style={{ color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.25)', width: '30px', height: '30px', borderRadius: '8px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
                               onClick={() => {
                                 setSelectedEditGradingStudent(student);
                                 setEditGradingForm({
                                   joinDate: student.joinDate,
                                   lastGradingDate: student.lastGradingDate || 'N/A',
-                                  belt: student.belt
+                                  belt: student.belt,
+                                  eligibilityOverride: student.eligibilityOverride || ''
                                 });
                                 setIsEditGradingModalOpen(true);
                               }}
@@ -8748,7 +9132,7 @@ function App() {
         {/* Modal: View Grading History */}
         {isHistoryModalOpen && selectedHistoryStudent && (
           <div className="modal-overlay" style={{ zIndex: 1000 }}>
-            <div className="modal-content" style={{ maxWidth: '650px', background: 'var(--color-bg-surface, #12141d)', padding: '1.75rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <div className="modal-content" style={{ maxWidth: '840px', width: '92%', background: 'var(--color-bg-surface, #12141d)', padding: '1.75rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
               <div className="panel-header" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
                 <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.1rem', margin: 0 }}>
                   <Award size={20} style={{ color: '#38bdf8' }} />
@@ -8766,44 +9150,50 @@ function App() {
                 </button>
               </div>
 
-              <div style={{ background: 'rgba(255,255,255,0.03)', padding: '0.85rem 1rem', borderRadius: '10px', marginBottom: '1.25rem', display: 'flex', flexWrap: 'wrap', gap: '15px', fontSize: '0.85rem', color: 'var(--color-text-main)' }}>
+              <div style={{ background: 'rgba(255,255,255,0.03)', padding: '0.85rem 1rem', borderRadius: '10px', marginBottom: '1.25rem', display: 'flex', flexWrap: 'wrap', gap: '15px', fontSize: '0.85rem', color: 'var(--color-text-main)', alignItems: 'center' }}>
                 <div>Branch: <strong style={{ color: '#fff' }}>{selectedHistoryStudent.branch}</strong></div>
                 <div>Batch: <strong style={{ color: '#fff' }}>{getBatchNameFromCode(selectedHistoryStudent.batch, selectedHistoryStudent.branch)}</strong></div>
-                <div>Current Belt: <span className={`badge ${getBeltColorClass(selectedHistoryStudent.belt)}`} style={{ padding: '2px 8px', fontSize: '0.75rem' }}>{selectedHistoryStudent.belt}</span></div>
+                <div>Current Belt: <span className={`badge ${getBeltColorClass(selectedHistoryStudent.belt)}`} style={{ padding: '4px 10px', fontSize: '0.75rem', fontWeight: 700 }}>{selectedHistoryStudent.belt}</span></div>
               </div>
 
               {selectedHistoryStudent.gradingHistory && selectedHistoryStudent.gradingHistory.length > 0 ? (
-                <div className="table-responsive" style={{ maxHeight: '350px', overflowY: 'auto' }}>
-                  <table className="attendance-table" style={{ fontSize: '0.85rem' }}>
+                <div className="table-responsive" style={{ maxHeight: '380px', overflowY: 'auto', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <table className="attendance-table" style={{ fontSize: '0.85rem', width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Belt Before</th>
-                        <th>Result</th>
-                        <th>Belt After</th>
-                        <th>Examiner</th>
-                        <th>Recorded At</th>
+                      <tr style={{ background: 'rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                        <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Date</th>
+                        <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Belt Before</th>
+                        <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Result</th>
+                        <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Belt After</th>
+                        <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Examiner</th>
+                        <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Recorded At</th>
                       </tr>
                     </thead>
                     <tbody>
                       {[...selectedHistoryStudent.gradingHistory].reverse().map((attempt, index) => (
-                        <tr key={index}>
-                          <td data-label="Date" style={{ fontWeight: 600 }}>{attempt.gradingDate}</td>
-                          <td data-label="Belt Before">
-                            <span className={`badge ${getBeltColorClass(attempt.beltBefore)}`} style={{ padding: '2px 6px', fontSize: '0.75rem' }}>{attempt.beltBefore}</span>
+                        <tr key={attempt._id || index} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                          <td data-label="Date" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', fontWeight: 600, color: '#fff' }}>
+                            {attempt.gradingDate}
                           </td>
-                          <td data-label="Result">
+                          <td data-label="Belt Before" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                            <span className={`badge ${getBeltColorClass(attempt.beltBefore)}`} style={{ padding: '4px 10px', fontSize: '0.75rem', fontWeight: 600 }}>{attempt.beltBefore}</span>
+                          </td>
+                          <td data-label="Result" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center' }}>
                             {attempt.result === 'Pass' ? (
-                              <span className="badge badge-green" style={{ background: 'rgba(76, 175, 80, 0.15)', color: '#4CAF50', border: '1px solid rgba(76, 175, 80, 0.3)', padding: '2px 8px', fontSize: '0.75rem' }}>Pass</span>
+                              <span className="badge badge-green" style={{ background: 'rgba(76, 175, 80, 0.15)', color: '#4CAF50', border: '1px solid rgba(76, 175, 80, 0.3)', padding: '4px 10px', fontSize: '0.75rem', fontWeight: 600 }}>
+                                Pass ({attempt.gradeLetter ? `Grade ${attempt.gradeLetter}` : 'Grade A'})
+                              </span>
                             ) : (
-                              <span className="badge badge-red" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#ff453a', border: '1px solid rgba(229, 9, 20, 0.3)', padding: '2px 8px', fontSize: '0.75rem' }}>Fail</span>
+                              <span className="badge badge-red" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#ff453a', border: '1px solid rgba(229, 9, 20, 0.3)', padding: '4px 10px', fontSize: '0.75rem', fontWeight: 600 }}>Fail</span>
                             )}
                           </td>
-                          <td data-label="Belt After">
-                            <span className={`badge ${getBeltColorClass(attempt.beltAfter)}`} style={{ padding: '2px 6px', fontSize: '0.75rem' }}>{attempt.beltAfter}</span>
+                          <td data-label="Belt After" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                            <span className={`badge ${getBeltColorClass(attempt.beltAfter)}`} style={{ padding: '4px 10px', fontSize: '0.75rem', fontWeight: 600 }}>{attempt.beltAfter}</span>
                           </td>
-                          <td data-label="Examiner" style={{ color: '#ccc' }}>{attempt.updatedBy}</td>
-                          <td data-label="Recorded At" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                          <td data-label="Examiner" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#fff', fontWeight: 500 }}>
+                            {attempt.updatedBy}
+                          </td>
+                          <td data-label="Recorded At" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
                             {new Date(attempt.createdAt || attempt.date).toLocaleString()}
                           </td>
                         </tr>
@@ -8921,6 +9311,46 @@ function App() {
                   </div>
                 </div>
 
+                {gradeResult === 'Pass' && (
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '8px' }}>
+                      Awarded Grade Level *
+                    </label>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                      {[
+                        { letter: 'A', label: 'Grade A', desc: 'Outstanding', color: '#FFD700', bg: 'rgba(255, 215, 0, 0.15)' },
+                        { letter: 'B', label: 'Grade B', desc: 'Merit / Good', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)' },
+                        { letter: 'C', label: 'Grade C', desc: 'Satisfactory', color: '#4ade80', bg: 'rgba(74, 222, 128, 0.15)' }
+                      ].map(g => {
+                        const isSelected = gradeLetter === g.letter;
+                        return (
+                          <div
+                            key={g.letter}
+                            style={{
+                              padding: '0.75rem 0.5rem',
+                              borderRadius: '10px',
+                              border: isSelected ? `2px solid ${g.color}` : '1px solid rgba(255, 255, 255, 0.1)',
+                              background: isSelected ? g.bg : 'rgba(255, 255, 255, 0.03)',
+                              textAlign: 'center',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease',
+                              boxShadow: isSelected ? `0 0 12px ${g.bg}` : 'none'
+                            }}
+                            onClick={() => setGradeLetter(g.letter)}
+                          >
+                            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: g.color, fontFamily: 'Outfit, sans-serif' }}>
+                              {g.label}
+                            </div>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                              {g.desc}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                   <button
                     type="button"
@@ -8979,15 +9409,12 @@ function App() {
                     value={editGradingForm.joinDate}
                     onChange={(e) => setEditGradingForm({ ...editGradingForm, joinDate: e.target.value })}
                     required
-                    disabled={!isSuper && !allowBranchAdminChangeBelt}
                   />
-                  {!isSuper && !allowBranchAdminChangeBelt && (
-                    <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Requires Super Admin permission to edit.</span>
-                  )}
+                  <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Update student join date.</span>
                 </div>
 
                 <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>Last Grading Date</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>Last Grading / Test Date</label>
                   <input
                     type="text"
                     className="form-control"
@@ -8997,26 +9424,29 @@ function App() {
                     placeholder="YYYY-MM-DD or N/A"
                     required
                   />
-                  <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Enter N/A if student has not taken a grading test yet. Recalculates next eligibility date.</span>
+                  <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Enter test date (YYYY-MM-DD) or N/A if student has not taken a test.</span>
                 </div>
 
                 <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>Present Grade</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>Present Grade / Level</label>
                   <select
                     className="form-control"
                     style={{ height: '40px', borderRadius: '10px' }}
                     value={editGradingForm.belt}
                     onChange={(e) => setEditGradingForm({ ...editGradingForm, belt: e.target.value })}
                     required
-                    disabled={!isSuper && !allowBranchAdminChangeBelt}
                   >
-                    {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
-                      <option key={b} value={b}>{b}</option>
-                    ))}
+                    <optgroup label="🥋 Traditional Belts">
+                      {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
+                        <option key={b} value={b}>{b} Belt</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="🥊 Kickboxing / Boxing Levels">
+                      {['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </optgroup>
                   </select>
-                  {!isSuper && !allowBranchAdminChangeBelt && (
-                    <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Requires Super Admin permission to edit.</span>
-                  )}
                 </div>
 
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
@@ -9046,6 +9476,19 @@ function App() {
         )}
       </div>
     );
+    } catch (err) {
+      console.error("Error rendering Grading view:", err);
+      return (
+        <div style={{ padding: '2rem', textAlign: 'center', color: '#ff453a', background: 'rgba(229, 9, 20, 0.1)', borderRadius: '14px', border: '1px solid rgba(229, 9, 20, 0.3)', margin: '1rem' }}>
+          <AlertTriangle size={32} style={{ marginBottom: '0.5rem' }} />
+          <h3 style={{ color: '#fff', margin: '0.5rem 0' }}>Grading View</h3>
+          <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>{err.message}</p>
+          <button className="btn-primary" onClick={fetchGradingStudents} style={{ marginTop: '1rem', padding: '0.5rem 1.25rem', borderRadius: '8px' }}>
+            Reload Grading Data
+          </button>
+        </div>
+      );
+    }
   };
 
   const renderPerformance = () => {
@@ -9666,19 +10109,31 @@ function App() {
 
     return (
       <div className="reminders-container" style={{ maxWidth: '1200px', margin: '0 auto' }}>
-        {/* Page Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+        {/* Page Header Banner */}
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(229, 9, 20, 0.18) 0%, rgba(56, 189, 248, 0.1) 100%)',
+          border: '1px solid rgba(56, 189, 248, 0.3)',
+          borderRadius: '16px',
+          padding: '1.25rem 1.5rem',
+          marginBottom: '1.5rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '1rem',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+        }}>
           <div>
-            <h2 style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.5rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <h2 style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.4rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Bell size={24} color="#E50914" /> Broadcast & Notification Center
             </h2>
-            <p style={{ margin: '4px 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+            <p style={{ margin: '4px 0 0 0', color: '#cbd5e1', fontSize: '0.85rem' }}>
               Send instant notices to all trainers, branch admins, or specific branches. Alerts appear automatically upon login.
             </p>
           </div>
 
           {/* Subtabs Switcher */}
-          <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', padding: '4px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', gap: '4px' }}>
+          <div style={{ display: 'flex', background: 'rgba(0, 0, 0, 0.4)', padding: '4px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.12)', gap: '4px' }}>
             <button
               type="button"
               onClick={() => setRemindersTab('broadcast')}
@@ -9729,44 +10184,44 @@ function App() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {/* Quick Summary Cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-              <div className="stat-card" style={{ borderTop: '3px solid #3b82f6' }}>
-                <div className="stat-icon-wrapper" style={{ background: 'rgba(59, 130, 246, 0.12)', borderColor: 'rgba(59, 130, 246, 0.25)' }}>
-                  <Bell size={20} color="#3b82f6" />
+              <div className="stat-card" style={{ background: 'linear-gradient(145deg, rgba(20, 24, 38, 0.8) 0%, rgba(15, 17, 26, 0.8) 100%)', border: '1px solid rgba(56, 189, 248, 0.3)', borderTop: '3px solid #38bdf8', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+                <div className="stat-icon-wrapper" style={{ background: 'rgba(56, 189, 248, 0.15)', borderColor: 'rgba(56, 189, 248, 0.3)' }}>
+                  <Bell size={20} color="#38bdf8" />
                 </div>
                 <div className="stat-details">
-                  <h3>Active Notices</h3>
-                  <p className="stat-value" style={{ color: '#3b82f6' }}>{activeAnnouncementsList.length}</p>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Broadcasting to logged-in users</span>
+                  <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#94a3b8', fontSize: '0.72rem', fontWeight: 600 }}>Active Notices</h3>
+                  <p className="stat-value" style={{ color: '#38bdf8', fontSize: '1.5rem', fontWeight: 700 }}>{activeAnnouncementsList.length}</p>
+                  <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>Broadcasting to logged-in users</span>
                 </div>
               </div>
 
-              <div className="stat-card" style={{ borderTop: '3px solid #4CAF50' }}>
-                <div className="stat-icon-wrapper" style={{ background: 'rgba(76, 175, 80, 0.12)', borderColor: 'rgba(76, 175, 80, 0.25)' }}>
-                  <Users size={20} color="#4CAF50" />
+              <div className="stat-card" style={{ background: 'linear-gradient(145deg, rgba(16, 32, 24, 0.8) 0%, rgba(12, 22, 18, 0.8) 100%)', border: '1px solid rgba(34, 197, 94, 0.3)', borderTop: '3px solid #4ade80', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+                <div className="stat-icon-wrapper" style={{ background: 'rgba(34, 197, 94, 0.15)', borderColor: 'rgba(34, 197, 94, 0.3)' }}>
+                  <Users size={20} color="#4ade80" />
                 </div>
                 <div className="stat-details">
-                  <h3>Target Reach</h3>
-                  <p className="stat-value" style={{ color: '#4CAF50' }}>All Staff</p>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Trainers & Branch Admins</span>
+                  <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#86efac', fontSize: '0.72rem', fontWeight: 600 }}>Target Reach</h3>
+                  <p className="stat-value" style={{ color: '#4ade80', fontSize: '1.5rem', fontWeight: 700 }}>All Staff</p>
+                  <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>Trainers & Branch Admins</span>
                 </div>
               </div>
 
-              <div className="stat-card" style={{ borderTop: '3px solid #FFD700' }}>
-                <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 215, 0, 0.12)', borderColor: 'rgba(255, 215, 0, 0.25)' }}>
+              <div className="stat-card" style={{ background: 'linear-gradient(145deg, rgba(35, 28, 15, 0.8) 0%, rgba(20, 16, 10, 0.8) 100%)', border: '1px solid rgba(255, 215, 0, 0.3)', borderTop: '3px solid #FFD700', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+                <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 215, 0, 0.15)', borderColor: 'rgba(255, 215, 0, 0.3)' }}>
                   <AlertCircle size={20} color="#FFD700" />
                 </div>
                 <div className="stat-details">
-                  <h3>Login Popup Alerts</h3>
-                  <p className="stat-value" style={{ color: '#FFD700' }}>
+                  <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#fde047', fontSize: '0.72rem', fontWeight: 600 }}>Login Popup Alerts</h3>
+                  <p className="stat-value" style={{ color: '#FFD700', fontSize: '1.5rem', fontWeight: 700 }}>
                     {activeAnnouncementsList.filter(n => n.priority === 'high').length}
                   </p>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Urgent instant modals</span>
+                  <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>Urgent instant modals</span>
                 </div>
               </div>
             </div>
 
             {/* Broadcast Composer Form */}
-            <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '16px', padding: '1.5rem' }}>
+            <div className="panel" style={{ background: 'linear-gradient(145deg, rgba(22, 26, 40, 0.85) 0%, rgba(16, 18, 28, 0.85) 100%)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '16px', padding: '1.5rem', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem', flexWrap: 'wrap', gap: '8px' }}>
                 <h3 style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.15rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Send size={18} color="var(--color-primary)" />
@@ -10080,7 +10535,7 @@ function App() {
         {/* TAB 2: Fee Due Reminders */}
         {remindersTab === 'fees' && (
           <div>
-            <div className="panel" style={{ marginBottom: '1.5rem', background: 'rgba(229, 9, 20, 0.1)', border: '1px solid rgba(229, 9, 20, 0.3)' }}>
+            <div className="panel" style={{ marginBottom: '1.5rem', background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(229, 9, 20, 0.35)', borderRadius: '16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.25rem' }}>
                 <AlertTriangle size={30} color="var(--color-primary)" />
                 <div>
@@ -10911,7 +11366,7 @@ function App() {
                   <th>Branch Name</th>
                   <th>Branch Code / Key</th>
                   <th>Credentials Account</th>
-                  <th>Students Roster</th>
+                  <th>Total Students</th>
                   <th>Staff / Trainers</th>
                   <th>Type</th>
                   <th>Actions</th>
@@ -10939,7 +11394,7 @@ function App() {
                           <span style={{ color: 'var(--color-text-muted)' }}>No Default Trainer Set</span>
                         )}
                       </td>
-                      <td data-label="Students Roster"><span className="badge badge-green">{studentCount} Students</span></td>
+                      <td data-label="Total Students"><span className="badge badge-green">{studentCount} Students</span></td>
                       <td data-label="Staff / Trainers"><span className="badge" style={{ background: 'rgba(52, 152, 219, 0.15)', color: '#3498db' }}>{adminCount} Admin / Trainer(s)</span></td>
                       <td data-label="Type">
                         {isDefault ? (
@@ -13654,15 +14109,15 @@ function App() {
           gap: '1.5rem'
         }}>
           <div style={{
-            background: 'rgba(94, 92, 230, 0.15)',
-            border: '2px solid #5e5ce6',
+            background: 'rgba(229, 9, 20, 0.15)',
+            border: '2px solid var(--color-primary)',
             borderRadius: '50%',
             width: '80px',
             height: '80px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#5e5ce6'
+            color: 'var(--color-primary)'
           }}>
             <AlertTriangle size={40} className="pulse-icon" />
           </div>
@@ -13673,7 +14128,7 @@ function App() {
             margin: 0,
             textTransform: 'uppercase',
             letterSpacing: '1px',
-            background: 'linear-gradient(90deg, #5e5ce6, #bf5af2)',
+            background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             fontFamily: 'Outfit, sans-serif'
@@ -13814,6 +14269,20 @@ function App() {
               <Award className="nav-icon" /> <span>Grading</span>
             </a>
           )}
+          <a
+            className={`nav-item ${currentView === 'announcements' ? 'active' : ''}`}
+            onClick={() => {
+              setCurrentView('announcements');
+              loadNotifications();
+            }}
+          >
+            <Megaphone className="nav-icon" /> <span>Announcements</span>
+            {unreadNotificationsCount > 0 && (
+              <span className="badge badge-red" style={{ marginLeft: 'auto', fontSize: '0.7rem', padding: '2px 6px', borderRadius: '10px' }}>
+                {unreadNotificationsCount}
+              </span>
+            )}
+          </a>
           <div style={{ flex: 1 }}></div>
           {(isAdminUser(loggedInUser) || isBranchAdmin(loggedInUser)) && (
             <a className={`nav-item ${currentView === 'credentials-list' ? 'active' : ''}`} onClick={() => setCurrentView('credentials-list')}>
@@ -13862,7 +14331,7 @@ function App() {
           </div>
         )}
 
-        <header className="header">
+        <header className="header" style={{ position: 'relative', zIndex: 10000, overflow: 'visible' }}>
           <div className="header-main-row">
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <button className="mobile-menu-btn" style={{ padding: 0 }} onClick={() => setIsSidebarOpen(true)}>
@@ -13876,7 +14345,8 @@ function App() {
                 {currentView === 'performance' && 'Student Performance'}
                 {currentView === 'settings' && 'Account Settings'}
                 {currentView === 'credentials-list' && 'Branch & Batch Mapping'}
-                {currentView === 'grading' && 'Student Belt Grading'}
+                {currentView === 'grading' && (userRole === 'trainer' ? 'Student Test Evaluation' : 'Student Belt & Level Test')}
+                {currentView === 'announcements' && 'Announcements & Notifications'}
               </h1>
             </div>
 
@@ -13885,7 +14355,7 @@ function App() {
             </div>
           </div>
 
-          {!(currentView === 'grading' || currentView === 'settings' || currentView === 'credentials-list' || currentView === 'performance' || currentView === 'attendance') && (
+          {!(currentView === 'grading' || currentView === 'announcements' || currentView === 'settings' || currentView === 'credentials-list' || currentView === 'performance' || currentView === 'attendance') && (
             <div className="header-actions">
               {/* Branch Filter Selector */}
               <div style={{ position: 'relative' }}>
@@ -13959,34 +14429,36 @@ function App() {
               <button
                 type="button"
                 style={{
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid var(--glass-border)',
-                  borderRadius: '8px',
-                  width: '38px',
-                  height: '38px',
+                  background: showNotificationsDropdown ? 'rgba(229, 9, 20, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                  border: showNotificationsDropdown ? '1px solid rgba(229, 9, 20, 0.4)' : '1px solid var(--glass-border)',
+                  borderRadius: '10px',
+                  width: '40px',
+                  height: '40px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   color: 'white',
                   cursor: 'pointer',
-                  position: 'relative'
+                  position: 'relative',
+                  transition: 'all 0.2s ease'
                 }}
                 onClick={() => setShowNotificationsDropdown(!showNotificationsDropdown)}
+                title="Notifications & Announcements"
               >
-                <Bell size={18} className={unreadNotificationsCount > 0 ? "shake-icon" : ""} />
+                <Bell size={19} className={unreadNotificationsCount > 0 ? "shake-icon" : ""} color={unreadNotificationsCount > 0 ? "#FFD700" : "#fff"} />
                 {unreadNotificationsCount > 0 && (
                   <span style={{
                     position: 'absolute',
-                    top: '-4px',
-                    right: '-4px',
-                    background: '#ff453a',
+                    top: '-3px',
+                    right: '-3px',
+                    background: '#E50914',
                     color: 'white',
                     fontSize: '0.65rem',
-                    fontWeight: 700,
-                    borderRadius: '50%',
+                    fontWeight: 800,
+                    borderRadius: '10px',
                     padding: '2px 6px',
                     lineHeight: 1,
-                    boxShadow: '0 2px 5px rgba(0,0,0,0.5)'
+                    boxShadow: '0 2px 8px rgba(229, 9, 20, 0.6)'
                   }}>
                     {unreadNotificationsCount}
                   </span>
@@ -13994,119 +14466,131 @@ function App() {
               </button>
 
               {showNotificationsDropdown && (
-                <div style={{
-                  position: 'absolute',
-                  right: 0,
-                  top: '46px',
-                  width: '320px',
-                  background: 'rgba(15, 15, 25, 0.98)',
-                  border: '1px solid var(--glass-border)',
-                  borderRadius: '12px',
-                  boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)',
-                  backdropFilter: 'blur(20px)',
-                  zIndex: 1000,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  maxHeight: '400px'
-                }}>
-                  <div style={{
-                    padding: '12px 16px',
-                    borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}>
-                    <span style={{ fontWeight: 600, fontSize: '0.85rem', color: '#fff' }}>Announcements</span>
-                    {unreadNotificationsCount > 0 && (
-                      <span style={{ fontSize: '0.75rem', color: '#8e8e93' }}>{unreadNotificationsCount} unread</span>
-                    )}
-                  </div>
+                <>
+                  {/* Click Outside Overlay to Close */}
+                  <div
+                    style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999 }}
+                    onClick={() => setShowNotificationsDropdown(false)}
+                  />
 
-                  <div style={{ overflowY: 'auto', flex: 1, padding: '8px 0' }}>
-                    {notifications.length === 0 ? (
-                      <div style={{ padding: '24px 16px', textAlign: 'center', color: '#8e8e93', fontSize: '0.8rem' }}>
-                        No announcements at the moment.
+                  {/* Dropdown Container */}
+                  <div className="notifications-dropdown-menu">
+                    {/* Header */}
+                    <div style={{
+                      padding: '12px 16px',
+                      background: 'rgba(255, 255, 255, 0.03)',
+                      borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                      display: 'flex',
+                      justify: 'space-between',
+                      alignItems: 'center',
+                      gap: '12px',
+                      flexWrap: 'nowrap'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Bell size={16} color="#E50914" />
+                        <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#fff', fontFamily: 'Outfit, sans-serif', whiteSpace: 'nowrap' }}>Announcements</span>
                       </div>
-                    ) : (
-                      notifications.map(n => {
-                        const currentUserClean = getSessionUser() ? getSessionUser().toLowerCase().trim() : '';
-                        const isRead = n.readBy && n.readBy.includes(currentUserClean);
-                        return (
-                          <div
-                            key={n._id}
-                            style={{
-                              padding: '10px 16px',
-                              borderBottom: '1px solid rgba(255, 255, 255, 0.03)',
-                              background: isRead ? 'transparent' : 'rgba(94, 92, 230, 0.05)',
-                              transition: 'background 0.2s',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: '4px'
-                            }}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
-                              <span style={{
-                                fontWeight: isRead ? 500 : 700,
-                                fontSize: '0.825rem',
-                                color: isRead ? '#e2e2ee' : '#fff'
+                      {unreadNotificationsCount > 0 ? (
+                        <span className="badge badge-gold" style={{ fontSize: '0.7rem', padding: '2px 8px', whiteSpace: 'nowrap' }}>
+                          {unreadNotificationsCount} UNREAD
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>All caught up</span>
+                      )}
+                    </div>
+
+                    {/* Notification List */}
+                    <div style={{ overflowY: 'auto', flex: 1, padding: '4px 0' }}>
+                      {notifications.length === 0 ? (
+                        <div style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '0.825rem' }}>
+                          <Bell size={24} style={{ opacity: 0.3, marginBottom: '6px' }} />
+                          <div>No announcements at the moment.</div>
+                        </div>
+                      ) : (
+                        notifications.map(n => {
+                          const currentUserClean = getSessionUser() ? getSessionUser().toLowerCase().trim() : '';
+                          const isRead = n.readBy && n.readBy.includes(currentUserClean);
+                          return (
+                            <div
+                              key={n._id}
+                              style={{
+                                padding: '12px 16px',
+                                borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+                                background: isRead ? 'transparent' : 'rgba(229, 9, 20, 0.06)',
+                                transition: 'background 0.2s ease',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '5px'
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                                <span style={{
+                                  fontWeight: isRead ? 600 : 700,
+                                  fontSize: '0.85rem',
+                                  color: isRead ? '#e2e8f0' : '#fff'
+                                }}>
+                                  {n.title}
+                                </span>
+                                <span className="badge" style={{
+                                  background: n.priority === 'high' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                                  color: n.priority === 'high' ? '#ef4444' : '#cbd5e1',
+                                  fontSize: '0.625rem',
+                                  padding: '2px 6px',
+                                  fontWeight: 700,
+                                  textTransform: 'uppercase'
+                                }}>
+                                  {n.priority}
+                                </span>
+                              </div>
+                              <p style={{
+                                margin: 0,
+                                fontSize: '0.78rem',
+                                color: '#94a3b8',
+                                lineHeight: '1.45',
+                                whiteSpace: 'pre-wrap',
+                                textAlign: 'left'
                               }}>
-                                {n.title}
-                              </span>
-                              <span className="badge" style={{
-                                background: n.priority === 'high' ? 'rgba(255, 69, 58, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-                                color: n.priority === 'high' ? '#ff453a' : '#8e8e93',
-                                fontSize: '0.6rem',
-                                padding: '1px 4px'
+                                {n.message}
+                              </p>
+                              <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                marginTop: '6px',
+                                fontSize: '0.7rem',
+                                color: 'var(--color-text-muted)'
                               }}>
-                                {n.priority}
-                              </span>
+                                <span>🗓️ {new Date(n.createdAt).toLocaleDateString()}</span>
+                                <button
+                                  type="button"
+                                  style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: isRead ? 'var(--color-text-muted)' : '#38bdf8',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    padding: '2px 4px',
+                                    fontSize: '0.725rem'
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (isRead) {
+                                      handleMarkAsUnread(n._id);
+                                    } else {
+                                      handleMarkAsRead(n._id);
+                                    }
+                                  }}
+                                >
+                                  {isRead ? 'Mark Unread' : '✓ Mark Read'}
+                                </button>
+                              </div>
                             </div>
-                            <p style={{
-                              margin: 0,
-                              fontSize: '0.75rem',
-                              color: '#a2a2b5',
-                              lineHeight: '1.4',
-                              whiteSpace: 'pre-wrap',
-                              textAlign: 'left'
-                            }}>
-                              {n.message}
-                            </p>
-                            <div style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              marginTop: '6px',
-                              fontSize: '0.65rem',
-                              color: '#8e8e93'
-                            }}>
-                              <span>{new Date(n.createdAt).toLocaleDateString()}</span>
-                              <button
-                                type="button"
-                                style={{
-                                  background: 'transparent',
-                                  border: 'none',
-                                  color: isRead ? '#8e8e93' : '#5e5ce6',
-                                  fontWeight: 600,
-                                  cursor: 'pointer',
-                                  padding: '2px 0'
-                                }}
-                                onClick={() => {
-                                  if (isRead) {
-                                    handleMarkAsUnread(n._id);
-                                  } else {
-                                    handleMarkAsRead(n._id);
-                                  }
-                                }}
-                              >
-                                {isRead ? 'Mark Unread' : 'Mark Read'}
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
+                          );
+                        })
+                      )}
+                    </div>
                   </div>
-                </div>
+                </>
               )}
             </div>
 
@@ -14129,11 +14613,11 @@ function App() {
                     <div className="stat-icon-wrapper" style={{ background: 'rgba(229, 9, 20, 0.12)', borderColor: 'rgba(229, 9, 20, 0.25)' }}>
                       <Users className="stat-icon" style={{ color: '#E50914' }} />
                     </div>
-                    <div className="stat-details">
-                      <h3>Active Students</h3>
-                      <p className="stat-value">{metrics.totalStudents}</p>
-                      <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
-                        Across all enrolled batches
+                    <div className="stat-details" style={{ minWidth: 0, overflow: 'hidden' }}>
+                      <h3 style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Active Students</h3>
+                      <p className="stat-value" style={{ whiteSpace: 'nowrap' }}>{metrics.totalStudents}</p>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        Across enrolled batches
                       </span>
                     </div>
                   </div>
@@ -14143,14 +14627,14 @@ function App() {
                     <div className="stat-icon-wrapper" style={{ background: 'rgba(76, 175, 80, 0.12)', borderColor: 'rgba(76, 175, 80, 0.25)' }}>
                       <Activity className="stat-icon" style={{ color: '#4CAF50' }} />
                     </div>
-                    <div className="stat-details">
-                      <h3>Today's Attendance</h3>
-                      <p className="stat-value" style={{ color: '#4CAF50' }}>
-                        {metrics.presentToday} <span style={{ fontSize: '1rem', color: 'var(--color-text-muted)', fontWeight: 500 }}>/ {metrics.presentToday + metrics.absentToday}</span>
+                    <div className="stat-details" style={{ minWidth: 0, overflow: 'hidden' }}>
+                      <h3 style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Today's Attendance</h3>
+                      <p className="stat-value" style={{ color: '#4CAF50', whiteSpace: 'nowrap' }}>
+                        {metrics.presentToday} <span style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', fontWeight: 500 }}>/ {metrics.presentToday + metrics.absentToday}</span>
                       </p>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px' }}>
-                        <span className="badge badge-green" style={{ fontSize: '0.72rem', padding: '1px 6px' }}>{metrics.attendancePercentage}% Rate</span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{metrics.absentToday} Absent</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '3px', flexWrap: 'wrap' }}>
+                        <span className="badge badge-green" style={{ fontSize: '0.7rem', padding: '1px 5px', whiteSpace: 'nowrap' }}>{metrics.attendancePercentage}% Rate</span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>{metrics.absentToday} Absent</span>
                       </div>
                     </div>
                   </div>
@@ -14160,12 +14644,12 @@ function App() {
                     <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 215, 0, 0.12)', borderColor: 'rgba(255, 215, 0, 0.25)' }}>
                       <Wallet className="stat-icon" style={{ color: '#FFD700' }} />
                     </div>
-                    <div className="stat-details">
-                      <h3>Fee Collection</h3>
-                      <p className="stat-value" style={{ color: '#FFD700' }}>
+                    <div className="stat-details" style={{ minWidth: 0, overflow: 'hidden' }}>
+                      <h3 style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Fee Collection</h3>
+                      <p className="stat-value" style={{ color: '#FFD700', whiteSpace: 'nowrap' }}>
                         ₹{metrics.feeCollection}
                       </p>
-                      <span style={{ fontSize: '0.78rem', color: metrics.pendingFees > 0 ? '#ff9f0a' : 'var(--color-text-muted)' }}>
+                      <span style={{ fontSize: '0.75rem', color: metrics.pendingFees > 0 ? '#ff9f0a' : 'var(--color-text-muted)', whiteSpace: 'nowrap', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         Pending: ₹{metrics.pendingFees}
                       </span>
                     </div>
@@ -14179,12 +14663,12 @@ function App() {
                     <div className="stat-icon-wrapper" style={{ background: 'rgba(156, 39, 176, 0.12)', borderColor: 'rgba(156, 39, 176, 0.25)' }}>
                       <CalendarDays className="stat-icon" style={{ color: '#c084fc' }} />
                     </div>
-                    <div className="stat-details">
-                      <h3>Live Classes Today</h3>
-                      <p className="stat-value" style={{ color: '#c084fc' }}>
-                        {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length} <span style={{ fontSize: '0.95rem', color: 'var(--color-text-muted)', fontWeight: 500 }}>Scheduled</span>
+                    <div className="stat-details" style={{ minWidth: 0, overflow: 'hidden' }}>
+                      <h3 style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Live Classes Today</h3>
+                      <p className="stat-value" style={{ color: '#c084fc', whiteSpace: 'nowrap' }}>
+                        {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length} <span style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', fontWeight: 500 }}>Scheduled</span>
                       </p>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
                         {metrics.filteredClasses.filter(c => c.status !== 'cancelled').length > 0
                           ? `Next: ${metrics.filteredClasses.filter(c => c.status !== 'cancelled')[0].className} (${metrics.filteredClasses.filter(c => c.status !== 'cancelled')[0].startTime})`
                           : 'No active classes remaining'}
@@ -14197,7 +14681,7 @@ function App() {
                 <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '16px', overflow: 'hidden', padding: 0 }}>
                   <div style={{ padding: '1.25rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', flexWrap: 'wrap', gap: '10px' }}>
                     <div>
-                      <h3 className="panel-title" style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.1rem', color: '#fff' }}>Student Roster</h3>
+                      <h3 className="panel-title" style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.1rem', color: '#fff' }}>Students List</h3>
                       <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>Total {searchedStudents.length} Students Listed</span>
                     </div>
                     <button className="btn-primary" onClick={() => {
@@ -14269,7 +14753,7 @@ function App() {
                                           gap: '4px'
                                         }}
                                       >
-                                        {student.studentName || student.name}
+                                        {renderHighlightedName(student.studentName || student.name, searchQuery)}
                                         {student.isPriority && (
                                           <Star size={13} fill="#FFD700" color="#FFD700" title="Priority Student" />
                                         )}
@@ -14442,8 +14926,113 @@ function App() {
           {currentView === 'settings' && renderSettings()}
           {currentView === 'credentials-list' && (lockBranchBatchMappingPage && userRole !== 'developer' ? renderSectionMaintenance('Branch & Batch Mapping') : renderCredentialsList())}
           {currentView === 'grading' && (lockGradingPage && userRole !== 'developer' ? renderSectionMaintenance('Student Belt Grading') : renderGrading())}
+          {currentView === 'announcements' && renderAnnouncements()}
         </div>
       </main>
+
+      {/* Modal: Announce / Post New Announcement */}
+      {isGradingAnnouncementModalOpen && (
+        <div className="modal-overlay" style={{ zIndex: 1000 }} onClick={() => setIsGradingAnnouncementModalOpen(false)}>
+          <div className="modal-content" style={{ maxWidth: '650px', width: '90%', boxSizing: 'border-box', maxHeight: '90vh', overflowY: 'auto', overflowX: 'hidden', background: 'var(--color-bg-surface, #12141d)', padding: '1.75rem', borderRadius: '18px', border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} onClick={(e) => e.stopPropagation()}>
+            <div className="panel-header" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.85rem' }}>
+              <h3 className="panel-title" style={{ fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '10px', margin: 0, fontWeight: 700 }}>
+                <Megaphone size={22} style={{ color: 'var(--color-primary, #e50914)' }} />
+                Post New Broadcast Announcement
+              </h3>
+              <button
+                className="btn-icon"
+                onClick={() => setIsGradingAnnouncementModalOpen(false)}
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            <form onSubmit={handlePublishGradingAnnouncement}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '1rem' }}>
+                <div className="form-group">
+                  <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.82rem', color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                    Target Branch
+                  </label>
+                  <select
+                    className="form-control"
+                    style={{ height: '42px', borderRadius: '10px', fontSize: '0.9rem' }}
+                    value={gradingAnnouncementForm.branch}
+                    onChange={(e) => setGradingAnnouncementForm({ ...gradingAnnouncementForm, branch: e.target.value })}
+                  >
+                    <option value="all">All Branches</option>
+                    {branches.map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.82rem', color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                    Grading / Event Date (Optional)
+                  </label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    style={{ height: '42px', borderRadius: '10px', fontSize: '0.9rem' }}
+                    value={gradingAnnouncementForm.gradingDate}
+                    onChange={(e) => setGradingAnnouncementForm({ ...gradingAnnouncementForm, gradingDate: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '1.15rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.82rem', color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                  Announcement Title *
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  style={{ height: '42px', borderRadius: '10px', fontSize: '0.92rem', paddingLeft: '0.85rem' }}
+                  required
+                  placeholder="e.g. 📢 Upcoming Belt Grading Examination"
+                  value={gradingAnnouncementForm.title}
+                  onChange={(e) => setGradingAnnouncementForm({ ...gradingAnnouncementForm, title: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.82rem', color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                  Announcement Details & Instructions *
+                </label>
+                <textarea
+                  className="form-control"
+                  rows="6"
+                  required
+                  style={{ minHeight: '150px', borderRadius: '12px', fontSize: '0.9rem', padding: '0.85rem', lineHeight: '1.5' }}
+                  placeholder="Enter full announcement details, syllabus requirements, venue, or eligibility criteria..."
+                  value={gradingAnnouncementForm.message}
+                  onChange={(e) => setGradingAnnouncementForm({ ...gradingAnnouncementForm, message: e.target.value })}
+                ></textarea>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ borderRadius: '10px', padding: '0.6rem 1.25rem' }}
+                  onClick={() => setIsGradingAnnouncementModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={submittingGradingAnnouncement}
+                  style={{ borderRadius: '10px', padding: '0.6rem 1.5rem', fontWeight: 600, background: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  {submittingGradingAnnouncement ? 'Broadcasting...' : '📢 Submit & Notify All'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Profile Modal */}
       {selectedStudent && (

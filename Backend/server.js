@@ -365,14 +365,24 @@ function calculateNextEligibleDate(baseDateStr) {
   }
 }
 
-const BELT_ORDER = ['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'];
+const BELT_ORDER = [
+  'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black',
+  'Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'
+];
 
 function getNextBelt(currentBelt) {
-  const index = BELT_ORDER.findIndex(b => b.toLowerCase() === String(currentBelt || '').toLowerCase().trim());
-  if (index === -1 || index === BELT_ORDER.length - 1) {
-    return 'None';
-  }
-  return BELT_ORDER[index + 1];
+  const belts = ['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'];
+  const levels = ['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'];
+
+  const curr = String(currentBelt || '').toLowerCase().trim();
+
+  const beltIdx = belts.findIndex(b => b.toLowerCase() === curr);
+  if (beltIdx !== -1) return beltIdx < belts.length - 1 ? belts[beltIdx + 1] : 'None';
+
+  const levelIdx = levels.findIndex(l => l.toLowerCase() === curr);
+  if (levelIdx !== -1) return levelIdx < levels.length - 1 ? levels[levelIdx + 1] : 'None';
+
+  return 'None';
 }
 
 // Attendance field helpers
@@ -2746,8 +2756,14 @@ app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin
         dec.nextEligibleGradingDate = calculateNextEligibleDate(dec.joinDate);
       }
       
-      // Calculate eligibility status based on next eligible date
-      dec.eligibilityStatus = (dec.nextEligibleGradingDate && todayStr >= dec.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
+      // Calculate eligibility status based on override or date check (defaults to Eligible if no previous test)
+      if (dec.eligibilityOverride) {
+        dec.eligibilityStatus = dec.eligibilityOverride;
+      } else if (!dec.lastGradingDate || dec.lastGradingDate === 'N/A' || !dec.nextEligibleGradingDate) {
+        dec.eligibilityStatus = 'Eligible';
+      } else {
+        dec.eligibilityStatus = (todayStr >= dec.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
+      }
       
       // Next belt auto computation
       dec.nextBelt = getNextBelt(dec.belt);
@@ -2766,7 +2782,7 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
   try {
     const { id } = req.params;
     const { role, branch, batch, username } = req.user;
-    const { result, gradingDate } = req.body;
+    const { result, gradingDate, gradeLetter } = req.body;
 
     if (!result || !['Pass', 'Fail'].includes(result)) {
       return res.status(400).json({ error: 'Valid grading result (Pass or Fail) is required.' });
@@ -2816,9 +2832,11 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
     }
 
     const nextEligibleDate = calculateNextEligibleDate(gradingDate);
+    const assignedGradeLetter = result === 'Pass' ? (gradeLetter || 'A') : '';
 
     student.lastGradingDate = gradingDate;
     student.lastGradingResult = result;
+    student.lastGradeLetter = assignedGradeLetter;
     student.nextEligibleGradingDate = nextEligibleDate;
 
     // Push entry to history
@@ -2826,6 +2844,7 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
       gradingDate,
       beltBefore,
       result,
+      gradeLetter: assignedGradeLetter,
       beltAfter,
       updatedBy: username,
       createdAt: new Date()
@@ -2840,6 +2859,122 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
     returnedStudent.nextBelt = getNextBelt(returnedStudent.belt);
     const todayStr = new Date().toISOString().split('T')[0];
     returnedStudent.eligibilityStatus = (returnedStudent.nextEligibleGradingDate && todayStr >= returnedStudent.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
+
+    res.json(returnedStudent);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/students/:id/grading-history/:historyId (Revoke a grading attempt)
+app.delete('/api/students/:id/grading-history/:historyId', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
+  try {
+    const { id, historyId } = req.params;
+    const student = await Student.findOne({ id: Number(id) });
+    if (!student) return res.status(404).json({ error: 'Student not found.' });
+
+    let entryIndex = -1;
+    entryIndex = student.gradingHistory.findIndex(h => String(h._id) === String(historyId));
+    if (entryIndex === -1 && !isNaN(Number(historyId))) {
+      entryIndex = Number(historyId);
+    }
+
+    if (entryIndex === -1 || !student.gradingHistory[entryIndex]) {
+      return res.status(404).json({ error: 'Grading history record not found.' });
+    }
+
+    const removedEntry = student.gradingHistory[entryIndex];
+    student.gradingHistory.splice(entryIndex, 1);
+
+    // Recalculate current belt & last grading stats from remaining history
+    if (student.gradingHistory.length > 0) {
+      const lastAttempt = student.gradingHistory[student.gradingHistory.length - 1];
+      student.belt = lastAttempt.beltAfter;
+      student.lastGradingDate = lastAttempt.gradingDate;
+      student.lastGradingResult = lastAttempt.result;
+      student.lastGradeLetter = lastAttempt.gradeLetter || '';
+      student.nextEligibleGradingDate = calculateNextEligibleDate(lastAttempt.gradingDate);
+    } else {
+      if (removedEntry && removedEntry.beltBefore) {
+        student.belt = removedEntry.beltBefore;
+      }
+      student.lastGradingDate = 'N/A';
+      student.lastGradingResult = 'N/A';
+      student.lastGradeLetter = '';
+      student.nextEligibleGradingDate = calculateNextEligibleDate(student.joinDate);
+    }
+
+    await student.save();
+    addLog('api', `Revoked grading history record for student ${decrypt(student.name)} (ID: ${student.id}). Belt is now ${student.belt}`);
+
+    const returnedStudent = decryptStudent(student);
+    returnedStudent.nextBelt = getNextBelt(returnedStudent.belt);
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (returnedStudent.eligibilityOverride) {
+      returnedStudent.eligibilityStatus = returnedStudent.eligibilityOverride;
+    } else if (!returnedStudent.lastGradingDate || returnedStudent.lastGradingDate === 'N/A' || !returnedStudent.nextEligibleGradingDate) {
+      returnedStudent.eligibilityStatus = 'Eligible';
+    } else {
+      returnedStudent.eligibilityStatus = (todayStr >= returnedStudent.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
+    }
+
+    res.json(returnedStudent);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2.5 Trainer Approval for Belt Grading endpoint
+app.put('/api/students/:id/trainer-approval', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { approved } = req.body;
+    const { username } = req.user;
+
+    const student = await Student.findOne({ id: Number(id) });
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found.' });
+    }
+
+    student.trainerApprovedForGrading = Boolean(approved);
+    student.trainerApprovedBy = approved ? username : '';
+    student.trainerApprovedAt = approved ? new Date().toISOString() : '';
+
+    // When revoking approval (approved === false), remove latest grading history attempt & revert belt if any test was recorded
+    if (!approved && student.gradingHistory && student.gradingHistory.length > 0) {
+      const removedEntry = student.gradingHistory.pop();
+      if (student.gradingHistory.length > 0) {
+        const lastAttempt = student.gradingHistory[student.gradingHistory.length - 1];
+        student.belt = lastAttempt.beltAfter;
+        student.lastGradingDate = lastAttempt.gradingDate;
+        student.lastGradingResult = lastAttempt.result;
+        student.lastGradeLetter = lastAttempt.gradeLetter || '';
+        student.nextEligibleGradingDate = calculateNextEligibleDate(lastAttempt.gradingDate);
+      } else {
+        if (removedEntry && removedEntry.beltBefore) {
+          student.belt = removedEntry.beltBefore;
+        }
+        student.lastGradingDate = 'N/A';
+        student.lastGradingResult = 'N/A';
+        student.lastGradeLetter = '';
+        student.nextEligibleGradingDate = calculateNextEligibleDate(student.joinDate);
+      }
+    }
+
+    await student.save();
+
+    const returnedStudent = decryptStudent(student);
+    returnedStudent.nextBelt = getNextBelt(returnedStudent.belt);
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (returnedStudent.eligibilityOverride) {
+      returnedStudent.eligibilityStatus = returnedStudent.eligibilityOverride;
+    } else if (!returnedStudent.lastGradingDate || returnedStudent.lastGradingDate === 'N/A' || !returnedStudent.nextEligibleGradingDate) {
+      returnedStudent.eligibilityStatus = 'Eligible';
+    } else {
+      returnedStudent.eligibilityStatus = (todayStr >= returnedStudent.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
+    }
+
+    addLog('api', `Trainer approval updated for student ${decrypt(student.name)} (ID: ${student.id}) - Approved: ${approved}`);
 
     res.json(returnedStudent);
   } catch (err) {
@@ -2883,21 +3018,6 @@ app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('s
       }
     }
 
-    // Check branchadmin / trainer limitations: cannot edit joinDate or belt level unless allowBranchAdminChangeBelt is true
-    if (role === 'branchadmin' || role === 'trainer') {
-      const systemSettingsObj = await SystemSetting.findOne({ configKey: 'main' });
-      const allowChange = systemSettingsObj ? systemSettingsObj.allowBranchAdminChangeBelt : false;
-      
-      if (!allowChange) {
-        if (joinDate !== undefined && joinDate !== student.joinDate) {
-          return res.status(403).json({ error: 'Unauthorized: You do not have permission to manually change Join Date.' });
-        }
-        if (belt !== undefined && belt !== student.belt) {
-          return res.status(403).json({ error: 'Unauthorized: You do not have permission to manually change student Belt level.' });
-        }
-      }
-    }
-
     let modified = false;
 
     if (joinDate !== undefined && joinDate !== student.joinDate) {
@@ -2935,6 +3055,11 @@ app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('s
       modified = true;
     }
 
+    if (req.body.eligibilityOverride !== undefined && req.body.eligibilityOverride !== student.eligibilityOverride) {
+      student.eligibilityOverride = req.body.eligibilityOverride;
+      modified = true;
+    }
+
     if (modified) {
       await student.save();
       addLog('api', `Manually updated grading info for student ${decrypt(student.name)} (ID: ${student.id})`);
@@ -2943,7 +3068,45 @@ app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('s
     const returnedStudent = decryptStudent(student);
     returnedStudent.nextBelt = getNextBelt(returnedStudent.belt);
     const todayStr = new Date().toISOString().split('T')[0];
-    returnedStudent.eligibilityStatus = (returnedStudent.nextEligibleGradingDate && todayStr >= returnedStudent.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
+    if (returnedStudent.eligibilityOverride) {
+      returnedStudent.eligibilityStatus = returnedStudent.eligibilityOverride;
+    } else if (!returnedStudent.lastGradingDate || returnedStudent.lastGradingDate === 'N/A' || !returnedStudent.nextEligibleGradingDate) {
+      returnedStudent.eligibilityStatus = 'Eligible';
+    } else {
+      returnedStudent.eligibilityStatus = (todayStr >= returnedStudent.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
+    }
+
+    res.json(returnedStudent);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3.5 Quick toggle eligibility status endpoint
+app.put('/api/students/:id/toggle-eligibility', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const student = await Student.findOne({ id: Number(id) });
+    if (!student) return res.status(404).json({ error: 'Student not found.' });
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    let currentStatus = student.eligibilityOverride;
+    if (!currentStatus) {
+      if (!student.lastGradingDate || student.lastGradingDate === 'N/A' || !student.nextEligibleGradingDate) {
+        currentStatus = 'Eligible';
+      } else {
+        currentStatus = (todayStr >= student.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
+      }
+    }
+
+    student.eligibilityOverride = currentStatus === 'Eligible' ? 'Not Eligible' : 'Eligible';
+    await student.save();
+
+    const returnedStudent = decryptStudent(student);
+    returnedStudent.nextBelt = getNextBelt(returnedStudent.belt);
+    returnedStudent.eligibilityStatus = student.eligibilityOverride;
+
+    addLog('api', `Toggled eligibility for student ${decrypt(student.name)} to ${student.eligibilityOverride}`);
 
     res.json(returnedStudent);
   } catch (err) {
@@ -3205,8 +3368,8 @@ app.get('/api/notifications', authenticateSession, async (req, res) => {
   }
 });
 
-// Create a new notification (allowed for developer, superadmin, admin)
-app.post('/api/notifications', authenticateSession, authorizeRoles('developer', 'superadmin', 'admin'), async (req, res) => {
+// Create a new notification (allowed for developer, superadmin, admin, branchadmin)
+app.post('/api/notifications', authenticateSession, authorizeRoles('developer', 'superadmin', 'admin', 'branchadmin'), async (req, res) => {
   try {
     const { title, message, type, priority, branch, batch, targetUser, expiryDate, scheduledAt, isScheduled } = req.body;
     if (!title || !title.trim()) {
@@ -3238,8 +3401,8 @@ app.post('/api/notifications', authenticateSession, authorizeRoles('developer', 
   }
 });
 
-// Edit an existing notification (allowed for developer, superadmin, admin)
-app.put('/api/notifications/:id', authenticateSession, authorizeRoles('developer', 'superadmin', 'admin'), async (req, res) => {
+// Edit an existing notification (allowed for developer, superadmin, admin, branchadmin)
+app.put('/api/notifications/:id', authenticateSession, authorizeRoles('developer', 'superadmin', 'admin', 'branchadmin'), async (req, res) => {
   try {
     const { title, message, type, priority, branch, batch, targetUser, expiryDate, scheduledAt, isScheduled } = req.body;
     if (title !== undefined && !title.trim()) {

@@ -40,19 +40,25 @@ const studentSchema = new mongoose.Schema({
   },
   lastGradingDate: { type: String, default: 'N/A' },
   nextEligibleGradingDate: { type: String, default: '' },
+  eligibilityOverride: { type: String, default: '' },
   lastGradingResult: { type: String, default: 'N/A' },
+  lastGradeLetter: { type: String, default: '' },
   gradingHistory: {
     type: [{
       gradingDate: { type: String, required: true },
       beltBefore: { type: String, required: true },
       result: { type: String, required: true, enum: ['Pass', 'Fail'] },
+      gradeLetter: { type: String, default: '' },
       beltAfter: { type: String, required: true },
       updatedBy: { type: String, required: true },
       createdAt: { type: Date, default: Date.now }
     }],
     default: []
   },
-  isPriority: { type: Boolean, default: false }
+  isPriority: { type: Boolean, default: false },
+  trainerApprovedForGrading: { type: Boolean, default: false },
+  trainerApprovedBy: { type: String, default: '' },
+  trainerApprovedAt: { type: String, default: '' }
 }, { timestamps: true });
 
 studentSchema.index({ branch: 1, status: 1 });
