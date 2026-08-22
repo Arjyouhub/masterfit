@@ -8,6 +8,10 @@ import {
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import './index.css';
+import gallery1Img from './assets/gallery1.jpg';
+import gallery2Img from './assets/gallery2.jpg';
+import gallery3Img from './assets/gallery3.jpg';
+import gallery4Img from './assets/gallery4.jpg';
 
 // Academy Branches static list fallback
 const DEFAULT_BRANCHES = [];
@@ -6772,7 +6776,7 @@ function App() {
         <img src="https://images.unsplash.com/photo-1555597673-b21d5c935865?auto=format&fit=crop&q=80" alt="Martial Arts" className="hero-bg" />
         <div className="hero-overlay"></div>
         <div className="hero-content">
-          <span className="hero-subtitle">Master Your Mind & Body</span>
+          <span className="hero-subtitle">GRAB YOUR BETTER VERSION</span>
           <h1 className="hero-title">MASTER FIT <span>Academy</span></h1>
           <p className="hero-desc">
             Train with elite instructors in a premium facility. Master Kung Fu, Karate, and Wushu, and embark on your journey from white to black belt.
@@ -6858,10 +6862,10 @@ function App() {
           <h2 className="section-title">Training Gallery</h2>
         </div>
         <div className="gallery-grid">
-          <div className="gallery-item"><img src="https://images.unsplash.com/photo-1555597673-b21d5c935865?auto=format&fit=crop&q=80" alt="Gallery 1" /></div>
-          <div className="gallery-item"><img src="https://images.unsplash.com/photo-1599058917212-d750089bc07e?auto=format&fit=crop&q=80" alt="Gallery 2" /></div>
-          <div className="gallery-item"><img src="https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?auto=format&fit=crop&q=80" alt="Gallery 3" /></div>
-          <div className="gallery-item"><img src="https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&q=80" alt="Gallery 4" /></div>
+          <div className="gallery-item"><img src={gallery1Img} alt="Gallery 1" /></div>
+          <div className="gallery-item"><img src={gallery2Img} alt="Gallery 2" /></div>
+          <div className="gallery-item"><img src={gallery3Img} alt="Gallery 3" /></div>
+          <div className="gallery-item"><img src={gallery4Img} alt="Gallery 4" /></div>
         </div>
       </section>
 
