@@ -728,7 +728,7 @@ async function syncUsersAndSeed() {
           existing.schedule = scheduleString;
           changed = true;
         }
-        if (existing.status !== 'Active') {
+        if (existing.status !== 'Active' && existing.status !== 'Pending' && existing.status !== 'Rejected') {
           existing.status = 'Active';
           changed = true;
         }
@@ -772,7 +772,7 @@ async function syncUsersAndSeed() {
     const allUsers = await User.find({});
     for (const u of allUsers) {
       const uClean = u.username.toLowerCase().trim();
-      if (!activeUsernames.has(uClean)) {
+      if (!activeUsernames.has(uClean) && u.role !== 'trainer' && u.status !== 'Pending' && u.status !== 'Rejected') {
         await User.deleteOne({ _id: u._id });
         console.log(`[Sync] Deleted outdated/removed User account: ${uClean}`);
       }
@@ -1321,11 +1321,172 @@ connectDb();
 
 // Routes
 
-// --- Branches CRUD ---
+// --- Public Branches & Batches API ---
 app.get('/api/public/branches', async (req, res) => {
   try {
     const list = await Branch.find({ status: 'Active' }).sort({ name: 1 }).lean();
-    res.json(list);
+    let rawNames = list.map(b => b.name).filter(Boolean);
+
+    if (rawNames.length === 0) {
+      const creds = await Credential.find().lean();
+      const setNames = new Set();
+      creds.forEach(c => {
+        if (c.branch && typeof c.branch === 'string' && c.branch.toLowerCase() !== 'all') {
+          setNames.add(c.branch.charAt(0).toUpperCase() + c.branch.slice(1).toLowerCase());
+        }
+      });
+      rawNames = Array.from(setNames);
+    }
+
+    if (rawNames.length === 0) {
+      rawNames = ['Kuttiady', 'Perambra', 'Kallachi', 'Chambra', 'Devargovil', 'Orkatteri', 'Paarakadav'];
+    }
+
+    // Deduplicate case-insensitively while preserving proper case
+    const seen = new Set();
+    const uniqueBranchNames = [];
+    rawNames.forEach(name => {
+      const key = String(name).trim().toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueBranchNames.push(name.trim());
+      }
+    });
+
+    res.json(uniqueBranchNames);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/public/batches', async (req, res) => {
+  try {
+    const list = await Batch.find({ status: 'Active' }).sort({ name: 1 }).lean();
+    
+    // Deduplicate batches strictly by unique code / name
+    const seenCodes = new Set();
+    const batches = [];
+
+    list.forEach(b => {
+      const key = (b.code || b.name || '').toLowerCase().trim();
+      if (!seenCodes.has(key)) {
+        seenCodes.add(key);
+        batches.push({
+          id: b.code || b._id.toString(),
+          code: b.code || b._id.toString(),
+          name: b.name,
+          schedule: b.schedule || 'Mon-Thu',
+          branch: b.branch || 'all',
+          status: b.status || 'Active'
+        });
+      }
+    });
+
+    if (batches.length === 0) {
+      batches.push(
+        { id: 'batch1', code: 'batch1', name: 'Batch 1 (Morning)', schedule: 'Mon-Thu', branch: 'Kuttiady' },
+        { id: 'batch2', code: 'batch2', name: 'Batch 2 (Evening)', schedule: 'Mon-Thu', branch: 'Kuttiady' }
+      );
+    }
+    res.json(batches);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Public Trainer Registration Route ---
+app.post('/api/public/register/trainer', async (req, res) => {
+  try {
+    const { username, email, password, fullName, phone, preferredBranch, preferredBatch } = req.body;
+
+    if (!username || !email || !password || !fullName) {
+      return res.status(400).json({ error: 'Username, Email, Password, and Full Name are required.' });
+    }
+
+    if (typeof username !== 'string' || typeof password !== 'string' || typeof email !== 'string') {
+      return res.status(400).json({ error: 'Invalid input data types.' });
+    }
+
+    const cleanUsername = username.toLowerCase().trim();
+    const cleanEmail = email.toLowerCase().trim();
+
+    if (password.length < (cachedSettings.minPasswordLength || 6)) {
+      return res.status(400).json({ error: `Password must be at least ${cachedSettings.minPasswordLength || 6} characters long.` });
+    }
+
+    const existingUser = await User.findOne({ 
+      $or: [
+        { username: cleanUsername },
+        { email: cleanEmail }
+      ]
+    });
+
+    if (existingUser) {
+      if (existingUser.username === cleanUsername) {
+        return res.status(400).json({ error: 'Username is already registered.' });
+      }
+      if (existingUser.email === cleanEmail) {
+        return res.status(400).json({ error: 'Email address is already registered.' });
+      }
+    }
+
+    let resolvedBranch = preferredBranch || '';
+    let resolvedBatch = preferredBatch || '';
+    let resolvedSchedule = '';
+
+    if (resolvedBranch && resolvedBatch) {
+      const dbBatch = await validateBranchBatchMapping(resolvedBranch, resolvedBatch);
+      if (dbBatch) {
+        resolvedBranch = dbBatch.branchName;
+        resolvedBatch = dbBatch.code;
+        resolvedSchedule = dbBatch.schedule;
+      }
+    }
+
+    const hashedPassword = hashPassword(password);
+    const newTrainer = new User({
+      username: cleanUsername,
+      email: cleanEmail,
+      password: hashedPassword,
+      role: 'trainer',
+      branch: resolvedBranch,
+      batch: resolvedBatch,
+      schedule: resolvedSchedule,
+      status: 'Pending',
+      fullName: fullName.trim(),
+      phone: phone ? phone.trim() : '',
+      passwordChangedAt: new Date()
+    });
+
+    await newTrainer.save();
+
+    // Create system notification for Super Admin
+    try {
+      await new Notification({
+        targetUser: 'superadmin',
+        title: 'New Trainer Registration Request',
+        message: `Trainer ${fullName.trim()} (${cleanUsername}) has registered and is pending approval.`,
+        type: 'TrainerRegistration',
+        priority: 'high',
+        branch: resolvedBranch || 'all'
+      }).save();
+    } catch (notifErr) {
+      console.error('Error creating registration notification:', notifErr);
+    }
+
+    await new SecurityLog({
+      eventType: 'TrainerRegistration',
+      username: cleanUsername,
+      role: 'trainer',
+      description: `Trainer self-registered: ${cleanUsername} (${cleanEmail}). Status: Pending approval.`,
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent']
+    }).save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Trainer registration submitted successfully! Your account is pending Super Admin approval.'
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3535,6 +3696,69 @@ app.get('/api/system/maintenance', async (req, res) => {
 });
 
 
+const isTrainerBranchMatch = (userBranch, bodyBranch) => {
+  if (!userBranch || !bodyBranch) return false;
+  const userBrLower = String(userBranch).toLowerCase();
+  const bodyBrLower = String(bodyBranch).toLowerCase().trim();
+  if (userBrLower.includes('all') || userBrLower.includes(bodyBrLower) || bodyBrLower.includes(userBrLower)) {
+    return true;
+  }
+  const allowedList = userBrLower.split(',').map(s => s.trim());
+  return allowedList.some(b => b === bodyBrLower || bodyBrLower.includes(b) || b.includes(bodyBrLower));
+};
+
+const isTrainerBatchMatch = async (userBatch, bodyBatch) => {
+  if (!userBatch || !bodyBatch) return false;
+  const userBtLower = String(userBatch).toLowerCase();
+  const bodyBtLower = String(bodyBatch).toLowerCase().trim();
+  if (userBtLower.includes('all')) return true;
+
+  const allowedList = userBtLower.split(',').map(s => s.trim());
+  if (allowedList.includes(bodyBtLower)) return true;
+
+  try {
+    const allDbBatches = await Batch.find({}).lean();
+    
+    // Find all identifiers that match bodyBatch
+    const bodyBatchObjs = allDbBatches.filter(b => 
+      String(b._id).toLowerCase() === bodyBtLower ||
+      String(b.code || '').toLowerCase() === bodyBtLower ||
+      String(b.name || '').toLowerCase() === bodyBtLower ||
+      String(b.name || '').toLowerCase().includes(bodyBtLower) ||
+      bodyBtLower.includes(String(b.name || '').toLowerCase())
+    );
+
+    const bodyIdentifiers = new Set([bodyBtLower]);
+    bodyBatchObjs.forEach(b => {
+      if (b._id) bodyIdentifiers.add(String(b._id).toLowerCase());
+      if (b.code) bodyIdentifiers.add(String(b.code).toLowerCase());
+      if (b.name) bodyIdentifiers.add(String(b.name).toLowerCase());
+    });
+
+    for (const allowedPart of allowedList) {
+      if (bodyIdentifiers.has(allowedPart)) return true;
+      const allowedBatchObjs = allDbBatches.filter(b => 
+        String(b._id).toLowerCase() === allowedPart ||
+        String(b.code || '').toLowerCase() === allowedPart ||
+        String(b.name || '').toLowerCase() === allowedPart
+      );
+      for (const b of allowedBatchObjs) {
+        if (
+          bodyIdentifiers.has(String(b._id).toLowerCase()) ||
+          bodyIdentifiers.has(String(b.code || '').toLowerCase()) ||
+          bodyIdentifiers.has(String(b.name || '').toLowerCase())
+        ) {
+          return true;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error during trainer batch match check:', e);
+  }
+
+  return false;
+};
+
 // 7. Login validation (linked to User model authentication & audits)
 app.post('/api/login', async (req, res) => {
   try {
@@ -3595,6 +3819,12 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Invalid username or password' });
     }
 
+    if (user.status === 'Pending') {
+      return res.status(403).json({ success: false, error: 'Your trainer account registration is pending Admin approval. Please wait for Super Admin approval before logging in.' });
+    }
+    if (user.status === 'Rejected') {
+      return res.status(403).json({ success: false, error: 'Your trainer account registration request was rejected by the administrator.' });
+    }
     if (user.status === 'Disabled') {
       return res.status(403).json({ success: false, error: 'Your account has been disabled by the administrator.' });
     }
@@ -3651,11 +3881,9 @@ app.post('/api/login', async (req, res) => {
       const bodyBatch = String(batch || '').toLowerCase().trim();
 
       if (isTrainer) {
-        const allowedBranches = String(user.branch || '').toLowerCase().split(',').map(s => s.trim());
-        const allowedBatches = String(user.batch || '').toLowerCase().split(',').map(s => s.trim());
-
         if (user.role === 'branchadmin') {
-          if (!allowedBranches.includes(bodyBranch) || bodyBatch !== 'admin') {
+          const allowedBranches = String(user.branch || '').toLowerCase().split(',').map(s => s.trim());
+          if (!allowedBranches.includes(bodyBranch) && !allowedBranches.includes('all')) {
             await new LoginHistory({
               username: user.username,
               status: 'Failed',
@@ -3668,7 +3896,10 @@ app.post('/api/login', async (req, res) => {
             return res.status(401).json({ success: false, error: 'Invalid branch selection for this Branch Admin account' });
           }
         } else if (user.role === 'trainer') {
-          if (!allowedBranches.includes(bodyBranch) || !allowedBatches.includes(bodyBatch)) {
+          const branchMatches = isTrainerBranchMatch(user.branch, bodyBranch);
+          const batchMatches = await isTrainerBatchMatch(user.batch, bodyBatch);
+
+          if (!branchMatches || !batchMatches) {
             await new LoginHistory({
               username: user.username,
               status: 'Failed',
@@ -6070,7 +6301,7 @@ app.put('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'de
   }
 });
 
-app.delete('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
+app.delete('/api/admins/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
   try {
     const { id } = req.params;
     const isPermanent = req.query.permanent === 'true';
@@ -6300,6 +6531,175 @@ developerRouter.delete('/help-reports/:id', async (req, res) => {
     const deleted = await HelpReport.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Help report not found' });
     res.json({ success: true, message: 'Help report deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Trainer Approvals & Batch Allocation APIs ---
+app.get('/api/admin/pending-trainers', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+  try {
+    const { role, branch } = req.user;
+    let query = { role: 'trainer', status: 'Pending' };
+    if (role === 'branchadmin') {
+      query.branch = new RegExp(`^${branch}$`, 'i');
+    }
+    const pendingList = await User.find(query).select('-password').sort({ createdAt: -1 }).lean();
+    res.json(pendingList);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/approve-trainer/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { branch, batch } = req.body;
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ error: 'Trainer account request not found.' });
+    }
+
+    if (user.role !== 'trainer') {
+      return res.status(400).json({ error: 'Selected account is not a trainer account.' });
+    }
+
+    if (req.user.role === 'branchadmin') {
+      if (branch && branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot approve trainer for another branch.' });
+      }
+    }
+
+    let resolvedBranch = branch || user.branch;
+    let resolvedBatch = batch || user.batch;
+    let resolvedSchedule = user.schedule || 'Mon-Thu';
+
+    if (resolvedBranch && resolvedBatch) {
+      const dbBatch = await validateBranchBatchMapping(resolvedBranch, resolvedBatch);
+      if (dbBatch) {
+        resolvedBranch = dbBatch.branchName;
+        resolvedBatch = dbBatch.code;
+        resolvedSchedule = dbBatch.schedule;
+        
+        dbBatch.trainer = user.username;
+        await dbBatch.save();
+      }
+    }
+
+    user.status = 'Active';
+    user.branch = resolvedBranch;
+    user.batch = resolvedBatch;
+    user.schedule = resolvedSchedule;
+    await user.save();
+
+    const creds = await Credential.findOne({ configType: 'main' });
+    if (creds) {
+      const key = `${resolvedBranch || 'Kuttiady'}_${resolvedBatch || 'batch1'}`;
+      const entry = { username: user.username, password: user.password };
+      if (creds.batchCredentials instanceof Map) {
+        creds.batchCredentials.set(key, entry);
+      } else {
+        if (!creds.batchCredentials) creds.batchCredentials = {};
+        creds.batchCredentials[key] = entry;
+      }
+      creds.markModified('batchCredentials');
+      await creds.save();
+    }
+
+    await new SecurityLog({
+      eventType: 'TrainerApproval',
+      username: req.user.username,
+      description: `Approved trainer account: ${user.username} for Branch: ${resolvedBranch}, Batch: ${resolvedBatch}`,
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent']
+    }).save();
+
+    res.json({ success: true, message: `Trainer ${user.username} approved successfully!`, user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/reject-trainer/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ error: 'Trainer account request not found.' });
+    }
+
+    user.status = 'Rejected';
+    await user.save();
+
+    await new SecurityLog({
+      eventType: 'TrainerRejection',
+      username: req.user.username,
+      description: `Rejected trainer account registration: ${user.username}`,
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent']
+    }).save();
+
+    res.json({ success: true, message: `Trainer registration for ${user.username} rejected.` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/allocate-batch', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
+  try {
+    const { userId, branch, batch } = req.body;
+    if (!userId || !branch || !batch) {
+      return res.status(400).json({ error: 'userId, branch, and batch are required.' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User account not found.' });
+    }
+
+    if (req.user.role === 'branchadmin') {
+      if (branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Access denied: Cannot reassign trainer to another branch.' });
+      }
+    }
+
+    const dbBatch = await validateBranchBatchMapping(branch, batch);
+    if (!dbBatch) {
+      return res.status(400).json({ error: `Selected batch '${batch}' is not valid for branch '${branch}'` });
+    }
+
+    user.branch = dbBatch.branchName;
+    user.batch = dbBatch.code;
+    user.schedule = dbBatch.schedule;
+    await user.save();
+
+    dbBatch.trainer = user.username;
+    await dbBatch.save();
+
+    const creds = await Credential.findOne({ configType: 'main' });
+    if (creds) {
+      const key = `${dbBatch.branchName}_${dbBatch.code}`;
+      const entry = { username: user.username, password: user.password };
+      if (creds.batchCredentials instanceof Map) {
+        creds.batchCredentials.set(key, entry);
+      } else {
+        if (!creds.batchCredentials) creds.batchCredentials = {};
+        creds.batchCredentials[key] = entry;
+      }
+      creds.markModified('batchCredentials');
+      await creds.save();
+    }
+
+    await new SecurityLog({
+      eventType: 'BatchAllocation',
+      username: req.user.username,
+      description: `Reallocated trainer ${user.username} to Branch: ${dbBatch.branchName}, Batch: ${dbBatch.code}`,
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent']
+    }).save();
+
+    res.json({ success: true, message: `Batch ${dbBatch.name} allocated to ${user.username} successfully!`, user });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -8,7 +8,7 @@ const userSchema = new mongoose.Schema({
   branch: { type: String, default: '' },
   batch: { type: String, default: '' },
   schedule: { type: String, default: '' },
-  status: { type: String, required: true, default: 'Active', enum: ['Active', 'Disabled', 'SoftDeleted'] },
+  status: { type: String, required: true, default: 'Active', enum: ['Active', 'Pending', 'Rejected', 'Disabled', 'SoftDeleted'] },
   fullName: { type: String, default: '' },
   phone: { type: String, default: '' },
   profilePhoto: { type: String, default: '' },

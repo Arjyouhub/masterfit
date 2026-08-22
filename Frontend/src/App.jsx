@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  Users, CalendarDays, Calendar, Layers, Wallet, Bell, Settings, LogOut, UserPlus, AlertTriangle, X,
+  Users, CalendarDays, Calendar, Layers, Wallet, Bell, Settings, LogOut, UserPlus, AlertTriangle, AlertCircle, X,
   ChevronLeft, ChevronRight, CheckCircle, XCircle, MessageCircle, MessageSquare,
   Search, Phone, Trash2, ArrowRight, Activity, MapPin, TrendingUp, Award, Menu,
   Shield, Lock, Unlock, FileDown, FileUp, Database, Terminal, Cpu, HardDrive, Key, History,
-  Eye, EyeOff, Star, Megaphone
+  Eye, EyeOff, Star, Megaphone, Send
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import './index.css';
@@ -14,7 +14,7 @@ import gallery3Img from './assets/gallery3.jpg';
 import gallery4Img from './assets/gallery4.jpg';
 
 // Academy Branches static list fallback
-const DEFAULT_BRANCHES = [];
+const DEFAULT_BRANCHES = ['Kuttiady', 'Perambra', 'Kallachi', 'Chambra', 'Devargovil', 'Orkatteri', 'Paarakadav'];
 
 const DEFAULT_BATCH_OPTIONS = [];
 
@@ -457,6 +457,7 @@ function App() {
     priority: 'high'
   });
   const [submittingGradingAnnouncement, setSubmittingGradingAnnouncement] = useState(false);
+  const [readDetailsModalNotification, setReadDetailsModalNotification] = useState(null);
 
   // Modals for Grading
   const [isGradeModalOpen, setIsGradeModalOpen] = useState(false);
@@ -733,6 +734,36 @@ function App() {
   const [editingAdmin, setEditingAdmin] = useState(null);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
 
+  // Trainer Registration & Approval States
+  const [loginTab, setLoginTab] = useState('login');
+  const [trainerRegForm, setTrainerRegForm] = useState({
+    username: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    fullName: '',
+    phone: '',
+    preferredBranch: '',
+    preferredBatch: ''
+  });
+  const [trainerRegError, setTrainerRegError] = useState('');
+  const [trainerRegSuccess, setTrainerRegSuccess] = useState('');
+  const [isSubmittingTrainerReg, setIsSubmittingTrainerReg] = useState(false);
+
+  // Trainer Approvals & Batch Allocation Page States
+  const [pendingTrainers, setPendingTrainers] = useState([]);
+  const [loadingPendingTrainers, setLoadingPendingTrainers] = useState(false);
+  const [approvalBranchSelections, setApprovalBranchSelections] = useState({});
+  const [approvalBatchSelections, setApprovalBatchSelections] = useState({});
+  const [activeTrainerBranchSelections, setActiveTrainerBranchSelections] = useState({});
+  const [activeTrainerBatchSelections, setActiveTrainerBatchSelections] = useState({});
+  const [trainerApprovalSuccess, setTrainerApprovalSuccess] = useState('');
+  const [trainerApprovalError, setTrainerApprovalError] = useState('');
+  const [selectedTrainerForAllocation, setSelectedTrainerForAllocation] = useState(null);
+  const [selectedPendingTrainerForApproval, setSelectedPendingTrainerForApproval] = useState(null);
+  const [trainerToDeleteConfirm, setTrainerToDeleteConfirm] = useState(null);
+  const [deletingTrainerLoading, setDeletingTrainerLoading] = useState(false);
+
   // Fee rate configuration states
   const [monthlyFeeRate, setMonthlyFeeRate] = useState(600);
   const [admissionFeeRate, setAdmissionFeeRate] = useState(1500);
@@ -937,16 +968,35 @@ function App() {
 
   const sortBranchesAlphabetically = (branchesList) => {
     if (!Array.isArray(branchesList)) return [];
-    return [...branchesList].sort((a, b) => {
-      const aStr = String(a).toLowerCase();
-      const bStr = String(b).toLowerCase();
-      return aStr.localeCompare(bStr, undefined, { sensitivity: 'base' });
+    const seen = new Map();
+    branchesList.forEach(b => {
+      if (!b) return;
+      const clean = String(b).trim();
+      const key = clean.toLowerCase();
+      if (!seen.has(key)) {
+        const formatted = clean.charAt(0).toUpperCase() + clean.slice(1);
+        seen.set(key, formatted);
+      }
+    });
+    return Array.from(seen.values()).sort((a, b) => {
+      return a.localeCompare(b, undefined, { sensitivity: 'base' });
     });
   };
 
   const sortBatchesAlphabetically = (batchesList) => {
     if (!Array.isArray(batchesList)) return [];
-    return [...batchesList].sort((a, b) => {
+    const seen = new Map();
+    batchesList.forEach(b => {
+      if (!b) return;
+      const branchKey = String(b.branch || '').trim().toLowerCase();
+      const nameKey = String(b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const schedKey = String(b.schedule || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const comboKey = `${branchKey}_${nameKey}_${schedKey}`;
+      if (!seen.has(comboKey)) {
+        seen.set(comboKey, b);
+      }
+    });
+    return Array.from(seen.values()).sort((a, b) => {
       const aName = (a.name || '').toLowerCase().replace(/\s+/g, '');
       const bName = (b.name || '').toLowerCase().replace(/\s+/g, '');
       return aName.localeCompare(bName, undefined, { numeric: true, sensitivity: 'base' });
@@ -973,54 +1023,42 @@ function App() {
       targetBranch = selectedBranchLogin || 'All';
     }
 
-    const branchKey = targetBranch.toLowerCase();
-    if (branchKey === 'all') {
-      const seenIds = new Set();
-      const seenNames = new Set();
-      const res = batchOptions.filter(opt => {
-        const idKey = (opt.id || opt.code || '').toLowerCase();
-        const nameKey = `${(opt.name || '').toLowerCase().replace(/\s+/g, '')}_${(opt.schedule || '').toLowerCase()}`;
-        if (seenIds.has(idKey) || seenNames.has(nameKey)) return false;
-        seenIds.add(idKey);
-        seenNames.add(nameKey);
+    const branchKey = String(targetBranch || 'All').toLowerCase().trim();
+    
+    let filtered = batchOptions;
+    if (branchKey !== 'all') {
+      filtered = batchOptions.filter(opt => {
+        let branchMatches = false;
+        if (opt.branch) {
+          const optBranch = String(opt.branch).toLowerCase().trim();
+          branchMatches = optBranch === 'all' || optBranch === branchKey;
+        } else {
+          branchMatches = true;
+        }
+        if (!branchMatches) return false;
+
+        if (requireCredentials && loggedInUser) {
+          return batchCredentials[`${branchKey}_${opt.id}`] !== undefined;
+        }
         return true;
       });
-      return sortBatchesAlphabetically(res);
     }
 
-    // Filter by branch
-    const filtered = batchOptions.filter(opt => {
-      // 1. Check branch match
-      let branchMatches = false;
-      if (opt.branch) {
-        if (opt.branch.toLowerCase() === 'all') {
-          branchMatches = true;
-        } else {
-          branchMatches = opt.branch.toLowerCase() === branchKey;
-        }
-      } else {
-        branchMatches = true;
-      }
-      if (!branchMatches) return false;
-
-      // 2. Check credentials if required and logged in
-      if (requireCredentials && loggedInUser) {
-        return batchCredentials[`${branchKey}_${opt.id}`] !== undefined;
-      }
-      return true;
-    });
-
-    // Deduplicate by id and by normalized name + schedule
-    const seenIds = new Set();
-    const seenNames = new Set();
+    const seenCombos = new Set();
     const res = filtered.filter(opt => {
-      const idKey = (opt.id || opt.code || '').toLowerCase();
-      const nameKey = `${(opt.name || '').toLowerCase().replace(/\s+/g, '')}_${(opt.schedule || '').toLowerCase()}`;
-      if (seenIds.has(idKey) || seenNames.has(nameKey)) return false;
-      seenIds.add(idKey);
-      seenNames.add(nameKey);
+      const bKey = String(opt.branch || '').toLowerCase().trim();
+      const idKey = String(opt.id || opt.code || '').toLowerCase().trim();
+      const normName = String(opt.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const normSched = String(opt.schedule || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const comboKey = `${bKey}_${normName}_${normSched}`;
+      const idCombo = `${bKey}_${idKey}`;
+      
+      if (seenCombos.has(comboKey) || (idKey && seenCombos.has(idCombo))) return false;
+      seenCombos.add(comboKey);
+      if (idKey) seenCombos.add(idCombo);
       return true;
     });
+
     return sortBatchesAlphabetically(res);
   };
 
@@ -1485,6 +1523,32 @@ function App() {
       .catch(err => alert("Error: " + err.message));
   };
 
+  const handleConfirmDeleteTrainer = (trainer) => {
+    if (!trainer) return;
+    setDeletingTrainerLoading(true);
+
+    fetch(`${API_BASE_URL}/admins/${trainer._id}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${getSessionToken()}`
+      }
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to remove trainer account');
+        setGlobalSuccess(`Trainer login access for @${trainer.username} has been disabled. All historical class & attendance details remain 100% saved in database.`);
+        setTrainerToDeleteConfirm(null);
+        setSelectedTrainerForAllocation(null);
+        reloadAllAppData();
+      })
+      .catch(err => {
+        alert('Error removing trainer: ' + err.message);
+      })
+      .finally(() => {
+        setDeletingTrainerLoading(false);
+      });
+  };
+
   const handleToggleAdminLock = (id, currentLocked) => {
     fetch(`${API_BASE_URL}/admins/${id}`, {
       method: 'PUT',
@@ -1600,32 +1664,31 @@ function App() {
     }
   }, [gradingFilterBranch, gradingFilterBatch, currentView, loggedInUser]);
 
-  // Dynamic batch loading for Login Page
+  // Dynamic branches & batches loading for Login & Trainer Registration from MongoDB
   useEffect(() => {
     const token = getSessionToken();
-    if (token) return; // Only run this when logged out (on login page)
+    if (token) return; // Only run when logged out (on login / registration page)
 
-    const selectedBranchObj = customBranches.find(
-      b => b.name.toLowerCase() === selectedBranchLogin.toLowerCase()
-    );
+    // 1. Fetch active database branches
+    fetch(`${API_BASE_URL}/public/branches`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setBranches(data);
+        }
+      })
+      .catch(err => console.warn('Public branches fetch warning:', err));
 
-    if (selectedBranchObj) {
-      fetch(`${API_BASE_URL}/public/batches?branchId=${selectedBranchObj._id}`)
-        .then(res => res.ok ? res.json() : [])
-        .then(data => {
-          setCustomBatches(data || []);
-          const uniqueBatches = [
-            ...DEFAULT_BATCH_OPTIONS.map(b => ({ ...b, branch: 'all' })),
-            ...(data || []).map(b => ({ id: b.code, name: b.name, schedule: b.schedule, branch: b.branch, branchId: b.branchId, branchName: b.branchName, status: b.status || 'Active' }))
-          ];
-          setBatchOptions(sortBatchesAlphabetically(uniqueBatches));
-        })
-        .catch(err => console.error('Error fetching public batches:', err));
-    } else {
-      setCustomBatches([]);
-      setBatchOptions(sortBatchesAlphabetically(DEFAULT_BATCH_OPTIONS.map(b => ({ ...b, branch: 'all' }))));
-    }
-  }, [selectedBranchLogin, customBranches]);
+    // 2. Fetch active database batches
+    fetch(`${API_BASE_URL}/public/batches`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setBatchOptions(sortBatchesAlphabetically(data));
+        }
+      })
+      .catch(err => console.warn('Public batches fetch warning:', err));
+  }, [loggedInUser, appMode]);
 
 
 
@@ -1634,13 +1697,14 @@ function App() {
     const token = getSessionToken();
     if (token) return; // Only when logged out
 
-    if (branches.length > 0) {
-      const matched = branches.find(b => b.toLowerCase() === selectedBranchLogin.toLowerCase());
+    if (Array.isArray(branches) && branches.length > 0) {
+      const currentLoginBr = String(selectedBranchLogin || '');
+      const matched = branches.find(b => typeof b === 'string' && b.toLowerCase() === currentLoginBr.toLowerCase());
       if (matched) {
         if (selectedBranchLogin !== matched) {
           setSelectedBranchLogin(matched);
         }
-      } else {
+      } else if (branches[0]) {
         setSelectedBranchLogin(branches[0]);
       }
     }
@@ -1694,14 +1758,14 @@ function App() {
   useEffect(() => {
     if (loggedInUser) {
       if (isAdminUser(loggedInUser)) {
-        const matching = branches.find(b => b.toLowerCase() === 'kuttiady');
+        const matching = (branches || []).find(b => typeof b === 'string' && b.toLowerCase() === 'kuttiady');
         setBranchFilter(matching || 'Kuttiady');
       } else {
         const resolvedBranch = getLoggedInUserBranch();
-        const matching = branches.find(b => b.toLowerCase() === resolvedBranch.toLowerCase());
-        setBranchFilter(matching || resolvedBranch);
-        setBatchForm(prev => ({ ...prev, branch: resolvedBranch.toLowerCase() }));
-        setNewBatchForm(prev => ({ ...prev, branch: resolvedBranch.toLowerCase() }));
+        const matching = (branches || []).find(b => typeof b === 'string' && b.toLowerCase() === String(resolvedBranch || '').toLowerCase());
+        setBranchFilter(matching || resolvedBranch || 'Kuttiady');
+        setBatchForm(prev => ({ ...prev, branch: String(resolvedBranch || 'kuttiady').toLowerCase() }));
+        setNewBatchForm(prev => ({ ...prev, branch: String(resolvedBranch || 'kuttiady').toLowerCase() }));
       }
     }
   }, [loggedInUser, branches]);
@@ -1710,7 +1774,7 @@ function App() {
   useEffect(() => {
     if (loggedInUser) {
       if (isBatchAdminUser(loggedInUser)) {
-        const activeBatch = batchOptions.find(b => b.id.toLowerCase() === userBatch.toLowerCase());
+        const activeBatch = (batchOptions || []).find(b => b && b.id && String(b.id).toLowerCase() === String(userBatch || '').toLowerCase());
         if (activeBatch) {
           setBatchFilter(activeBatch.id);
         } else {
@@ -1790,13 +1854,187 @@ function App() {
 
   // Fetch active sessions when settings page or credentials list is loaded
   useEffect(() => {
-    if ((currentView === 'settings' || currentView === 'credentials-list') && (isAdminUser(loggedInUser) || isBranchAdmin(loggedInUser))) {
+    if ((currentView === 'settings' || currentView === 'credentials-list' || currentView === 'trainer-approvals') && (isAdminUser(loggedInUser) || isBranchAdmin(loggedInUser))) {
       fetch(`${API_BASE_URL}/sessions`)
         .then(res => res.json())
         .then(data => setActiveSessions(data || []))
         .catch(err => console.error('Error fetching sessions:', err));
     }
   }, [currentView, loggedInUser]);
+
+  const loadPendingTrainers = () => {
+    const token = getSessionToken();
+    if (!token) return;
+    setLoadingPendingTrainers(true);
+    fetch(`${API_BASE_URL}/admin/pending-trainers`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        setPendingTrainers(data || []);
+        setLoadingPendingTrainers(false);
+      })
+      .catch(err => {
+        console.error('Error fetching pending trainers:', err);
+        setLoadingPendingTrainers(false);
+      });
+  };
+
+  useEffect(() => {
+    if ((currentView === 'trainer-approvals' || currentView === 'credentials-list') && (isAdminUser(loggedInUser) || isBranchAdmin(loggedInUser))) {
+      loadPendingTrainers();
+      fetch(`${API_BASE_URL}/admins`)
+        .then(res => res.ok ? res.json() : [])
+        .then(data => setAdminsList(data || []))
+        .catch(err => console.error('Error fetching admin accounts list:', err));
+    }
+  }, [currentView, loggedInUser]);
+
+  const handleApproveTrainer = (trainerId) => {
+    const token = getSessionToken();
+    if (!token) return;
+    setTrainerApprovalError('');
+    setTrainerApprovalSuccess('');
+
+    const targetTrainer = pendingTrainers.find(t => t._id === trainerId);
+    const branch = approvalBranchSelections[trainerId] || (targetTrainer ? targetTrainer.branch : '') || (branches[0] || 'Kuttiady');
+    const batch = approvalBatchSelections[trainerId] || (targetTrainer ? targetTrainer.batch : '') || 'batch1';
+
+    fetch(`${API_BASE_URL}/admin/approve-trainer/${trainerId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ branch, batch })
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to approve trainer account'); });
+        }
+        return res.json();
+      })
+      .then(data => {
+        setTrainerApprovalSuccess(data.message || 'Trainer approved successfully!');
+        loadPendingTrainers();
+        reloadAllAppData();
+      })
+      .catch(err => {
+        setTrainerApprovalError(err.message);
+      });
+  };
+
+  const handleRejectTrainer = (trainerId) => {
+    if (!window.confirm("Are you sure you want to reject this trainer registration request?")) return;
+    const token = getSessionToken();
+    if (!token) return;
+    setTrainerApprovalError('');
+    setTrainerApprovalSuccess('');
+
+    fetch(`${API_BASE_URL}/admin/reject-trainer/${trainerId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to reject trainer account'); });
+        }
+        return res.json();
+      })
+      .then(data => {
+        setTrainerApprovalSuccess(data.message || 'Trainer registration rejected.');
+        loadPendingTrainers();
+        reloadAllAppData();
+      })
+      .catch(err => {
+        setTrainerApprovalError(err.message);
+      });
+  };
+
+  const handleReallocateBatch = (userId, currentBranch, currentBatch) => {
+    const token = getSessionToken();
+    if (!token) return;
+    setTrainerApprovalError('');
+    setTrainerApprovalSuccess('');
+
+    const branch = activeTrainerBranchSelections[userId] || currentBranch;
+    const batch = activeTrainerBatchSelections[userId] || currentBatch;
+
+    fetch(`${API_BASE_URL}/admin/allocate-batch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ userId, branch, batch })
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to reallocate batch'); });
+        }
+        return res.json();
+      })
+      .then(data => {
+        setTrainerApprovalSuccess(data.message || 'Batch reallocated successfully!');
+        reloadAllAppData();
+      })
+      .catch(err => {
+        setTrainerApprovalError(err.message);
+      });
+  };
+
+  const handleTrainerRegistration = (e) => {
+    e.preventDefault();
+    setTrainerRegError('');
+    setTrainerRegSuccess('');
+
+    if (trainerRegForm.password !== trainerRegForm.confirmPassword) {
+      setTrainerRegError('Passwords do not match.');
+      return;
+    }
+
+    setIsSubmittingTrainerReg(true);
+    fetch(`${API_BASE_URL}/public/register/trainer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: trainerRegForm.username,
+        email: trainerRegForm.email,
+        password: trainerRegForm.password,
+        fullName: trainerRegForm.fullName,
+        phone: trainerRegForm.phone,
+        preferredBranch: trainerRegForm.preferredBranch,
+        preferredBatch: trainerRegForm.preferredBatch
+      })
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(data => { throw new Error(data.error || 'Failed to submit trainer registration'); });
+        }
+        return res.json();
+      })
+      .then(data => {
+        setIsSubmittingTrainerReg(false);
+        setTrainerRegSuccess(data.message || 'Registration submitted successfully! Your account is pending Super Admin approval.');
+        setTrainerRegForm({
+          username: '',
+          email: '',
+          password: '',
+          confirmPassword: '',
+          fullName: '',
+          phone: '',
+          preferredBranch: branches[0] || 'Kuttiady',
+          preferredBatch: ''
+        });
+      })
+      .catch(err => {
+        setIsSubmittingTrainerReg(false);
+        setTrainerRegError(err.message);
+      });
+  };
 
   // Fetch raw credentials and admin accounts list when credentials-list page is loaded
   useEffect(() => {
@@ -7067,19 +7305,39 @@ function App() {
 
     // Helper to determine if a day of the week has scheduled batch/class
     const isDayBatchScheduled = (dayOfWeekShortName) => {
+      // 1. If specific batch is selected
       if (batchFilter !== 'All') {
-        const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchFilter.toLowerCase());
+        const selectedBatchObj = batchOptions.find(b => (b.id || b.code || '').toLowerCase() === batchFilter.toLowerCase());
         if (selectedBatchObj) {
           const bDays = parseScheduleToDays(selectedBatchObj.schedule);
           return !!bDays[dayOfWeekShortName];
         }
       }
+
+      // 2. Filter active batches for current branch
+      const activeBatches = batchOptions.filter(b =>
+        (branchFilter === 'All' || !b.branch || b.branch.toLowerCase().trim() === branchFilter.toLowerCase().trim()) &&
+        (b.status || 'Active') === 'Active'
+      );
+
+      if (activeBatches.length > 0) {
+        return activeBatches.some(b => {
+          const bDays = parseScheduleToDays(b.schedule);
+          return !!bDays[dayOfWeekShortName];
+        });
+      }
+
+      // 3. Fallback to student schedules if batches list is loading
       const relevantStudents = searchedStudents.filter(s => (s.status || 'Active') !== 'Inactive' && (branchFilter === 'All' || s.branch === branchFilter));
-      if (relevantStudents.length === 0) return true;
-      return relevantStudents.some(s => {
-        const sched = s.schedule || batchOptions.find(b => b.id.toLowerCase() === (s.batch || '').toLowerCase())?.schedule;
-        return sched ? !!parseScheduleToDays(sched)[dayOfWeekShortName] : false;
-      });
+      if (relevantStudents.length > 0) {
+        return relevantStudents.some(s => {
+          const sched = s.schedule || batchOptions.find(b => (b.id || b.code || '').toLowerCase() === (s.batch || '').toLowerCase())?.schedule;
+          return sched ? !!parseScheduleToDays(sched)[dayOfWeekShortName] : false;
+        });
+      }
+
+      // 4. Default: Sunday is off day, Mon-Sat are potential batch days
+      return dayOfWeekShortName !== 'Sun';
     };
 
     const days = [];
@@ -7110,13 +7368,19 @@ function App() {
         <div
           key={i}
           className={`calendar-day ${dateStr === markingDate ? 'today' : ''}`}
-          onClick={() => setMarkingDate(dateStr)}
+          onClick={() => {
+            setMarkingDate(dateStr);
+            setTimeout(() => {
+              const el = document.getElementById('daily-attendance-section');
+              if (el) el.scrollIntoView({ behavior: 'smooth' });
+            }, 100);
+          }}
           style={{
             cursor: 'pointer',
-            opacity: isClassDay ? 1 : 0.4,
+            opacity: isClassDay ? 1 : 0.45,
             background: dateStr === markingDate
-              ? 'rgba(229, 9, 20, 0.15)'
-              : (!isClassDay ? 'rgba(255, 255, 255, 0.01)' : 'rgba(255, 255, 255, 0.03)'),
+              ? 'rgba(229, 9, 20, 0.18)'
+              : (!isClassDay ? 'rgba(255, 255, 255, 0.01)' : 'rgba(255, 255, 255, 0.04)'),
             border: dateStr === markingDate
               ? '1px solid var(--color-primary)'
               : (!isClassDay ? '1px dashed rgba(255, 255, 255, 0.08)' : '1px solid var(--glass-border)')
@@ -7134,12 +7398,12 @@ function App() {
                 </span>
               </div>
             ) : isClassDay ? (
-              <span style={{ fontSize: '0.65rem', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', padding: '2px 5px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.2)', display: 'inline-block', marginTop: '2px' }}>
+              <span style={{ fontSize: '0.65rem', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', padding: '2px 5px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.2)', display: 'inline-block', marginTop: '2px', fontWeight: 600 }}>
                 Class Day
               </span>
             ) : (
               <span style={{ fontSize: '0.65rem', color: '#8e8e93', background: 'rgba(255, 255, 255, 0.04)', padding: '2px 5px', borderRadius: '4px', border: '1px solid rgba(255, 255, 255, 0.06)', display: 'inline-block', marginTop: '2px' }}>
-                No Batch
+                No Batches
               </span>
             )}
           </div>
@@ -7165,44 +7429,67 @@ function App() {
 
       // 1. Day of Week filter: Only show students whose batch/schedule runs on this day of the week
       const studentSched = s.schedule || (() => {
-        const bObj = batchOptions.find(b => b.id.toLowerCase() === (s.batch || '').toLowerCase());
+        const bObj = batchOptions.find(b => 
+          (b.id && String(b.id).toLowerCase() === String(s.batch || '').toLowerCase()) ||
+          (b.code && String(b.code).toLowerCase() === String(s.batch || '').toLowerCase()) ||
+          (b.name && String(b.name).toLowerCase() === String(s.batch || '').toLowerCase())
+        );
         return bObj ? bObj.schedule : '';
       })();
 
       if (studentSched) {
         const activeDaysMap = parseScheduleToDays(studentSched);
-        if (activeDaysMap && !activeDaysMap[markingDayOfWeekShort]) {
+        if (activeDaysMap && Object.values(activeDaysMap).some(Boolean) && !activeDaysMap[markingDayOfWeekShort]) {
           return false; // Does not have class on this day
         }
       }
 
       // 2. Time Slot Filter (All, Morning, Evening, Night)
-      const matchBatch = attendanceBatchFilter === 'All' ||
-        s.batch === attendanceBatchFilter ||
+      const matchBatchSlot = attendanceBatchFilter === 'All' ||
+        (s.batch && String(s.batch).toLowerCase() === attendanceBatchFilter.toLowerCase()) ||
         (() => {
-          const batchObj = batchOptions.find(b => b.id.toLowerCase() === (s.batch || '').toLowerCase());
+          const batchObj = batchOptions.find(b => 
+            (b.id && String(b.id).toLowerCase() === String(s.batch || '').toLowerCase()) ||
+            (b.code && String(b.code).toLowerCase() === String(s.batch || '').toLowerCase()) ||
+            (b.name && String(b.name).toLowerCase() === String(s.batch || '').toLowerCase())
+          );
           return batchObj && batchObj.slotType && batchObj.slotType.toLowerCase() === attendanceBatchFilter.toLowerCase();
         })();
 
-      // 3. Branch filter
-      const matchBranch = branchFilter === 'All' || s.branch === branchFilter;
+      // 3. Branch filter (case-insensitive & fallback)
+      const matchBranch = branchFilter === 'All' || 
+        !s.branch || 
+        !branchFilter || 
+        String(s.branch).toLowerCase().trim() === String(branchFilter).toLowerCase().trim() ||
+        String(s.branch).toLowerCase().includes(String(branchFilter).toLowerCase().trim()) ||
+        String(branchFilter).toLowerCase().includes(String(s.branch).toLowerCase().trim());
 
-      // 4. Batch filter dropdown
+      // 4. Batch filter dropdown (matching id, code, or name)
       const matchBatchSchedule = batchFilter === 'All' || (() => {
-        const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchFilter.toLowerCase());
-        if (!selectedBatchObj) return false;
-        const studentBatchLower = (s.batch || '').toLowerCase().trim();
-        const targetIdLower = selectedBatchObj.id.toLowerCase().trim();
-        const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
-        if (studentBatchLower === targetIdLower) return true;
-        if (studentBatchLower === targetNameLower) return true;
-        if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
-          return false;
+        if (!s.batch || !batchFilter) return true;
+        const studentBatchLower = String(s.batch).toLowerCase().trim();
+        const selectedIdLower = String(batchFilter).toLowerCase().trim();
+        if (studentBatchLower === selectedIdLower) return true;
+
+        const selectedBatchObj = batchOptions.find(b => 
+          (b.id && String(b.id).toLowerCase() === selectedIdLower) ||
+          (b.code && String(b.code).toLowerCase() === selectedIdLower) ||
+          (b.name && String(b.name).toLowerCase() === selectedIdLower)
+        );
+        if (selectedBatchObj) {
+          if (
+            (selectedBatchObj.id && String(selectedBatchObj.id).toLowerCase() === studentBatchLower) ||
+            (selectedBatchObj.code && String(selectedBatchObj.code).toLowerCase() === studentBatchLower) ||
+            (selectedBatchObj.name && String(selectedBatchObj.name).toLowerCase() === studentBatchLower)
+          ) {
+            return true;
+          }
+          return schedulesMatch(s.schedule, selectedBatchObj.schedule);
         }
-        return schedulesMatch(s.schedule, selectedBatchObj.schedule);
+        return true;
       })();
 
-      return matchBatch && matchBranch && matchBatchSchedule;
+      return matchBatchSlot && matchBranch && matchBatchSchedule;
     });
 
     let dailyPresentCount = 0;
@@ -7281,7 +7568,7 @@ function App() {
         {attendanceTab === 'monthly' ? (
           <>
             {/* Daily Attendance Controller Card */}
-            <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1.25rem' }}>
+            <div id="daily-attendance-section" className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1.25rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '1rem', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '0.75rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <h3 className="panel-title" style={{ fontSize: '0.95rem', margin: 0, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
@@ -8586,10 +8873,20 @@ function App() {
 
   const renderAnnouncements = () => {
     const isCanPublish = userRole === 'developer' || userRole === 'superadmin' || userRole === 'admin' || userRole === 'branchadmin';
-    const activeList = notifications && notifications.length > 0 ? notifications : devNotifications;
+    const rawList = notifications && notifications.length > 0 ? notifications : devNotifications;
+    const activeAnnouncementsList = (rawList || []).filter(n =>
+      n && n.type !== 'TrainerRegistration' && n.targetUser !== 'superadmin' && !String(n.title || '').includes('Trainer Registration')
+    );
+
+    const trainerOptions = Array.from(new Set(
+      (adminsList || [])
+        .filter(a => (a.role === 'trainer' || a.role === 'coordinator') && a.status === 'Active')
+        .map(a => a.fullName || a.username)
+        .filter(Boolean)
+    ));
 
     return (
-      <div className="announcements-view-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <div className="announcements-view-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '1200px', margin: '0 auto' }}>
         {/* Banner Header */}
         <div style={{
           background: 'linear-gradient(135deg, rgba(229, 9, 20, 0.15) 0%, rgba(255, 215, 0, 0.08) 100%)',
@@ -8597,7 +8894,7 @@ function App() {
           borderRadius: '16px',
           padding: '1.25rem 1.5rem',
           display: 'flex',
-          justify: 'space-between',
+          justifyContent: 'space-between',
           alignItems: 'center',
           flexWrap: 'wrap',
           gap: '1rem'
@@ -8606,129 +8903,320 @@ function App() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Megaphone size={24} color="#FFD700" />
               <h2 style={{ margin: 0, color: '#fff', fontSize: '1.3rem', fontWeight: 700 }}>
-                Announcements & Notifications
+                Broadcast & Announcements Center
               </h2>
             </div>
             <p style={{ margin: '4px 0 0 0', color: '#cbd5e1', fontSize: '0.85rem' }}>
-              View and publish broadcast alerts, belt grading exam dates, and system updates for all branches.
+              Send instant broadcast notices to trainers, branch admins, or specific branches. Alerts appear automatically upon user login.
             </p>
           </div>
-
-          {isCanPublish && (
-            <button
-              className="btn-primary"
-              onClick={() => setIsGradingAnnouncementModalOpen(true)}
-              style={{
-                background: 'linear-gradient(135deg, #E50914, #c10712)',
-                borderRadius: '10px',
-                padding: '0.6rem 1.2rem',
-                fontSize: '0.85rem',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                boxShadow: '0 4px 15px rgba(229, 9, 20, 0.4)'
-              }}
-            >
-              <Megaphone size={16} /> Post New Announcement
-            </button>
-          )}
         </div>
 
-        {/* Announcements List */}
-        <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '16px', padding: '1.25rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-            <h3 style={{ margin: 0, color: '#fff', fontSize: '1.05rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Bell size={18} color="var(--color-primary)" />
-              Active Announcements ({activeList.length})
+        {/* Send Broadcast Announcement Form */}
+        {isCanPublish && (
+          <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(229, 9, 20, 0.35)', borderRadius: '16px', padding: '1.5rem' }}>
+            <h3 style={{ margin: '0 0 1rem 0', fontFamily: 'Outfit, sans-serif', color: '#fff', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Send size={18} color="var(--color-primary)" /> Send New Broadcast Announcement
             </h3>
-            <button
-              className="btn-secondary"
-              onClick={loadNotifications}
-              style={{ fontSize: '0.8rem', padding: '0.4rem 0.85rem', borderRadius: '8px' }}
-            >
-              Refresh List
+
+            {/* Quick Template Chips */}
+            <div style={{ marginBottom: '1.25rem' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '6px', fontWeight: 600 }}>QUICK TEMPLATES:</span>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {[
+                  { label: '🥋 Belt Grading Exam', title: 'Upcoming Belt Grading Examination', type: 'exam', msg: 'All eligible students and branch trainers are requested to prepare the registration and grading roster for the upcoming examination session.' },
+                  { label: '💼 Staff Meeting', title: 'Monthly Staff & Trainer Meeting', type: 'general', msg: 'All branch managers and instructors are requested to attend the upcoming monthly coordination meeting.' },
+                  { label: '⚠️ Urgent Maintenance', title: 'System Notice: Scheduled Update', type: 'warning', msg: 'Please ensure all attendance entries for the current week are marked and verified before the upcoming maintenance.' }
+                ].map((tpl, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => {
+                      setAnnouncementForm({
+                        ...announcementForm,
+                        title: tpl.title,
+                        message: tpl.msg,
+                        type: tpl.type
+                      });
+                    }}
+                    style={{
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      color: 'var(--color-text-light)',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {tpl.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Form Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+              {/* Title */}
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
+                  Notice Title <span style={{ color: '#E50914' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g., Special Batch Timings / Exam Details"
+                  value={announcementForm.title}
+                  onChange={(e) => setAnnouncementForm({ ...announcementForm, title: e.target.value })}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              {/* Target Audience */}
+              <div>
+                <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
+                  Target Audience
+                </label>
+                <select
+                  className="form-control"
+                  value={announcementForm.targetUser || 'all'}
+                  onChange={(e) => setAnnouncementForm({ ...announcementForm, targetUser: e.target.value })}
+                  style={{ width: '100%' }}
+                >
+                  <option value="all">🌐 All Users (Trainers & Branch Admins)</option>
+                  <option value="trainers">🥋 All Trainers Only</option>
+                  <option value="branches">🏢 All Branch Admins Only</option>
+                  {trainerOptions && trainerOptions.length > 0 && trainerOptions.map(t => (
+                    <option key={t} value={t}>👤 Trainer: {t}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Branch Scope */}
+              <div>
+                <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
+                  Target Branch
+                </label>
+                <select
+                  className="form-control"
+                  value={announcementForm.branch || 'all'}
+                  onChange={(e) => setAnnouncementForm({ ...announcementForm, branch: e.target.value })}
+                  style={{ width: '100%' }}
+                >
+                  <option value="all">🏢 All Branches</option>
+                  {branches && branches.map(b => (
+                    <option key={b} value={b}>📍 {b} Branch</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Notice Category */}
+              <div>
+                <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
+                  Notice Category
+                </label>
+                <select
+                  className="form-control"
+                  value={announcementForm.type || 'general'}
+                  onChange={(e) => setAnnouncementForm({ ...announcementForm, type: e.target.value })}
+                  style={{ width: '100%' }}
+                >
+                  <option value="general">📢 General Announcement</option>
+                  <option value="exam">🥋 Belt Grading / Exam</option>
+                  <option value="warning">⚠️ Urgent Notice / Instruction</option>
+                  <option value="update">🚀 Academy Update</option>
+                </select>
+              </div>
+
+              {/* Priority */}
+              <div>
+                <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
+                  Priority & Display Style
+                </label>
+                <select
+                  className="form-control"
+                  value={announcementForm.priority || 'medium'}
+                  onChange={(e) => setAnnouncementForm({ ...announcementForm, priority: e.target.value })}
+                  style={{ width: '100%' }}
+                >
+                  <option value="low">🟢 Normal (Notification List)</option>
+                  <option value="medium">🟡 Medium Priority</option>
+                  <option value="high">🔴 High / Urgent (Instant Popup on Login!)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Message Body */}
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
+                Notice Message / Description <span style={{ color: '#E50914' }}>*</span>
+              </label>
+              <textarea
+                className="form-control"
+                rows={4}
+                placeholder="Enter the full announcement details..."
+                value={announcementForm.message}
+                onChange={(e) => setAnnouncementForm({ ...announcementForm, message: e.target.value })}
+                style={{ width: '100%', height: 'auto', minHeight: '90px', padding: '10px 14px', lineHeight: '1.5' }}
+              />
+            </div>
+
+            {/* Submit Button */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              {editingNotificationId && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setEditingNotificationId(null);
+                    setAnnouncementForm({ title: '', message: '', type: 'general', priority: 'medium', branch: 'all', batch: 'all', targetUser: 'all', expiryDate: '', scheduledAt: '', isScheduled: false });
+                  }}
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={handleSaveAnnouncement}
+                disabled={devActionLoading}
+                style={{ padding: '0.7rem 1.5rem', fontWeight: 700, fontSize: '0.9rem', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+              >
+                <Send size={16} />
+                {devActionLoading ? 'Publishing...' : (editingNotificationId ? 'Update Notice' : 'Broadcast Notice Now')}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Active & Published Announcements History */}
+        <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '16px', overflow: 'hidden', padding: 0 }}>
+          <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+            <div>
+              <h3 style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.1rem', color: '#fff' }}>Published Broadcasts History</h3>
+              <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>Total {activeAnnouncementsList.length} Active Broadcasts</span>
+            </div>
+            <button className="btn-small btn-secondary" onClick={loadNotifications}>
+              🔄 Refresh
             </button>
           </div>
 
-          {activeList.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '3.5rem 1rem', color: 'var(--color-text-muted)' }}>
-              <Megaphone size={36} style={{ opacity: 0.4, marginBottom: '0.5rem' }} />
-              <div style={{ fontSize: '1rem', color: '#fff', fontWeight: 600 }}>No Active Announcements</div>
-              <p style={{ fontSize: '0.8rem', marginTop: '4px' }}>There are currently no active system or branch announcements.</p>
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1rem' }}>
-              {activeList.map(n => {
-                const isRead = n.readBy && n.readBy.includes((loggedInUser || '').toLowerCase().trim());
-                const isGrading = n.type === 'grading' || (n.title && n.title.toLowerCase().includes('grading'));
+          {activeAnnouncementsList.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '1.25rem' }}>
+              {activeAnnouncementsList.map((n) => {
+                const priorityColor = n.priority === 'high' ? '#E50914' : n.priority === 'medium' ? '#FFD700' : '#4CAF50';
+                const targetDisplay = n.targetUser === 'all' ? '🌐 All Users' : n.targetUser === 'trainers' ? '🥋 All Trainers' : n.targetUser === 'branches' ? '🏢 All Branch Admins' : `👤 ${n.targetUser}`;
+                const branchDisplay = n.branch && n.branch !== 'all' ? `📍 ${n.branch}` : '🏢 All Branches';
 
                 return (
                   <div
-                    key={n._id || n.id}
+                    key={n._id}
                     style={{
-                      background: isGrading
-                        ? 'linear-gradient(145deg, rgba(30, 20, 25, 0.8) 0%, rgba(18, 20, 29, 0.9) 100%)'
-                        : 'linear-gradient(145deg, rgba(20, 24, 38, 0.7) 0%, rgba(15, 17, 26, 0.8) 100%)',
-                      border: isGrading
-                        ? '1px solid rgba(255, 215, 0, 0.35)'
-                        : '1px solid rgba(255, 255, 255, 0.1)',
+                      padding: '1.25rem 1.5rem',
                       borderRadius: '14px',
-                      padding: '1.25rem',
+                      background: '#151926',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      borderLeft: `4px solid ${priorityColor}`,
+                      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.35)',
                       display: 'flex',
-                      flexDirection: 'column',
-                      gap: '0.75rem',
-                      boxShadow: '0 4px 20px rgba(0,0,0,0.35)',
-                      position: 'relative'
+                      justify: 'space-between',
+                      alignItems: 'flex-start',
+                      flexWrap: 'wrap',
+                      gap: '12px',
+                      boxSizing: 'border-box'
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        {isGrading ? (
-                          <span className="badge badge-gold" style={{ fontSize: '0.7rem', padding: '2px 8px' }}>
-                            🏆 Belt Grading
-                          </span>
-                        ) : (
-                          <span className="badge badge-blue" style={{ fontSize: '0.7rem', padding: '2px 8px' }}>
-                            📢 Announcement
-                          </span>
-                        )}
-                        <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: '0.7rem', padding: '2px 8px' }}>
-                          Branch: {n.branch || 'All'}
+                    <div style={{ flex: 1, minWidth: '180px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                        <span style={{ fontWeight: 700, fontSize: '0.98rem', color: '#fff' }}>{n.title}</span>
+                        <span className="badge" style={{ background: `${priorityColor}22`, color: priorityColor, border: `1px solid ${priorityColor}44`, fontSize: '0.7rem', padding: '2px 8px', borderRadius: '6px' }}>
+                          {n.priority === 'high' ? '🔴 Urgent Popup' : n.priority === 'medium' ? '🟡 Medium' : '🟢 Normal'}
+                        </span>
+                        <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--color-text-light)', fontSize: '0.7rem', padding: '2px 8px', borderRadius: '6px' }}>
+                          {targetDisplay}
+                        </span>
+                        <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.12)', color: '#FFD700', fontSize: '0.7rem', padding: '2px 8px', borderRadius: '6px' }}>
+                          {branchDisplay}
                         </span>
                       </div>
 
-                      {isCanPublish && n._id && (
+                      <div style={{
+                        background: '#0d0f19',
+                        padding: '10px 14px',
+                        borderRadius: '10px',
+                        border: '1px solid rgba(255, 255, 255, 0.05)',
+                        margin: '6px 0 10px 0'
+                      }}>
+                        <p style={{ margin: 0, color: 'var(--color-text-light)', fontSize: '0.85rem', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
+                          {n.message}
+                        </p>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.75rem', color: 'var(--color-text-muted)', flexWrap: 'wrap' }}>
+                        <span>Sender: <strong style={{ color: '#fff' }}>{n.sender || 'Admin'}</strong></span>
+                        <span>•</span>
+                        <span>Sent: {n.createdAt ? new Date(n.createdAt).toLocaleDateString() : 'N/A'}</span>
+                        {n.readBy && (
+                          <>
+                            <span>•</span>
+                            <button
+                              type="button"
+                              onClick={() => setReadDetailsModalNotification(n)}
+                              style={{
+                                background: 'rgba(74, 222, 128, 0.12)',
+                                border: '1px solid rgba(74, 222, 128, 0.3)',
+                                color: '#4ade80',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                padding: '3px 10px',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                transition: 'all 0.2s ease'
+                              }}
+                              title="Click to view full list of trainers and branch admins who read this notice"
+                            >
+                              <Eye size={13} /> ✓ Read by {n.readBy.length} {n.readBy.length === 1 ? 'user' : 'users'}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {isCanPublish && n._id && (
+                      <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
                         <button
+                          type="button"
                           className="btn-icon"
-                          title="Delete Announcement"
-                          style={{ color: '#ff453a', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', width: '28px', height: '28px', borderRadius: '6px', cursor: 'pointer' }}
+                          style={{ color: '#38bdf8', padding: '6px', background: 'rgba(56, 189, 248, 0.1)', borderRadius: '6px' }}
+                          title="Edit Notice"
+                          onClick={() => handleStartEditAnnouncement(n)}
+                        >
+                          <Eye size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-icon"
+                          style={{ color: '#F44336', padding: '6px', background: 'rgba(244, 67, 54, 0.1)', borderRadius: '6px' }}
+                          title="Delete Notice"
                           onClick={() => handleDeleteNotification(n._id)}
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={16} />
                         </button>
-                      )}
-                    </div>
-
-                    <h4 style={{ margin: 0, color: '#fff', fontSize: '1rem', fontWeight: 700, lineHeight: '1.3' }}>
-                      {n.title}
-                    </h4>
-
-                    <p style={{ margin: 0, fontSize: '0.83rem', color: '#cbd5e1', lineHeight: '1.45', whiteSpace: 'pre-wrap', flex: 1 }}>
-                      {n.message}
-                    </p>
-
-                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '0.65rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.73rem', color: 'var(--color-text-muted)' }}>
-                      <span>Posted by {n.sender || 'Admin'} • {new Date(n.createdAt || Date.now()).toLocaleDateString()}</span>
-                      {isRead ? (
-                        <span style={{ color: '#4ade80', fontWeight: 600 }}>✓ Read</span>
-                      ) : (
-                        <span className="badge badge-red" style={{ fontSize: '0.65rem', padding: '1px 6px' }}>NEW</span>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '3.5rem 1rem', color: 'var(--color-text-muted)' }}>
+              <Megaphone size={36} style={{ opacity: 0.4, marginBottom: '0.5rem' }} />
+              <div style={{ fontSize: '1rem', color: '#fff', fontWeight: 600 }}>No Active Announcements</div>
+              <p style={{ fontSize: '0.8rem', marginTop: '4px' }}>Use the form above to publish system announcements.</p>
             </div>
           )}
         </div>
@@ -9400,57 +9888,65 @@ function App() {
               </div>
 
               <form onSubmit={handleSubmitEditGrading}>
-                <div style={{ marginBottom: '1.25rem', fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
-                  Student: <strong style={{ color: '#fff' }}>{selectedEditGradingStudent.name}</strong> (ID: #{selectedEditGradingStudent.id})
-                </div>
-
-                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>Join Date</label>
-                  <input
-                    type="date"
-                    className="form-control"
-                    style={{ height: '40px', borderRadius: '10px' }}
-                    value={editGradingForm.joinDate}
-                    onChange={(e) => setEditGradingForm({ ...editGradingForm, joinDate: e.target.value })}
-                    required
-                  />
-                  <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Update student join date.</span>
-                </div>
-
-                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>Last Grading / Test Date</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    style={{ height: '40px', borderRadius: '10px' }}
-                    value={editGradingForm.lastGradingDate}
-                    onChange={(e) => setEditGradingForm({ ...editGradingForm, lastGradingDate: e.target.value })}
-                    placeholder="YYYY-MM-DD or N/A"
-                    required
-                  />
-                  <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>Enter test date (YYYY-MM-DD) or N/A if student has not taken a test.</span>
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  padding: '12px 14px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  marginBottom: '1.25rem',
+                  fontSize: '0.85rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px'
+                }}>
+                  <div>Student: <strong style={{ color: '#fff' }}>{selectedEditGradingStudent.name}</strong> (ID: #{selectedEditGradingStudent.id})</div>
+                  <div style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
+                    🥋 Last Grading Date: <strong style={{ color: '#e2e8f0' }}>{selectedEditGradingStudent.lastGradingDate || 'N/A'}</strong>
+                  </div>
                 </div>
 
                 <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>Present Grade / Level</label>
-                  <select
-                    className="form-control"
-                    style={{ height: '40px', borderRadius: '10px' }}
-                    value={editGradingForm.belt}
-                    onChange={(e) => setEditGradingForm({ ...editGradingForm, belt: e.target.value })}
-                    required
-                  >
-                    <optgroup label="🥋 Traditional Belts">
-                      {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
-                        <option key={b} value={b}>{b} Belt</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="🥊 Kickboxing / Boxing Levels">
-                      {['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
-                        <option key={b} value={b}>{b}</option>
-                      ))}
-                    </optgroup>
-                  </select>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', display: 'block', marginBottom: '6px' }}>
+                    Present Grade / Level
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      className="form-control"
+                      style={{ height: '40px', borderRadius: '10px', flex: 1, fontSize: '0.9rem' }}
+                      value={editGradingForm.belt || ''}
+                      onChange={(e) => setEditGradingForm({ ...editGradingForm, belt: e.target.value })}
+                      placeholder="Type or select belt/level (e.g. Orange Belt)"
+                      list="grading-belt-options-list"
+                      required
+                    />
+                    <select
+                      className="form-control"
+                      style={{ height: '40px', borderRadius: '10px', width: 'auto', maxWidth: '160px', fontSize: '0.85rem' }}
+                      value={editGradingForm.belt || ''}
+                      onChange={(e) => setEditGradingForm({ ...editGradingForm, belt: e.target.value })}
+                    >
+                      <option value="">-- Quick Select --</option>
+                      <optgroup label="🥋 Traditional Belts">
+                        {['White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Brown Belt', 'Black Belt', 'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
+                          <option key={b} value={b}>{b}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="🥊 Kickboxing / Boxing Levels">
+                        {['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
+                          <option key={b} value={b}>{b}</option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </div>
+                  <datalist id="grading-belt-options-list">
+                    {['White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Red Belt', 'Brown Belt', 'Black Belt', 'Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
+                      <option key={b} value={b} />
+                    ))}
+                  </datalist>
+                  <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
+                    Type any custom grade/level or choose from the quick selection dropdown.
+                  </span>
                 </div>
 
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
@@ -10105,526 +10601,127 @@ function App() {
   const renderReminders = () => {
     const currentSystemMonth = new Date().toISOString().slice(0, 7);
     const unpaidStudents = searchedStudents.filter(s => {
+      const isInactive = (s.status || 'Active') === 'Inactive';
+      if (isInactive) return false;
+      const matchBranch = branchFilter === 'All' || !s.branch || String(s.branch).toLowerCase().trim() === String(branchFilter).toLowerCase().trim();
+      const matchBatch = batchFilter === 'All' || !s.batch || String(s.batch).toLowerCase().trim() === String(batchFilter).toLowerCase().trim();
+
       const fees = calculateStudentFees(s, currentSystemMonth);
-      return fees.totalDue > 0;
+      return matchBranch && matchBatch && fees.totalDue > 0;
     });
 
-    const activeAnnouncementsList = notifications && notifications.length > 0 ? notifications : devNotifications;
+    const sendReminderMessage = (student) => {
+      const pFee = student.pendingFees !== undefined ? Number(student.pendingFees) : 600;
+      const text = encodeURIComponent(`Hello ${student.studentName || student.name}, this is a gentle reminder from MasterFit Academy regarding your pending fee balance of ₹${pFee}. Please clear it at your earliest convenience.`);
+      const phone = student.phone || student.parentPhone;
+      if (phone) {
+        window.open(`https://wa.me/91${phone}?text=${text}`, '_blank');
+      } else {
+        alert(`No phone number available for ${student.studentName || student.name}`);
+      }
+    };
 
     return (
       <div className="reminders-container" style={{ maxWidth: '1200px', margin: '0 auto' }}>
         {/* Page Header Banner */}
-        <div style={{
-          background: 'linear-gradient(135deg, rgba(229, 9, 20, 0.18) 0%, rgba(56, 189, 248, 0.1) 100%)',
-          border: '1px solid rgba(56, 189, 248, 0.3)',
-          borderRadius: '16px',
-          padding: '1.25rem 1.5rem',
-          marginBottom: '1.5rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '1rem',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
-        }}>
-          <div>
-            <h2 style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.4rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Bell size={24} color="#E50914" /> Broadcast & Notification Center
-            </h2>
-            <p style={{ margin: '4px 0 0 0', color: '#cbd5e1', fontSize: '0.85rem' }}>
-              Send instant notices to all trainers, branch admins, or specific branches. Alerts appear automatically upon login.
-            </p>
-          </div>
-
-          {/* Subtabs Switcher */}
-          <div style={{ display: 'flex', background: 'rgba(0, 0, 0, 0.4)', padding: '4px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.12)', gap: '4px' }}>
-            <button
-              type="button"
-              onClick={() => setRemindersTab('broadcast')}
-              style={{
-                background: remindersTab === 'broadcast' ? 'linear-gradient(135deg, #E50914, #b91c1c)' : 'transparent',
-                color: '#fff',
-                border: 'none',
-                padding: '8px 16px',
-                borderRadius: '8px',
-                fontWeight: 600,
-                fontSize: '0.85rem',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                transition: 'all 0.2s ease',
-                boxShadow: remindersTab === 'broadcast' ? '0 2px 8px rgba(229, 9, 20, 0.4)' : 'none'
-              }}
-            >
-              <Send size={15} /> Staff Broadcast ({activeAnnouncementsList.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setRemindersTab('fees')}
-              style={{
-                background: remindersTab === 'fees' ? 'linear-gradient(135deg, #E50914, #b91c1c)' : 'transparent',
-                color: '#fff',
-                border: 'none',
-                padding: '8px 16px',
-                borderRadius: '8px',
-                fontWeight: 600,
-                fontSize: '0.85rem',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                transition: 'all 0.2s ease',
-                boxShadow: remindersTab === 'fees' ? '0 2px 8px rgba(229, 9, 20, 0.4)' : 'none'
-              }}
-            >
-              <Wallet size={15} /> Fee Dues ({unpaidStudents.length})
-            </button>
+        <div className="glass-panel" style={{ padding: '1.5rem', borderRadius: '16px', border: '1px solid rgba(255, 255, 255, 0.08)', background: 'linear-gradient(135deg, rgba(20, 20, 30, 0.8), rgba(10, 10, 15, 0.9))', marginBottom: '1.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <h2 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0, color: '#fff', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Bell size={24} color="#FFD700" /> Fee Alerts & Student Reminders
+              </h2>
+              <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', margin: '4px 0 0 0' }}>
+                Track student fee due alerts and send WhatsApp / SMS reminders directly to parents & students.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <div className="stat-card" style={{ padding: '0.75rem 1.25rem', minWidth: '130px', background: 'rgba(255, 215, 0, 0.08)', border: '1px solid rgba(255, 215, 0, 0.2)', borderRadius: '10px' }}>
+                <span style={{ fontSize: '0.72rem', color: '#FFD700', fontWeight: 700, textTransform: 'uppercase' }}>Pending Dues</span>
+                <p style={{ fontSize: '1.5rem', fontWeight: 800, color: '#fff', margin: '2px 0 0 0' }}>{unpaidStudents.length}</p>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* TAB 1: Staff Broadcast & Announcements */}
-        {remindersTab === 'broadcast' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            {/* Quick Summary Cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-              <div className="stat-card" style={{ background: 'linear-gradient(145deg, rgba(20, 24, 38, 0.8) 0%, rgba(15, 17, 26, 0.8) 100%)', border: '1px solid rgba(56, 189, 248, 0.3)', borderTop: '3px solid #38bdf8', borderRadius: '14px', padding: '1rem 1.25rem' }}>
-                <div className="stat-icon-wrapper" style={{ background: 'rgba(56, 189, 248, 0.15)', borderColor: 'rgba(56, 189, 248, 0.3)' }}>
-                  <Bell size={20} color="#38bdf8" />
-                </div>
-                <div className="stat-details">
-                  <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#94a3b8', fontSize: '0.72rem', fontWeight: 600 }}>Active Notices</h3>
-                  <p className="stat-value" style={{ color: '#38bdf8', fontSize: '1.5rem', fontWeight: 700 }}>{activeAnnouncementsList.length}</p>
-                  <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>Broadcasting to logged-in users</span>
-                </div>
-              </div>
-
-              <div className="stat-card" style={{ background: 'linear-gradient(145deg, rgba(16, 32, 24, 0.8) 0%, rgba(12, 22, 18, 0.8) 100%)', border: '1px solid rgba(34, 197, 94, 0.3)', borderTop: '3px solid #4ade80', borderRadius: '14px', padding: '1rem 1.25rem' }}>
-                <div className="stat-icon-wrapper" style={{ background: 'rgba(34, 197, 94, 0.15)', borderColor: 'rgba(34, 197, 94, 0.3)' }}>
-                  <Users size={20} color="#4ade80" />
-                </div>
-                <div className="stat-details">
-                  <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#86efac', fontSize: '0.72rem', fontWeight: 600 }}>Target Reach</h3>
-                  <p className="stat-value" style={{ color: '#4ade80', fontSize: '1.5rem', fontWeight: 700 }}>All Staff</p>
-                  <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>Trainers & Branch Admins</span>
-                </div>
-              </div>
-
-              <div className="stat-card" style={{ background: 'linear-gradient(145deg, rgba(35, 28, 15, 0.8) 0%, rgba(20, 16, 10, 0.8) 100%)', border: '1px solid rgba(255, 215, 0, 0.3)', borderTop: '3px solid #FFD700', borderRadius: '14px', padding: '1rem 1.25rem' }}>
-                <div className="stat-icon-wrapper" style={{ background: 'rgba(255, 215, 0, 0.15)', borderColor: 'rgba(255, 215, 0, 0.3)' }}>
-                  <AlertCircle size={20} color="#FFD700" />
-                </div>
-                <div className="stat-details">
-                  <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#fde047', fontSize: '0.72rem', fontWeight: 600 }}>Login Popup Alerts</h3>
-                  <p className="stat-value" style={{ color: '#FFD700', fontSize: '1.5rem', fontWeight: 700 }}>
-                    {activeAnnouncementsList.filter(n => n.priority === 'high').length}
-                  </p>
-                  <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>Urgent instant modals</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Broadcast Composer Form */}
-            <div className="panel" style={{ background: 'linear-gradient(145deg, rgba(22, 26, 40, 0.85) 0%, rgba(16, 18, 28, 0.85) 100%)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '16px', padding: '1.5rem', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem', flexWrap: 'wrap', gap: '8px' }}>
-                <h3 style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.15rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Send size={18} color="var(--color-primary)" />
-                  {editingNotificationId ? 'Edit Broadcast Notice' : 'Send New Notification to Staff'}
-                </h3>
-                {editingNotificationId && (
-                  <button
-                    type="button"
-                    className="btn-small btn-secondary"
-                    onClick={() => {
-                      setEditingNotificationId(null);
-                      setAnnouncementForm({
-                        title: '',
-                        message: '',
-                        type: 'general',
-                        priority: 'medium',
-                        branch: 'all',
-                        batch: 'all',
-                        targetUser: 'all',
-                        expiryDate: '',
-                        scheduledAt: '',
-                        isScheduled: false
-                      });
-                    }}
-                  >
-                    Cancel Edit
-                  </button>
-                )}
-              </div>
-
-              {/* Alert Messages */}
-              {announcementSuccess && (
-                <div style={{ background: 'rgba(76, 175, 80, 0.12)', border: '1px solid rgba(76, 175, 80, 0.3)', color: '#4CAF50', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem' }}>
-                  <CheckCircle size={16} /> {announcementSuccess}
-                </div>
-              )}
-              {announcementError && (
-                <div style={{ background: 'rgba(244, 67, 54, 0.12)', border: '1px solid rgba(244, 67, 54, 0.3)', color: '#F44336', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem' }}>
-                  <AlertTriangle size={16} /> {announcementError}
-                </div>
-              )}
-
-              {/* Quick Template Chips */}
-              <div style={{ marginBottom: '1.25rem' }}>
-                <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '6px', fontWeight: 600 }}>QUICK TEMPLATES:</span>
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  {[
-                    { label: '🏖️ Holiday Notice', title: 'Holiday Announcement: Academy Closed', type: 'holiday', msg: 'Please note that all branches and classes will remain closed tomorrow on account of holiday. Classes will resume as per regular schedule.' },
-                    { label: '🥋 Belt Grading Exam', title: 'Upcoming Belt Grading Examination', type: 'exam', msg: 'All eligible students and branch trainers are requested to prepare the registration and grading roster for the upcoming examination session.' },
-                    { label: '💼 Staff Meeting', title: 'Monthly Staff & Trainer Meeting', type: 'general', msg: 'All branch managers and instructors are requested to attend the upcoming monthly coordination meeting.' },
-                    { label: '⚠️ Urgent Maintenance', title: 'System Notice: Scheduled Update', type: 'warning', msg: 'Please ensure all attendance entries for the current week are marked and verified before the upcoming maintenance.' }
-                  ].map((tpl, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => {
-                        setAnnouncementForm({
-                          ...announcementForm,
-                          title: tpl.title,
-                          message: tpl.msg,
-                          type: tpl.type
-                        });
-                      }}
-                      style={{
-                        background: 'rgba(255,255,255,0.05)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        color: 'var(--color-text-light)',
-                        padding: '4px 10px',
-                        borderRadius: '6px',
-                        fontSize: '0.75rem',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease'
-                      }}
-                    >
-                      {tpl.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Form Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
-                {/* Title */}
-                <div style={{ gridColumn: 'span 2' }}>
-                  <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
-                    Notice Title <span style={{ color: '#E50914' }}>*</span>
-                  </label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g., Special Batch Timings / Holiday Notice / Exam Details"
-                    value={announcementForm.title}
-                    onChange={(e) => setAnnouncementForm({ ...announcementForm, title: e.target.value })}
-                    style={{ width: '100%' }}
-                  />
-                </div>
-
-                {/* Target Audience */}
-                <div>
-                  <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
-                    Target Audience
-                  </label>
-                  <select
-                    className="form-control"
-                    value={announcementForm.targetUser || 'all'}
-                    onChange={(e) => setAnnouncementForm({ ...announcementForm, targetUser: e.target.value })}
-                    style={{ width: '100%' }}
-                  >
-                    <option value="all">🌐 All Users (Trainers & Branch Admins)</option>
-                    <option value="trainers">🥋 All Trainers Only</option>
-                    <option value="branches">🏢 All Branch Admins Only</option>
-                    {trainerOptions && trainerOptions.length > 0 && trainerOptions.map(t => (
-                      <option key={t} value={t}>👤 Trainer: {t}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Branch Scope */}
-                <div>
-                  <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
-                    Target Branch
-                  </label>
-                  <select
-                    className="form-control"
-                    value={announcementForm.branch || 'all'}
-                    onChange={(e) => setAnnouncementForm({ ...announcementForm, branch: e.target.value })}
-                    style={{ width: '100%' }}
-                  >
-                    <option value="all">🏢 All Branches</option>
-                    {branches && branches.map(b => (
-                      <option key={b} value={b}>📍 {b} Branch</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Notification Category */}
-                <div>
-                  <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
-                    Notice Category
-                  </label>
-                  <select
-                    className="form-control"
-                    value={announcementForm.type || 'general'}
-                    onChange={(e) => setAnnouncementForm({ ...announcementForm, type: e.target.value })}
-                    style={{ width: '100%' }}
-                  >
-                    <option value="general">📢 General Announcement</option>
-                    <option value="holiday">🏖️ Holiday / Leave Notice</option>
-                    <option value="exam">🥋 Belt Grading / Exam</option>
-                    <option value="warning">⚠️ Urgent Notice / Instruction</option>
-                    <option value="update">🚀 Academy Update</option>
-                  </select>
-                </div>
-
-                {/* Priority Level */}
-                <div>
-                  <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
-                    Priority & Display Style
-                  </label>
-                  <select
-                    className="form-control"
-                    value={announcementForm.priority || 'medium'}
-                    onChange={(e) => setAnnouncementForm({ ...announcementForm, priority: e.target.value })}
-                    style={{ width: '100%' }}
-                  >
-                    <option value="low">🟢 Normal (Notification List)</option>
-                    <option value="medium">🟡 Medium Priority</option>
-                    <option value="high">🔴 High / Urgent (Instant Popup on Login!)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Message Body */}
-              <div style={{ marginBottom: '1.25rem' }}>
-                <label style={{ display: 'block', marginBottom: '4px', color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>
-                  Notice Message / Description <span style={{ color: '#E50914' }}>*</span>
-                </label>
-                <textarea
-                  className="form-control"
-                  rows={4}
-                  placeholder="Enter the full announcement details. This will appear when trainers or branch admins log in..."
-                  value={announcementForm.message}
-                  onChange={(e) => setAnnouncementForm({ ...announcementForm, message: e.target.value })}
-                  style={{ width: '100%', height: 'auto', minHeight: '90px', padding: '10px 14px', lineHeight: '1.5' }}
-                />
-              </div>
-
-              {/* Action Buttons */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                {editingNotificationId && (
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => {
-                      setEditingNotificationId(null);
-                      setAnnouncementForm({
-                        title: '',
-                        message: '',
-                        type: 'general',
-                        priority: 'medium',
-                        branch: 'all',
-                        batch: 'all',
-                        targetUser: 'all',
-                        expiryDate: '',
-                        scheduledAt: '',
-                        isScheduled: false
-                      });
-                    }}
-                  >
-                    Cancel
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={handleSaveAnnouncement}
-                  disabled={devActionLoading}
-                  style={{ padding: '0.7rem 1.5rem', fontWeight: 700, fontSize: '0.9rem', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
-                >
-                  <Send size={16} />
-                  {devActionLoading ? 'Publishing...' : (editingNotificationId ? 'Update Notice' : 'Broadcast Notice Now')}
-                </button>
-              </div>
-            </div>
-
-            {/* Active & Sent Notices History */}
-            <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '16px', overflow: 'hidden', padding: 0 }}>
-              <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                <div>
-                  <h3 style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.1rem', color: '#fff' }}>Published Broadcasts & Notice History</h3>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>Total {activeAnnouncementsList.length} Active Broadcasts</span>
-                </div>
-                <button className="btn-small btn-secondary" onClick={() => { loadNotifications(); loadDevNotifications(); }}>
-                  🔄 Refresh
-                </button>
-              </div>
-
-              {activeAnnouncementsList.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', divideY: '1px solid rgba(255,255,255,0.06)' }}>
-                  {activeAnnouncementsList.map((n) => {
-                    const priorityColor = n.priority === 'high' ? '#E50914' : n.priority === 'medium' ? '#FFD700' : '#4CAF50';
-                    const targetDisplay = n.targetUser === 'all' ? '🌐 All Users' : n.targetUser === 'trainers' ? '🥋 All Trainers' : n.targetUser === 'branches' ? '🏢 All Branch Admins' : `👤 ${n.targetUser}`;
-                    const branchDisplay = n.branch && n.branch !== 'all' ? `📍 ${n.branch}` : '🏢 All Branches';
-
-                    return (
-                      <div key={n._id} style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
-                        <div style={{ flex: 1, minWidth: '240px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' }}>
-                            <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#fff' }}>{n.title}</span>
-                            <span className="badge" style={{ background: `${priorityColor}22`, color: priorityColor, border: `1px solid ${priorityColor}44`, fontSize: '0.7rem', padding: '2px 6px' }}>
-                              {n.priority === 'high' ? '🔴 Urgent Popup' : n.priority === 'medium' ? '🟡 Medium' : '🟢 Normal'}
-                            </span>
-                            <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--color-text-light)', fontSize: '0.7rem', padding: '2px 6px' }}>
-                              {targetDisplay}
-                            </span>
-                            <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.12)', color: '#FFD700', fontSize: '0.7rem', padding: '2px 6px' }}>
-                              {branchDisplay}
-                            </span>
-                          </div>
-                          <p style={{ margin: 0, color: 'var(--color-text-light)', fontSize: '0.85rem', lineHeight: '1.5' }}>
-                            {n.message}
-                          </p>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '8px', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                            <span>Sender: <strong style={{ color: '#fff' }}>{n.sender || 'Admin'}</strong></span>
-                            <span>•</span>
-                            <span>Sent: {n.createdAt ? new Date(n.createdAt).toLocaleDateString() : 'N/A'} at {n.createdAt ? new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
-                            {n.readBy && (
-                              <>
-                                <span>•</span>
-                                <span style={{ color: '#4CAF50' }}>✓ Read by {n.readBy.length} users</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-
-                        <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
-                          <button
-                            type="button"
-                            className="btn-icon"
-                            style={{ color: '#38bdf8', padding: '6px' }}
-                            title="Edit Notice"
-                            onClick={() => handleStartEditAnnouncement(n)}
-                          >
-                            <Eye size={16} />
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-icon"
-                            style={{ color: '#F44336', padding: '6px' }}
-                            title="Delete Notice"
-                            onClick={() => handleDeleteNotification(n._id)}
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div style={{ textAlign: 'center', padding: '3.5rem 2rem', color: 'var(--color-text-muted)' }}>
-                  <Bell size={32} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
-                  <div style={{ fontSize: '0.95rem', color: '#fff', fontWeight: 600 }}>No Broadcast Notices Yet</div>
-                  <p style={{ fontSize: '0.8rem', margin: 0, marginTop: '4px' }}>Use the form above to send an announcement to trainers and branches.</p>
-                </div>
-              )}
-            </div>
+        {/* Pending Dues List */}
+        <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '16px', overflow: 'hidden', padding: 0 }}>
+          <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, fontSize: '1.1rem', color: '#fff' }}>
+              <Wallet size={18} color="#FFD700" /> Pending Dues List ({unpaidStudents.length})
+            </h3>
           </div>
-        )}
 
-        {/* TAB 2: Fee Due Reminders */}
-        {remindersTab === 'fees' && (
-          <div>
-            <div className="panel" style={{ marginBottom: '1.5rem', background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(229, 9, 20, 0.35)', borderRadius: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.25rem' }}>
-                <AlertTriangle size={30} color="var(--color-primary)" />
-                <div>
-                  <h3 style={{ margin: 0, color: 'var(--color-primary)', fontFamily: 'Outfit, sans-serif' }}>Monthly Fee Due Reminders</h3>
-                  <p style={{ margin: '0.3rem 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Direct WhatsApp and SMS alerts for students with overdue fees.</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '16px', overflow: 'hidden', padding: 0 }}>
-              <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                <h3 className="panel-title" style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '1.1rem', color: '#fff' }}>Pending Dues List ({unpaidStudents.length})</h3>
-              </div>
-              {unpaidStudents.length > 0 ? (
-                <div className="premium-table-container" style={{ border: 'none', background: 'transparent' }}>
-                  <table className="premium-table responsive-table-cards">
-                    <thead>
-                      <tr>
-                        <th>Student Name</th>
-                        <th>Phone</th>
-                        <th>Due Amount</th>
-                        <th style={{ textAlign: 'center' }}>Send Reminder</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {unpaidStudents.map(student => {
-                        const fees = calculateStudentFees(student, currentSystemMonth);
-                        const brName = student.branch.toUpperCase();
-                        let msg = `Hi ${student.studentName || student.name}, this is a reminder from MASTER FIT Academy (${brName}). You have pending dues: `;
-                        const items = [];
-                        if (fees.admissionDue > 0) items.push(`Admission Fee (₹${fees.admissionDue})`);
-                        if (fees.unpaidMonths.length > 0) items.push(`Monthly Fees for ${fees.unpaidMonths.join(', ')} (₹${fees.monthlyDue})`);
-                        msg += items.join(' and ') + `. Total outstanding: ₹${fees.totalDue}. Please clear it as soon as possible. Thank you!`;
-                        const encodedMsg = encodeURIComponent(msg);
-
-                        return (
-                          <tr key={student.id}>
-                            <td data-label="Student Name" onClick={() => handleSelectStudent(student)} style={{ cursor: 'pointer', color: '#E50914', textDecoration: 'underline', fontWeight: 700 }}>
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                {student.studentName || student.name}
-                                {student.isPriority && (
-                                  <Star size={13} fill="#FFD700" color="#FFD700" style={{ display: 'inline-block', verticalAlign: 'middle' }} title="Priority Student" />
-                                )}
-                              </span>
-                            </td>
-                            <td data-label="Phone" style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>{student.phone}</td>
-                            <td data-label="Due Amount">
-                              <span className="badge badge-red">₹{fees.totalDue}</span>
-                              <span style={{ fontSize: '0.72rem', display: 'block', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                                {fees.admissionDue > 0 ? 'Admission' : ''}
-                                {fees.admissionDue > 0 && fees.unpaidMonths.length > 0 ? ' + ' : ''}
-                                {fees.unpaidMonths.length > 0 ? `${fees.unpaidMonths.length}m monthly` : ''}
-                              </span>
-                            </td>
-                            <td data-label="Send Reminder">
-                              <div className="actions-flex-container" style={{ justifyContent: 'center' }}>
-                                <a href={`https://wa.me/${student.phone}?text=${encodedMsg}`} target="_blank" rel="noreferrer" className="btn-small" style={{ background: '#25D366', color: 'white', border: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none', padding: '5px 10px', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 600 }}>
-                                  <MessageCircle size={14} /> WhatsApp
-                                </a>
-                                <a href={`tel:${student.phone}`} className="btn-icon" style={{ color: '#2196F3', padding: '6px' }} title="Call Student">
-                                  <Phone size={16} />
-                                </a>
-                                <a href={`sms:${student.phone}`} className="btn-icon" style={{ color: '#FF9800', padding: '6px' }} title="SMS Message Student">
-                                  <MessageSquare size={16} />
-                                </a>
-                                <button className="btn-icon" onClick={() => handleDeleteStudent(student.id)} style={{ color: '#F44336', padding: '6px' }} title="Delete">
-                                  <Trash2 size={16} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div style={{ textAlign: 'center', padding: '3.5rem 0', color: 'var(--color-text-muted)' }}>
-                  <CheckCircle size={40} style={{ color: '#4CAF50', marginBottom: '0.75rem' }} />
-                  <p style={{ margin: 0, color: '#fff', fontWeight: 600 }}>All clear! No pending payments.</p>
-                </div>
-              )}
-            </div>
+          <div className="premium-table-container" style={{ border: 'none', background: 'transparent' }}>
+            <table className="premium-table responsive-table-cards">
+              <thead>
+                <tr>
+                  <th>Student Name</th>
+                  <th>Branch / Batch</th>
+                  <th>Contact Info</th>
+                  <th>Pending Amount</th>
+                  <th style={{ textAlign: 'center' }}>Send Reminder</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unpaidStudents.length > 0 ? unpaidStudents.map(student => {
+                  const pFee = student.pendingFees !== undefined ? Number(student.pendingFees) : 600;
+                  return (
+                    <tr key={student.id}>
+                      <td data-label="Student Name">
+                        <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left' }}>
+                          <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.92rem' }}>
+                            {student.studentName || student.name}
+                          </span>
+                          <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                            Belt: {student.belt || 'White'}
+                          </span>
+                        </div>
+                      </td>
+                      <td data-label="Branch / Batch">
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          <span className="badge badge-blue" style={{ fontSize: '0.75rem', padding: '4px 8px' }}>
+                            📍 {student.branch || 'Kuttiady'}
+                          </span>
+                          <span className="badge badge-purple" style={{ fontSize: '0.75rem', padding: '4px 8px' }}>
+                            🥋 {getBatchNameFromCode(student.batch, student.branch)}
+                          </span>
+                        </div>
+                      </td>
+                      <td data-label="Contact Info">
+                        <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                          <span>📞 Student: {student.phone || 'N/A'}</span>
+                          <span>👨 Parent: {student.parentPhone || 'N/A'}</span>
+                        </div>
+                      </td>
+                      <td data-label="Pending Amount">
+                        <span className="badge badge-gold" style={{ fontSize: '0.88rem', fontWeight: 800, padding: '4px 10px' }}>
+                          ₹{pFee}
+                        </span>
+                      </td>
+                      <td data-label="Send Reminder" style={{ textAlign: 'center' }}>
+                        <button
+                          className="btn-primary btn-small"
+                          style={{ padding: '6px 14px', fontWeight: 700, whiteSpace: 'nowrap', background: '#25D366', borderColor: '#25D366', color: '#fff' }}
+                          onClick={() => sendReminderMessage(student)}
+                        >
+                          💬 Send WhatsApp Alert
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                }) : (
+                  <tr>
+                    <td colSpan="5" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '2.5rem' }}>
+                      <CheckCircle size={32} style={{ color: '#30d158', marginBottom: '8px', opacity: 0.8 }} />
+                      <div style={{ fontWeight: 600, color: '#fff', fontSize: '1rem' }}>No Pending Fee Reminders</div>
+                      <div style={{ fontSize: '0.85rem', marginTop: '4px' }}>All active students in selected branch/batch have cleared their fees.</div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
-        )}
+        </div>
       </div>
     );
   };
@@ -12512,6 +12609,661 @@ function App() {
     );
   };
 
+
+  const renderTrainerApprovals = () => {
+    const isSuper = isAdminUser(loggedInUser);
+    const isBranchAdm = isBranchAdmin(loggedInUser);
+    const hasAccess = isSuper || isBranchAdm;
+
+    if (!hasAccess) {
+      return (
+        <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
+          <h3 className="panel-title" style={{ color: '#E50914' }}>Access Denied</h3>
+          <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Only administrators can access Trainer Approvals & Batch Allocation.</p>
+        </div>
+      );
+    }
+
+    const activeTrainers = (adminsList || []).filter(a => (a.role === 'trainer' || a.role === 'coordinator') && a.status === 'Active');
+
+    const resolveBatchDisplayNames = (rawBatch) => {
+      if (!rawBatch) return 'Unassigned';
+      const parts = String(rawBatch).split(',').map(p => p.trim()).filter(Boolean);
+      const names = parts.map(pt => {
+        const ptLower = pt.toLowerCase();
+        const opt = (batchOptions || []).find(b => 
+          (b.id && String(b.id).toLowerCase() === ptLower) ||
+          (b.code && String(b.code).toLowerCase() === ptLower) ||
+          (b.name && String(b.name).toLowerCase() === ptLower)
+        );
+        if (opt) {
+          return opt.schedule ? `${opt.name} (${opt.schedule})` : opt.name;
+        }
+        if (ptLower.startsWith('batch_')) {
+          return 'Batch ' + pt.slice(6, 12);
+        }
+        if (ptLower.startsWith('batch')) {
+          return 'Batch ' + pt.slice(5);
+        }
+        return pt;
+      });
+      return names.join(', ') || 'Unassigned';
+    };
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        {/* Banner Alert Feedback */}
+        {trainerApprovalSuccess && (
+          <div style={{ padding: '0.85rem 1.25rem', background: 'rgba(48, 209, 88, 0.15)', border: '1px solid rgba(48, 209, 88, 0.3)', color: '#30d158', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <CheckCircle size={18} />
+            <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{trainerApprovalSuccess}</span>
+          </div>
+        )}
+        {trainerApprovalError && (
+          <div style={{ padding: '0.85rem 1.25rem', background: 'rgba(255, 69, 58, 0.15)', border: '1px solid rgba(255, 69, 58, 0.3)', color: '#ff453a', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <AlertTriangle size={18} />
+            <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{trainerApprovalError}</span>
+          </div>
+        )}
+
+        {/* Header Summary */}
+        <div className="glass-panel" style={{ padding: '1.5rem', borderRadius: '14px', border: '1px solid rgba(255, 255, 255, 0.08)', background: 'linear-gradient(135deg, rgba(20, 20, 30, 0.8), rgba(10, 10, 15, 0.9))' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <h2 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0, color: '#fff', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Shield size={24} color="#FFD700" /> Trainer Approvals & Batch Allocation
+              </h2>
+              <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', margin: '4px 0 0 0' }}>
+                Approve new trainer registrations and allocate branches & batches.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <div className="stat-card" style={{ padding: '0.75rem 1.25rem', minWidth: '130px', background: 'rgba(255, 215, 0, 0.08)', border: '1px solid rgba(255, 215, 0, 0.2)', borderRadius: '10px' }}>
+                <span style={{ fontSize: '0.72rem', color: '#FFD700', fontWeight: 700, textTransform: 'uppercase' }}>Pending Requests</span>
+                <p style={{ fontSize: '1.5rem', fontWeight: 800, color: '#fff', margin: '2px 0 0 0' }}>{pendingTrainers.length}</p>
+              </div>
+              <div className="stat-card" style={{ padding: '0.75rem 1.25rem', minWidth: '130px', background: 'rgba(48, 209, 88, 0.08)', border: '1px solid rgba(48, 209, 88, 0.2)', borderRadius: '10px' }}>
+                <span style={{ fontSize: '0.72rem', color: '#30d158', fontWeight: 700, textTransform: 'uppercase' }}>Active Trainers</span>
+                <p style={{ fontSize: '1.5rem', fontWeight: 800, color: '#fff', margin: '2px 0 0 0' }}>{activeTrainers.length}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* SECTION 1: PENDING TRAINER APPROVALS */}
+        <div className="panel" style={{ borderRadius: '14px' }}>
+          <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
+            <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, fontSize: '1.1rem' }}>
+              <Bell size={18} color="#FFD700" /> Pending Account Registrations ({pendingTrainers.length})
+            </h3>
+            <button className="btn-outline-primary btn-small" onClick={loadPendingTrainers} disabled={loadingPendingTrainers}>
+              {loadingPendingTrainers ? 'Refreshing...' : '🔄 Refresh List'}
+            </button>
+          </div>
+
+          {loadingPendingTrainers ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>Loading pending trainer registrations...</div>
+          ) : pendingTrainers.length === 0 ? (
+            <div style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--color-text-muted)', background: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px dashed rgba(255,255,255,0.08)' }}>
+              <CheckCircle size={32} style={{ color: '#30d158', marginBottom: '8px', opacity: 0.8 }} />
+              <div style={{ fontWeight: 600, color: '#fff', fontSize: '1rem' }}>No Pending Registrations</div>
+              <div style={{ fontSize: '0.85rem', marginTop: '4px' }}>All submitted trainer account requests have been reviewed.</div>
+            </div>
+          ) : (
+            <div className="table-responsive">
+              <table className="data-table responsive-table-cards">
+                <thead>
+                  <tr>
+                    <th>Trainer Details</th>
+                    <th>Email & Contact</th>
+                    <th>Requested Branch</th>
+                    <th style={{ textAlign: 'center' }}>Approval & Allocation</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingTrainers.map(trainer => {
+                    return (
+                      <tr key={trainer._id}>
+                        <td data-label="Trainer Details">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPendingTrainerForApproval(trainer)}
+                            style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit' }}
+                          >
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                              <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.95rem', textDecoration: 'underline' }}>
+                                {trainer.fullName || trainer.username}
+                              </span>
+                              <span style={{ fontSize: '0.78rem', color: '#FFD700', fontWeight: 600 }}>
+                                @{trainer.username}
+                              </span>
+                              <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                                Registered: {new Date(trainer.createdAt).toLocaleDateString()}
+                              </span>
+                            </div>
+                          </button>
+                        </td>
+                        <td data-label="Email & Contact">
+                          <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left', fontSize: '0.82rem' }}>
+                            <span style={{ color: '#e2e8f0' }}>📧 {trainer.email || 'N/A'}</span>
+                            <span style={{ color: 'var(--color-text-muted)', marginTop: '2px' }}>📞 {trainer.phone || 'N/A'}</span>
+                          </div>
+                        </td>
+                        <td data-label="Requested Branch">
+                          <span className="badge badge-gold" style={{ width: 'fit-content', padding: '4px 10px', fontSize: '0.75rem' }}>
+                            📍 {trainer.branch || 'None Selected'}
+                          </span>
+                        </td>
+                        <td data-label="Approval & Allocation">
+                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                            <button
+                              className="btn-primary btn-small"
+                              style={{ background: '#30d158', borderColor: '#30d158', padding: '6px 14px', fontWeight: 700, whiteSpace: 'nowrap' }}
+                              onClick={() => setSelectedPendingTrainerForApproval(trainer)}
+                            >
+                              🛡️ Review & Approve
+                            </button>
+                            <button
+                              className="btn-danger btn-small"
+                              style={{ padding: '6px 12px', whiteSpace: 'nowrap' }}
+                              onClick={() => handleRejectTrainer(trainer._id)}
+                            >
+                              ✕ Reject
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* DEDICATED PENDING TRAINER APPROVAL MODAL */}
+        {selectedPendingTrainerForApproval && (() => {
+          const trainer = selectedPendingTrainerForApproval;
+          const cleanRequestedBranch = String(trainer.branch || '').split(',')[0].trim();
+          const selBranch = approvalBranchSelections[trainer._id] || (cleanRequestedBranch && branches.includes(cleanRequestedBranch) ? cleanRequestedBranch : (branches[0] || 'Kuttiady'));
+          const availableBatches = getFilteredBatchOptions(selBranch);
+          const selBatch = approvalBatchSelections[trainer._id] || trainer.batch || (availableBatches[0] ? availableBatches[0].id : 'batch1');
+
+          return (
+            <div className="modal-overlay" style={{ zIndex: 1100 }}>
+              <div className="modal-content" style={{ maxWidth: '520px', width: '95%', background: '#0e0f17', border: '1px solid var(--glass-border-gold)', borderRadius: '16px', padding: '1.75rem' }}>
+                <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 className="panel-title" style={{ margin: 0, fontSize: '1.1rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Bell size={18} color="#FFD700" /> Review Trainer Registration Request
+                  </h3>
+                  <button className="btn-icon" onClick={() => setSelectedPendingTrainerForApproval(null)}><X size={20} /></button>
+                </div>
+
+                {/* Trainer Info Card */}
+                <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '12px', padding: '1rem', marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '0.75rem' }}>
+                    <div className="avatar" style={{ width: '44px', height: '44px', fontSize: '1.1rem', background: 'linear-gradient(135deg, #FFD700, #b89600)', color: '#000', fontWeight: 'bold' }}>
+                      {(trainer.fullName || trainer.username).charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '1rem', color: '#fff' }}>{trainer.fullName || trainer.username}</div>
+                      <div style={{ fontSize: '0.8rem', color: '#FFD700', fontWeight: 600 }}>@{trainer.username}</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '0.8rem', color: 'var(--color-text-muted)', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div>📧 Email: <strong style={{ color: '#fff' }}>{trainer.email || 'N/A'}</strong></div>
+                    <div>📞 Phone: <strong style={{ color: '#fff' }}>{trainer.phone || 'N/A'}</strong></div>
+                    <div>🏢 Requested Branch: <strong style={{ color: '#FFD700' }}>{trainer.branch || 'None Selected'}</strong></div>
+                    <div>📅 Date: <strong style={{ color: '#fff' }}>{new Date(trainer.createdAt).toLocaleDateString()}</strong></div>
+                  </div>
+                </div>
+
+                {/* Allocation Controls Form */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.82rem', color: '#fff', fontWeight: 600, marginBottom: '6px' }}>Allocate Branch *</label>
+                    <select
+                      className="form-control"
+                      style={{ width: '100%', height: '40px', background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.15)' }}
+                      value={selBranch}
+                      onChange={(e) => {
+                        const newBr = e.target.value;
+                        setApprovalBranchSelections(prev => ({ ...prev, [trainer._id]: newBr }));
+                        const bOpts = getFilteredBatchOptions(newBr);
+                        if (bOpts[0]) {
+                          setApprovalBatchSelections(prev => ({ ...prev, [trainer._id]: bOpts[0].id }));
+                        }
+                      }}
+                    >
+                      {branches.map(b => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.82rem', color: '#fff', fontWeight: 600, marginBottom: '6px' }}>Allocate Batch *</label>
+                    <select
+                      className="form-control"
+                      style={{ width: '100%', height: '40px', background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.15)' }}
+                      value={selBatch}
+                      onChange={(e) => {
+                        const newBt = e.target.value;
+                        setApprovalBatchSelections(prev => ({ ...prev, [trainer._id]: newBt }));
+                      }}
+                    >
+                      {availableBatches.map(opt => (
+                        <option key={opt.id} value={opt.id}>{opt.name} ({opt.schedule})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                    <button
+                      type="button"
+                      className="btn-danger btn-small"
+                      style={{ padding: '8px 14px' }}
+                      onClick={() => {
+                        handleRejectTrainer(trainer._id);
+                        setSelectedPendingTrainerForApproval(null);
+                      }}
+                    >
+                      ✕ Reject Request
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-primary btn-small"
+                      style={{ background: '#30d158', borderColor: '#30d158', padding: '8px 16px', fontWeight: 700 }}
+                      onClick={() => {
+                        handleApproveTrainer(trainer._id);
+                        setSelectedPendingTrainerForApproval(null);
+                      }}
+                    >
+                      ✓ Approve & Allocate Account
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* SECTION 2: ACTIVE TRAINERS & BATCH ALLOCATION MATRIX */}
+        <div className="panel" style={{ borderRadius: '14px' }}>
+          <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
+            <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, fontSize: '1.1rem' }}>
+              <Users size={18} color="var(--color-primary)" /> Active Trainers Batch Allocation ({activeTrainers.length})
+            </h3>
+          </div>
+
+          <div className="table-responsive">
+            <table className="data-table responsive-table-cards">
+              <thead>
+                <tr>
+                  <th>Trainer Name / Username</th>
+                  <th>Contact Info</th>
+                  <th>Assigned Branch</th>
+                  <th>Assigned Batch</th>
+                  <th style={{ textAlign: 'center' }}>Allocation & Profile</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeTrainers.length > 0 ? activeTrainers.map(tr => {
+                  const currBr = tr.branch || 'Kuttiady';
+                  const currBt = tr.batch || 'batch1';
+
+                  return (
+                    <tr key={tr._id}>
+                      <td data-label="Trainer Name / Username">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTrainerForAllocation(tr)}
+                          style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit' }}
+                        >
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.92rem', textDecoration: 'underline' }}>
+                              {tr.fullName || tr.username}
+                            </span>
+                            <span style={{ fontSize: '0.78rem', color: 'var(--color-primary)' }}>
+                              @{tr.username}
+                            </span>
+                          </div>
+                        </button>
+                      </td>
+                      <td data-label="Contact Info">
+                        <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                          <span>{tr.email || 'No email'}</span>
+                          <span>{tr.phone || 'No phone'}</span>
+                        </div>
+                      </td>
+                      <td data-label="Assigned Branch">
+                        <span className="badge badge-blue" style={{ fontSize: '0.75rem', padding: '4px 10px', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }} title={currBr}>
+                          {Array.from(new Set(String(currBr).split(',').map(s => s.trim()))).join(', ')}
+                        </span>
+                      </td>
+                      <td data-label="Assigned Batch">
+                        <span className="badge badge-purple" style={{ fontSize: '0.75rem', padding: '4px 10px', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }} title={resolveBatchDisplayNames(currBt)}>
+                          {resolveBatchDisplayNames(currBt)}
+                        </span>
+                      </td>
+                      <td data-label="Allocation & Profile" style={{ textAlign: 'center' }}>
+                        <div style={{ display: 'inline-flex', gap: '8px', alignItems: 'center' }}>
+                          <button
+                            className="btn-primary btn-small"
+                            style={{ padding: '6px 14px', fontWeight: 600, whiteSpace: 'nowrap', background: 'rgba(229, 9, 20, 0.2)', border: '1px solid rgba(229, 9, 20, 0.4)', color: '#fff' }}
+                            onClick={() => setSelectedTrainerForAllocation(tr)}
+                          >
+                            ⚙️ Edit Allocation
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-secondary btn-small"
+                            style={{
+                              padding: '6px 10px',
+                              fontWeight: 600,
+                              whiteSpace: 'nowrap',
+                              background: 'rgba(239, 68, 68, 0.15)',
+                              border: '1px solid rgba(239, 68, 68, 0.35)',
+                              color: '#ef4444',
+                              cursor: 'pointer'
+                            }}
+                            title="Delete Trainer Account"
+                            onClick={() => setTrainerToDeleteConfirm(tr)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }) : (
+                  <tr>
+                    <td colSpan="5" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '2rem' }}>
+                      No active trainers currently found in system.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* DEDICATED TRAINER PROFILE & ALLOCATION MODAL */}
+        {selectedTrainerForAllocation && (() => {
+          const tr = selectedTrainerForAllocation;
+          const currBr = tr.branch || 'Kuttiady';
+          const currBt = tr.batch || 'batch1';
+          const cleanBr = String(currBr || '').split(',')[0].trim();
+          const selBr = activeTrainerBranchSelections[tr._id] || (cleanBr && branches.includes(cleanBr) ? cleanBr : (branches[0] || 'Kuttiady'));
+          const availableBatches = getFilteredBatchOptions(selBr);
+          const selBt = activeTrainerBatchSelections[tr._id] || (currBr === selBr ? currBt : (availableBatches[0] ? availableBatches[0].id : 'batch1'));
+
+          return (
+            <div className="modal-overlay" style={{ zIndex: 1100 }}>
+              <div className="modal-content" style={{ maxWidth: '520px', width: '95%', background: '#0e0f17', border: '1px solid var(--glass-border-red)', borderRadius: '16px', padding: '1.75rem' }}>
+                <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 className="panel-title" style={{ margin: 0, fontSize: '1.1rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Users size={18} color="var(--color-primary)" /> Trainer Allocation Details
+                  </h3>
+                  <button className="btn-icon" onClick={() => setSelectedTrainerForAllocation(null)}><X size={20} /></button>
+                </div>
+
+                {/* Trainer Profile Card */}
+                <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '12px', padding: '1rem', marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '0.75rem' }}>
+                    <div className="avatar" style={{ width: '44px', height: '44px', fontSize: '1.1rem', background: 'linear-gradient(135deg, var(--color-primary), #900)' }}>
+                      {(tr.fullName || tr.username).charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '1rem', color: '#fff' }}>{tr.fullName || tr.username}</div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--color-primary)', fontWeight: 600 }}>@{tr.username}</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '0.8rem', color: 'var(--color-text-muted)', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div>📧 Email: <strong style={{ color: '#fff' }}>{tr.email || 'N/A'}</strong></div>
+                    <div>📞 Phone: <strong style={{ color: '#fff' }}>{tr.phone || 'N/A'}</strong></div>
+                  </div>
+                </div>
+
+                {/* Current Allocation Card */}
+                <div style={{ background: 'rgba(229, 9, 20, 0.08)', border: '1px solid rgba(229, 9, 20, 0.25)', borderRadius: '12px', padding: '1rem', marginBottom: '1.25rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700, display: 'block', marginBottom: '6px' }}>Current Active Allocation</span>
+                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                    <span className="badge badge-blue" style={{ padding: '4px 10px' }}>📍 Branch: {currBr}</span>
+                    <span className="badge badge-purple" style={{ padding: '4px 10px' }}>
+                      🥋 Batch: {resolveBatchDisplayNames(currBt)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Edit Allocation Form */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.82rem', color: '#fff', fontWeight: 600, marginBottom: '6px' }}>Re-allocate Branch</label>
+                    <select
+                      className="form-control"
+                      style={{ width: '100%', height: '40px', background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.15)' }}
+                      value={selBr}
+                      onChange={(e) => {
+                        const newBr = e.target.value;
+                        setActiveTrainerBranchSelections(prev => ({ ...prev, [tr._id]: newBr }));
+                        const bOpts = getFilteredBatchOptions(newBr);
+                        if (bOpts[0]) {
+                          setActiveTrainerBatchSelections(prev => ({ ...prev, [tr._id]: bOpts[0].id }));
+                        }
+                      }}
+                    >
+                      {branches.map(b => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.82rem', color: '#fff', fontWeight: 600, marginBottom: '6px' }}>Re-allocate Batch</label>
+                    <select
+                      className="form-control"
+                      style={{ width: '100%', height: '40px', background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.15)' }}
+                      value={selBt}
+                      onChange={(e) => {
+                        const newBt = e.target.value;
+                        setActiveTrainerBatchSelections(prev => ({ ...prev, [tr._id]: newBt }));
+                      }}
+                    >
+                      {availableBatches.map(opt => (
+                        <option key={opt.id} value={opt.id}>{opt.name} ({opt.schedule})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{
+                        background: 'rgba(239, 68, 68, 0.15)',
+                        border: '1px solid rgba(239, 68, 68, 0.35)',
+                        color: '#ef4444',
+                        fontWeight: 600,
+                        fontSize: '0.8rem',
+                        padding: '0.5rem 1rem',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                      onClick={() => setTrainerToDeleteConfirm(tr)}
+                    >
+                      <Trash2 size={15} /> Delete Account
+                    </button>
+                    <div style={{ display: 'flex', gap: '10px', marginLeft: 'auto' }}>
+                      <button type="button" className="btn-secondary" onClick={() => setSelectedTrainerForAllocation(null)}>Cancel</button>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        style={{ fontWeight: 700 }}
+                        onClick={() => {
+                          handleReallocateBatch(tr._id, currBr, currBt);
+                          setSelectedTrainerForAllocation(null);
+                        }}
+                      >
+                        ✓ Save Allocation
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* MODERN TRAINER DELETE CONFIRMATION MODAL */}
+        {trainerToDeleteConfirm && (
+          <div className="modal-overlay" style={{ zIndex: 12000 }} onClick={() => setTrainerToDeleteConfirm(null)}>
+            <div
+              className="modal-content"
+              style={{
+                maxWidth: '500px',
+                width: '92%',
+                background: 'linear-gradient(145deg, #181c2b 0%, #0d0f18 100%)',
+                border: '1px solid rgba(239, 68, 68, 0.4)',
+                borderRadius: '20px',
+                padding: '1.75rem',
+                boxShadow: '0 24px 60px rgba(0,0,0,0.95), 0 0 0 1px rgba(239, 68, 68, 0.2)',
+                backdropFilter: 'blur(20px)',
+                boxSizing: 'border-box'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header Icon & Title */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '1.25rem' }}>
+                <div style={{
+                  width: '46px',
+                  height: '46px',
+                  borderRadius: '14px',
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid rgba(239, 68, 68, 0.4)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
+                }}>
+                  <AlertTriangle size={24} color="#ef4444" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#ffffff', fontWeight: 700 }}>
+                    Remove Trainer Access
+                  </h3>
+                  <span style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    ⚠️ Disable Login Access
+                  </span>
+                </div>
+              </div>
+
+              {/* Trainer Profile Summary */}
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '12px',
+                padding: '1rem',
+                marginBottom: '1.25rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px'
+              }}>
+                <div className="avatar" style={{ width: '42px', height: '42px', fontSize: '1.1rem', background: 'linear-gradient(135deg, #e50914, #7f1d1d)', flexShrink: 0 }}>
+                  {(trainerToDeleteConfirm.fullName || trainerToDeleteConfirm.username).charAt(0).toUpperCase()}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {trainerToDeleteConfirm.fullName || trainerToDeleteConfirm.username}
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: '#38bdf8', fontWeight: 600 }}>
+                    @{trainerToDeleteConfirm.username}
+                  </div>
+                </div>
+                <span className="badge badge-red" style={{ fontSize: '0.7rem', padding: '3px 8px' }}>
+                  {trainerToDeleteConfirm.branch || 'Trainer'}
+                </span>
+              </div>
+
+              {/* Database Data Preservation Assurance Card */}
+              <div style={{
+                background: '#0d101a',
+                border: '1px solid rgba(56, 189, 248, 0.25)',
+                borderRadius: '12px',
+                padding: '1rem',
+                marginBottom: '1.5rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <span style={{ fontSize: '1.1rem' }}>🔒</span>
+                  <div>
+                    <div style={{ fontSize: '0.825rem', fontWeight: 700, color: '#4ade80' }}>
+                      Historical Class & Attendance Data Preserved
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: '#cbd5e1', lineHeight: '1.45', marginTop: '2px' }}>
+                      All past class details and student attendance entries taken by this trainer will remain <strong>100% saved in the database</strong>.
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                  <span style={{ fontSize: '1.1rem' }}>🚫</span>
+                  <div>
+                    <div style={{ fontSize: '0.825rem', fontWeight: 700, color: '#ef4444' }}>
+                      Trainer Login Disabled
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: '#cbd5e1', lineHeight: '1.45', marginTop: '2px' }}>
+                      Login credentials will be revoked immediately and active sessions logged out.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ padding: '0.65rem 1.25rem', borderRadius: '10px', fontWeight: 600, fontSize: '0.85rem' }}
+                  onClick={() => setTrainerToDeleteConfirm(null)}
+                  disabled={deletingTrainerLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  style={{
+                    background: 'linear-gradient(135deg, #e50914 0%, #b91c1c 100%)',
+                    border: 'none',
+                    padding: '0.65rem 1.4rem',
+                    borderRadius: '10px',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    boxShadow: '0 4px 16px rgba(229, 9, 20, 0.4)',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                  disabled={deletingTrainerLoading}
+                  onClick={() => handleConfirmDeleteTrainer(trainerToDeleteConfirm)}
+                >
+                  {deletingTrainerLoading ? 'Disabling Access...' : '✓ Confirm & Disable Login'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderSectionMaintenance = (sectionName) => (
     <div className="glass-panel text-center" style={{ padding: '3rem', margin: '2rem auto', maxWidth: '600px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem', border: '1px solid rgba(255, 159, 10, 0.2)' }}>
       <div style={{ background: 'rgba(255, 159, 10, 0.1)', padding: '1rem', borderRadius: '50%' }}>
@@ -13319,11 +14071,83 @@ function App() {
           <div className="login-glow-2"></div>
           <div className="login-glow-3"></div>
         </div>
-        <div className={`glass-panel login-card-animated ${isLoggingIn ? 'submitting' : ''}`} style={{ zIndex: 1, padding: '1.5rem 2rem', width: '100%', maxWidth: '400px', textAlign: 'center' }}>
-          <h2 className="brand animate-item-1" style={{ justifyContent: 'center', marginBottom: '0.25rem', fontSize: '1.8rem' }}>
-            <span className="brand-accent">MASTER</span> FIT Login
+        <div className={`glass-panel login-card-animated ${isLoggingIn ? 'submitting' : ''}`} style={{
+          zIndex: 1,
+          padding: '2rem 2.25rem',
+          width: '100%',
+          maxWidth: '460px',
+          textAlign: 'center',
+          background: 'rgba(10, 10, 18, 0.92)',
+          backdropFilter: 'blur(25px)',
+          border: '1px solid rgba(229, 9, 20, 0.25)',
+          borderRadius: '20px',
+          boxShadow: '0 25px 60px rgba(0, 0, 0, 0.8), 0 0 35px rgba(229, 9, 20, 0.12)'
+        }}>
+          <h2 className="brand animate-item-1" style={{ justifyContent: 'center', marginBottom: '0.2rem', fontSize: '1.95rem', letterSpacing: '0.5px' }}>
+            <span className="brand-accent">MASTER</span> FIT
           </h2>
-          <p className="animate-item-2" style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem', marginBottom: '1rem', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase' }}>Branch & Batch Portal</p>
+          <p className="animate-item-2" style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.78rem', marginBottom: '1.25rem', fontWeight: 700, letterSpacing: '1.5px', textTransform: 'uppercase' }}>
+            Academy Branch & Batch Portal
+          </p>
+
+          {!isForgotPassword && (
+            <div style={{
+              display: 'flex',
+              background: 'rgba(255, 255, 255, 0.04)',
+              padding: '5px',
+              borderRadius: '12px',
+              marginBottom: '1.5rem',
+              border: '1px solid rgba(255, 255, 255, 0.08)'
+            }}>
+              <button
+                type="button"
+                style={{
+                  flex: 1,
+                  padding: '8px 14px',
+                  borderRadius: '9px',
+                  border: 'none',
+                  background: loginTab === 'login' ? 'linear-gradient(135deg, #E50914, #B20710)' : 'transparent',
+                  color: '#fff',
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  transition: 'all 0.25s ease',
+                  boxShadow: loginTab === 'login' ? '0 4px 14px rgba(229, 9, 20, 0.4)' : 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px'
+                }}
+                onClick={() => { setLoginTab('login'); setTrainerRegError(''); setTrainerRegSuccess(''); setLoginError(''); }}
+              >
+                <Lock size={14} /> Sign In
+              </button>
+              <button
+                type="button"
+                style={{
+                  flex: 1,
+                  padding: '8px 14px',
+                  borderRadius: '9px',
+                  border: 'none',
+                  background: loginTab === 'register' ? 'linear-gradient(135deg, #E50914, #B20710)' : 'transparent',
+                  color: '#fff',
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  transition: 'all 0.25s ease',
+                  boxShadow: loginTab === 'register' ? '0 4px 14px rgba(229, 9, 20, 0.4)' : 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px'
+                }}
+                onClick={() => { setLoginTab('register'); setTrainerRegError(''); setTrainerRegSuccess(''); setLoginError(''); }}
+              >
+                <UserPlus size={14} /> Trainer Account Create
+              </button>
+            </div>
+          )}
+
           {isForgotPassword ? (
             <>
               <p className="animate-item-3" style={{ color: 'var(--color-text-muted)', marginBottom: '1.5rem' }}>If you forgot your password, please contact the administrator via WhatsApp.</p>
@@ -13349,6 +14173,141 @@ function App() {
                 <button type="button" className="btn-outline-primary animate-item-5" style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent' }} onClick={() => setIsForgotPassword(false)}>Back to Login</button>
               </div>
             </>
+          ) : loginTab === 'register' ? (
+            <div style={{ textAlign: 'left' }}>
+              <h3 style={{ fontSize: '1.05rem', color: '#fff', marginBottom: '0.2rem', textAlign: 'center' }}>Create Trainer Account</h3>
+              <p style={{ color: 'var(--color-text-muted)', fontSize: '0.78rem', marginBottom: '1rem', textAlign: 'center' }}>
+                Register your account. Super Admin approval required before login.
+              </p>
+
+              {trainerRegSuccess && (
+                <div style={{ color: '#30d158', marginBottom: '1rem', background: 'rgba(48, 209, 88, 0.1)', padding: '0.65rem 0.85rem', borderRadius: '6px', border: '1px solid rgba(48, 209, 88, 0.3)', fontSize: '0.82rem', lineHeight: '1.4' }}>
+                  ✓ {trainerRegSuccess}
+                </div>
+              )}
+              {trainerRegError && (
+                <div style={{ color: '#E50914', marginBottom: '1rem', background: 'rgba(229, 9, 20, 0.1)', padding: '0.65rem 0.85rem', borderRadius: '6px', border: '1px solid rgba(229, 9, 20, 0.3)', fontSize: '0.82rem' }}>
+                  ⚠️ {trainerRegError}
+                </div>
+              )}
+
+              <form onSubmit={handleTrainerRegistration}>
+                <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                  <label style={{ fontSize: '0.8rem', marginBottom: '2px' }}>Full Name *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="Enter full name"
+                    value={trainerRegForm.fullName}
+                    onChange={(e) => setTrainerRegForm({ ...trainerRegForm, fullName: e.target.value })}
+                    required
+                    style={{ height: '36px' }}
+                  />
+                </div>
+
+                <div className="grid-2-col" style={{ gap: '8px' }}>
+                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                    <label style={{ fontSize: '0.8rem', marginBottom: '2px' }}>Username *</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Username"
+                      value={trainerRegForm.username}
+                      onChange={(e) => setTrainerRegForm({ ...trainerRegForm, username: e.target.value.toLowerCase().trim() })}
+                      required
+                      style={{ height: '36px' }}
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                    <label style={{ fontSize: '0.8rem', marginBottom: '2px' }}>Mobile Phone *</label>
+                    <input
+                      type="tel"
+                      className="form-control"
+                      placeholder="10-digit number"
+                      maxLength="10"
+                      value={trainerRegForm.phone}
+                      onChange={(e) => setTrainerRegForm({ ...trainerRegForm, phone: e.target.value.replace(/\D/g, '') })}
+                      required
+                      style={{ height: '36px' }}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                  <label style={{ fontSize: '0.8rem', marginBottom: '2px' }}>Email Address *</label>
+                  <input
+                    type="email"
+                    className="form-control"
+                    placeholder="trainer@example.com"
+                    value={trainerRegForm.email}
+                    onChange={(e) => setTrainerRegForm({ ...trainerRegForm, email: e.target.value.trim() })}
+                    required
+                    style={{ height: '36px' }}
+                  />
+                </div>
+
+                <div className="grid-2-col" style={{ gap: '8px' }}>
+                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                    <label style={{ fontSize: '0.8rem', marginBottom: '2px' }}>Password *</label>
+                    <input
+                      type="password"
+                      className="form-control"
+                      placeholder="Password"
+                      value={trainerRegForm.password}
+                      onChange={(e) => setTrainerRegForm({ ...trainerRegForm, password: e.target.value })}
+                      required
+                      style={{ height: '36px' }}
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                    <label style={{ fontSize: '0.8rem', marginBottom: '2px' }}>Confirm Password *</label>
+                    <input
+                      type="password"
+                      className="form-control"
+                      placeholder="Confirm password"
+                      value={trainerRegForm.confirmPassword}
+                      onChange={(e) => setTrainerRegForm({ ...trainerRegForm, confirmPassword: e.target.value })}
+                      required
+                      style={{ height: '36px' }}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                  <label style={{ fontSize: '0.8rem', marginBottom: '2px' }}>Preferred Branch *</label>
+                  <select
+                    className="form-control"
+                    value={trainerRegForm.preferredBranch || branches[0]}
+                    onChange={(e) => setTrainerRegForm({ ...trainerRegForm, preferredBranch: e.target.value, preferredBatch: '' })}
+                    style={{ height: '38px', background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '10px' }}
+                  >
+                    {branches.map(b => (
+                      <option key={b} value={b} style={{ background: '#1a1a1a', color: '#fff' }}>{b}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  style={{ width: '100%', justifyContent: 'center', marginTop: '0.5rem', height: '38px', fontWeight: 700 }}
+                  disabled={isSubmittingTrainerReg}
+                >
+                  {isSubmittingTrainerReg ? 'Submitting Registration...' : 'Submit Trainer Registration'}
+                </button>
+              </form>
+
+              <div style={{ marginTop: '1rem', textAlign: 'center' }}>
+                <button
+                  type="button"
+                  className="btn-outline-primary"
+                  style={{ width: '100%', justifyContent: 'center', border: 'none', background: 'transparent', fontSize: '0.85rem' }}
+                  onClick={() => setLoginTab('login')}
+                >
+                  Already have an account? Sign In
+                </button>
+              </div>
+            </div>
           ) : (
             <>
               {loginError && <div style={{ color: '#E50914', marginBottom: '1rem', background: 'rgba(229, 9, 20, 0.1)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(229, 9, 20, 0.3)' }} className="animate-item-3">{loginError}</div>}
@@ -14273,25 +15232,37 @@ function App() {
               <Award className="nav-icon" /> <span>Grading</span>
             </a>
           )}
-          <a
-            className={`nav-item ${currentView === 'announcements' ? 'active' : ''}`}
-            onClick={() => {
-              setCurrentView('announcements');
-              loadNotifications();
-            }}
-          >
-            <Megaphone className="nav-icon" /> <span>Announcements</span>
-            {unreadNotificationsCount > 0 && (
-              <span className="badge badge-red" style={{ marginLeft: 'auto', fontSize: '0.7rem', padding: '2px 6px', borderRadius: '10px' }}>
-                {unreadNotificationsCount}
-              </span>
-            )}
-          </a>
+          {(userRole === 'superadmin' || userRole === 'developer' || userRole === 'branchadmin') && (
+            <a
+              className={`nav-item ${currentView === 'announcements' ? 'active' : ''}`}
+              onClick={() => {
+                setCurrentView('announcements');
+                loadNotifications();
+              }}
+            >
+              <Megaphone className="nav-icon" /> <span>Announcements</span>
+              {unreadNotificationsCount > 0 && (
+                <span className="badge badge-red" style={{ marginLeft: 'auto', fontSize: '0.7rem', padding: '2px 6px', borderRadius: '10px' }}>
+                  {unreadNotificationsCount}
+                </span>
+              )}
+            </a>
+          )}
           <div style={{ flex: 1 }}></div>
           {(isAdminUser(loggedInUser) || isBranchAdmin(loggedInUser)) && (
-            <a className={`nav-item ${currentView === 'credentials-list' ? 'active' : ''}`} onClick={() => setCurrentView('credentials-list')}>
-              <Lock className="nav-icon" /> <span>Branch & Batch Mapping</span>
-            </a>
+            <>
+              <a className={`nav-item ${currentView === 'trainer-approvals' ? 'active' : ''}`} onClick={() => { setCurrentView('trainer-approvals'); loadPendingTrainers(); }}>
+                <Shield className="nav-icon" /> <span>Trainer Approvals</span>
+                {pendingTrainers.length > 0 && (
+                  <span className="badge badge-gold" style={{ marginLeft: 'auto', fontSize: '0.7rem', padding: '2px 6px', borderRadius: '10px' }}>
+                    {pendingTrainers.length}
+                  </span>
+                )}
+              </a>
+              <a className={`nav-item ${currentView === 'credentials-list' ? 'active' : ''}`} onClick={() => setCurrentView('credentials-list')}>
+                <Lock className="nav-icon" /> <span>Branch & Batch Mapping</span>
+              </a>
+            </>
           )}
           {hasSettingsAccess(loggedInUser) && (
             <a className={`nav-item ${currentView === 'settings' ? 'active' : ''}`} onClick={() => setCurrentView('settings')}>
@@ -14349,6 +15320,7 @@ function App() {
                 {currentView === 'performance' && 'Student Performance'}
                 {currentView === 'settings' && 'Account Settings'}
                 {currentView === 'credentials-list' && 'Branch & Batch Mapping'}
+                {currentView === 'trainer-approvals' && 'Trainer Approvals & Batch Allocation'}
                 {currentView === 'grading' && (userRole === 'trainer' ? 'Student Test Evaluation' : 'Student Belt & Level Test')}
                 {currentView === 'announcements' && 'Announcements & Notifications'}
               </h1>
@@ -14359,7 +15331,7 @@ function App() {
             </div>
           </div>
 
-          {!(currentView === 'grading' || currentView === 'announcements' || currentView === 'settings' || currentView === 'credentials-list' || currentView === 'performance' || currentView === 'attendance') && (
+          {!(currentView === 'grading' || currentView === 'announcements' || currentView === 'settings' || currentView === 'credentials-list' || currentView === 'trainer-approvals' || currentView === 'performance' || currentView === 'attendance') && (
             <div className="header-actions">
               {/* Branch Filter Selector */}
               <div style={{ position: 'relative' }}>
@@ -14504,77 +15476,126 @@ function App() {
                     </div>
 
                     {/* Notification List */}
-                    <div style={{ overflowY: 'auto', flex: 1, padding: '4px 0' }}>
+                    <div style={{ overflowY: 'auto', flex: 1, padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       {notifications.length === 0 ? (
-                        <div style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '0.825rem' }}>
-                          <Bell size={24} style={{ opacity: 0.3, marginBottom: '6px' }} />
+                        <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                          <Bell size={28} style={{ opacity: 0.3, marginBottom: '8px' }} />
                           <div>No announcements at the moment.</div>
                         </div>
                       ) : (
                         notifications.map(n => {
                           const currentUserClean = getSessionUser() ? getSessionUser().toLowerCase().trim() : '';
                           const isRead = n.readBy && n.readBy.includes(currentUserClean);
+                          const cleanTitle = (n.title || '').trim();
+                          const hasEmojiPrefix = cleanTitle.startsWith('📢') || cleanTitle.startsWith('📣') || cleanTitle.startsWith('🔔') || cleanTitle.startsWith('⚠️') || cleanTitle.startsWith('🥋') || cleanTitle.startsWith('💼');
+                          
                           return (
                             <div
                               key={n._id}
                               style={{
-                                padding: '12px 16px',
-                                borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
-                                background: isRead ? 'transparent' : 'rgba(229, 9, 20, 0.06)',
-                                transition: 'background 0.2s ease',
+                                padding: '12px 14px',
+                                borderRadius: '12px',
+                                border: isRead ? '1px solid rgba(255, 255, 255, 0.12)' : '1px solid rgba(229, 9, 20, 0.45)',
+                                borderLeft: isRead ? '4px solid rgba(255, 255, 255, 0.25)' : '4px solid #E50914',
+                                background: isRead
+                                  ? '#161927'
+                                  : 'linear-gradient(135deg, #24141d 0%, #171b2a 100%)',
+                                boxShadow: isRead ? '0 2px 8px rgba(0, 0, 0, 0.4)' : '0 4px 16px rgba(0, 0, 0, 0.5)',
+                                transition: 'all 0.2s ease',
                                 display: 'flex',
                                 flexDirection: 'column',
-                                gap: '5px'
+                                gap: '8px',
+                                boxSizing: 'border-box',
+                                width: '100%'
                               }}
                             >
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
-                                <span style={{
-                                  fontWeight: isRead ? 600 : 700,
-                                  fontSize: '0.85rem',
-                                  color: isRead ? '#e2e8f0' : '#fff'
-                                }}>
-                                  {n.title}
-                                </span>
-                                <span className="badge" style={{
-                                  background: n.priority === 'high' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.08)',
-                                  color: n.priority === 'high' ? '#ef4444' : '#cbd5e1',
-                                  fontSize: '0.625rem',
-                                  padding: '2px 6px',
-                                  fontWeight: 700,
-                                  textTransform: 'uppercase'
-                                }}>
-                                  {n.priority}
-                                </span>
+                              {/* Title & Priority Row */}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', width: '100%' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
+                                  {!hasEmojiPrefix && <span style={{ fontSize: '0.9rem', flexShrink: 0 }}>📢</span>}
+                                  <span style={{
+                                    fontWeight: isRead ? 600 : 700,
+                                    fontSize: '0.875rem',
+                                    color: isRead ? '#e2e8f0' : '#ffffff',
+                                    lineHeight: '1.35',
+                                    wordBreak: 'break-word',
+                                    overflowWrap: 'anywhere'
+                                  }}>
+                                    {cleanTitle}
+                                  </span>
+                                </div>
+                                {n.priority && (
+                                  <span className="badge" style={{
+                                    background: n.priority === 'high' ? 'rgba(239, 68, 68, 0.25)' : 'rgba(255, 255, 255, 0.1)',
+                                    color: n.priority === 'high' ? '#ef4444' : '#cbd5e1',
+                                    border: n.priority === 'high' ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid rgba(255, 255, 255, 0.15)',
+                                    fontSize: '0.625rem',
+                                    padding: '2px 8px',
+                                    borderRadius: '6px',
+                                    fontWeight: 800,
+                                    textTransform: 'uppercase',
+                                    flexShrink: 0,
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    {n.priority}
+                                  </span>
+                                )}
                               </div>
-                              <p style={{
-                                margin: 0,
-                                fontSize: '0.78rem',
-                                color: '#94a3b8',
-                                lineHeight: '1.45',
-                                whiteSpace: 'pre-wrap',
-                                textAlign: 'left'
+
+                              {/* Message Body */}
+                              <div style={{
+                                background: '#0d0f19',
+                                padding: '8px 10px',
+                                borderRadius: '8px',
+                                border: '1px solid rgba(255, 255, 255, 0.06)'
                               }}>
-                                {n.message}
-                              </p>
+                                <p style={{
+                                  margin: 0,
+                                  fontSize: '0.78rem',
+                                  color: '#cbd5e1',
+                                  lineHeight: '1.45',
+                                  whiteSpace: 'pre-wrap',
+                                  textAlign: 'left',
+                                  wordBreak: 'break-word'
+                                }}>
+                                  {n.message}
+                                </p>
+                              </div>
+
+                              {/* Footer Details & Read Action */}
                               <div style={{
                                 display: 'flex',
                                 justifyContent: 'space-between',
                                 alignItems: 'center',
-                                marginTop: '6px',
-                                fontSize: '0.7rem',
-                                color: 'var(--color-text-muted)'
+                                marginTop: '2px',
+                                fontSize: '0.72rem',
+                                color: 'var(--color-text-muted)',
+                                flexWrap: 'wrap',
+                                gap: '6px'
                               }}>
-                                <span>🗓️ {new Date(n.createdAt).toLocaleDateString()}</span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span>🗓️ {new Date(n.createdAt).toLocaleDateString()}</span>
+                                  {n.sender && (
+                                    <>
+                                      <span>•</span>
+                                      <span>👤 {n.sender}</span>
+                                    </>
+                                  )}
+                                </div>
                                 <button
                                   type="button"
                                   style={{
-                                    background: 'transparent',
-                                    border: 'none',
-                                    color: isRead ? 'var(--color-text-muted)' : '#38bdf8',
+                                    background: isRead ? 'rgba(255, 255, 255, 0.08)' : 'rgba(56, 189, 248, 0.18)',
+                                    border: isRead ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(56, 189, 248, 0.4)',
+                                    color: isRead ? '#94a3b8' : '#38bdf8',
                                     fontWeight: 600,
                                     cursor: 'pointer',
-                                    padding: '2px 4px',
-                                    fontSize: '0.725rem'
+                                    padding: '4px 10px',
+                                    borderRadius: '6px',
+                                    fontSize: '0.7rem',
+                                    whiteSpace: 'nowrap',
+                                    marginLeft: 'auto',
+                                    transition: 'all 0.15s ease'
                                   }}
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -14929,10 +15950,134 @@ function App() {
           )}
           {currentView === 'settings' && renderSettings()}
           {currentView === 'credentials-list' && (lockBranchBatchMappingPage && userRole !== 'developer' ? renderSectionMaintenance('Branch & Batch Mapping') : renderCredentialsList())}
+          {currentView === 'trainer-approvals' && renderTrainerApprovals()}
           {currentView === 'grading' && (lockGradingPage && userRole !== 'developer' ? renderSectionMaintenance('Student Belt Grading') : renderGrading())}
           {currentView === 'announcements' && renderAnnouncements()}
         </div>
       </main>
+
+      {/* Modal: View Read Receipts (Trainers & Branch Admins who read notification) */}
+      {readDetailsModalNotification && (
+        <div className="modal-overlay" style={{ zIndex: 100005 }} onClick={() => setReadDetailsModalNotification(null)}>
+          <div
+            className="modal-content"
+            style={{
+              maxWidth: '560px',
+              width: '90%',
+              boxSizing: 'border-box',
+              maxHeight: '85vh',
+              overflowY: 'auto',
+              background: 'linear-gradient(145deg, rgba(22, 26, 40, 0.98) 0%, rgba(15, 17, 26, 0.98) 100%)',
+              padding: '1.5rem',
+              borderRadius: '20px',
+              border: '1px solid rgba(74, 222, 128, 0.35)',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.85)',
+              backdropFilter: 'blur(20px)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.85rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.15rem', color: '#fff', margin: 0, fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Eye size={20} color="#4ade80" /> Notice Read Receipts
+                </h3>
+                <p style={{ margin: '4px 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
+                  Announcement: <strong style={{ color: '#fff' }}>"{readDetailsModalNotification.title}"</strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setReadDetailsModalNotification(null)}
+                style={{ color: '#fff', background: 'rgba(255,255,255,0.08)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Read Stats */}
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '1.25rem', background: 'rgba(74, 222, 128, 0.08)', border: '1px solid rgba(74, 222, 128, 0.2)', padding: '0.75rem 1rem', borderRadius: '12px', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.85rem', color: '#fff', fontWeight: 600 }}>Total Staff Read:</span>
+              <span className="badge badge-gold" style={{ fontSize: '0.85rem', padding: '4px 12px', fontWeight: 800 }}>
+                {readDetailsModalNotification.readBy ? readDetailsModalNotification.readBy.length : 0} Users
+              </span>
+            </div>
+
+            {/* Staff List */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {readDetailsModalNotification.readBy && readDetailsModalNotification.readBy.length > 0 ? (
+                readDetailsModalNotification.readBy.map((username, idx) => {
+                  const userDetails = (adminsList || []).find(a =>
+                    (a.username || '').toLowerCase().trim() === String(username).toLowerCase().trim() ||
+                    (a.fullName || '').toLowerCase().trim() === String(username).toLowerCase().trim()
+                  );
+
+                  const displayName = userDetails ? (userDetails.fullName || userDetails.username) : username;
+                  const roleRaw = userDetails ? (userDetails.role || '').toLowerCase() : '';
+                  const roleTag = roleRaw === 'trainer' ? '🥋 Trainer' : roleRaw === 'branchadmin' ? '🏢 Branch Admin' : roleRaw === 'superadmin' ? '👑 Super Admin' : '👤 Staff Member';
+                  const branchTag = userDetails && userDetails.branch ? userDetails.branch : 'All Branches';
+
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        display: 'flex',
+                        justify: 'space-between',
+                        alignItems: 'center',
+                        padding: '10px 14px',
+                        background: 'rgba(255,255,255,0.03)',
+                        border: '1px solid rgba(255,255,255,0.06)',
+                        borderRadius: '10px',
+                        flexWrap: 'wrap',
+                        gap: '8px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'linear-gradient(135deg, #E50914, #990000)', color: '#fff', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem' }}>
+                          {displayName.charAt(0).toUpperCase()}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.9rem' }}>{displayName}</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>@{username}</span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span className="badge badge-purple" style={{ fontSize: '0.72rem', padding: '2px 8px' }}>
+                          {roleTag}
+                        </span>
+                        <span className="badge badge-blue" style={{ fontSize: '0.72rem', padding: '2px 8px' }}>
+                          📍 {branchTag}
+                        </span>
+                        <span style={{ fontSize: '0.72rem', color: '#4ade80', fontWeight: 600, marginLeft: '4px' }}>
+                          ✓ Read
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                  No read receipt records found for this announcement.
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.25rem', paddingTop: '0.85rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setReadDetailsModalNotification(null)}
+                style={{ padding: '0.5rem 1.25rem', borderRadius: '8px', fontSize: '0.85rem' }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal: Announce / Post New Announcement */}
       {isGradingAnnouncementModalOpen && (
@@ -15254,12 +16399,12 @@ function App() {
                       >
                         <option value="">Select Trainer</option>
                         {(() => {
-                          const filtered = trainersList.filter(t => 
+                          const filtered = (trainersList || []).filter(t => 
                             !editingStudentData.branch || 
                             !t.branch || 
-                            t.branch.toLowerCase().split(',').map(b => b.trim()).includes(editingStudentData.branch.toLowerCase().trim())
+                            (typeof t.branch === 'string' && typeof editingStudentData.branch === 'string' && t.branch.toLowerCase().split(',').map(b => b.trim()).includes(editingStudentData.branch.toLowerCase().trim()))
                           );
-                          const listToShow = filtered.length > 0 ? filtered : trainersList;
+                          const listToShow = filtered.length > 0 ? filtered : (trainersList || []);
                           return listToShow.map(t => (
                             <option key={t.username} value={t.username}>
                               {t.username} {t.fullName ? `(${t.fullName})` : ''}
@@ -16289,12 +17434,12 @@ function App() {
                   >
                     <option value="">Select Trainer</option>
                     {(() => {
-                      const filtered = trainersList.filter(t => 
+                      const filtered = (trainersList || []).filter(t => 
                         !newStudent.branch || 
                         !t.branch || 
-                        t.branch.toLowerCase().split(',').map(b => b.trim()).includes(newStudent.branch.toLowerCase().trim())
+                        (typeof t.branch === 'string' && typeof newStudent.branch === 'string' && t.branch.toLowerCase().split(',').map(b => b.trim()).includes(newStudent.branch.toLowerCase().trim()))
                       );
-                      const listToShow = filtered.length > 0 ? filtered : trainersList;
+                      const listToShow = filtered.length > 0 ? filtered : (trainersList || []);
                       return listToShow.map(t => (
                         <option key={t.username} value={t.username}>
                           {t.username} {t.fullName ? `(${t.fullName})` : ''}

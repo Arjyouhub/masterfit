@@ -1,0 +1,10 @@
+{
+  "name": "attendance-project",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:full": "npm --prefix Frontend run dev:full",
+    "dev": "npm --prefix Frontend run dev",
+    "server": "npm --prefix Backend run dev"
+  }
+}
