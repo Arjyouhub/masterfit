@@ -67,7 +67,7 @@ const BRANCHES_DATA = [
     tag: 'Branch',
     phone: '9995422610',
     whatsapp: '919567964340',
-    address: 'Parakkadavu Junction, Kozhikode / Kannur Border, Kerala',
+    address: 'Parakkadavu Junction, Kozhikode Route',
     timings: 'Morning: 06:00 AM - 08:00 AM | Evening: 04:30 PM - 08:00 PM',
     disciplines: ['Karate', 'Wushu', 'Kickboxing', 'Sports Martial Arts']
   },
