@@ -14,7 +14,124 @@ import gallery3Img from './assets/gallery3.jpg';
 import gallery4Img from './assets/gallery4.jpg';
 
 // Academy Branches static list fallback
-const DEFAULT_BRANCHES = ['Kuttiady', 'Perambra', 'Kallachi', 'Chambra', 'Devargovil', 'Orkatteri', 'Paarakadav'];
+const DEFAULT_BRANCHES = [
+  'Kuttiady', 'Perambra', 'Kallachi', 'Orkatteri', 'Paarakadav',
+  'Chembra', 'Kallikandi', 'Devargovil', 'Thuvakunne', 'Elankode', 'Peringathur'
+];
+
+const BRANCHES_DATA = [
+  {
+    id: 'kuttiady',
+    name: 'Kuttiady',
+    tag: 'Head Office',
+    phone: '9995422610',
+    whatsapp: '919567964340',
+    address: 'Main Town Center, Kuttiady, Kozhikode, Kerala',
+    timings: 'Morning: 06:00 AM - 09:00 AM | Evening: 04:30 PM - 09:00 PM',
+    disciplines: ['Kung Fu', 'Karate', 'Wushu', 'MMA', 'Boxing', 'Kickboxing', 'Taekwondo', 'Fitness'],
+    isHeadOffice: true
+  },
+  {
+    id: 'perambra',
+    name: 'Perambra',
+    tag: 'Branch',
+    phone: '9995422610',
+    whatsapp: '919567964340',
+    address: 'Near Town Centre, Perambra, Kozhikode, Kerala',
+    timings: 'Morning: 06:30 AM - 08:30 AM | Evening: 05:00 PM - 08:30 PM',
+    disciplines: ['Karate', 'Kickboxing', 'Kung Fu', 'Boxing', 'Fitness Training']
+  },
+  {
+    id: 'kallachi',
+    name: 'Kallachi',
+    tag: 'Branch',
+    phone: '9995422610',
+    whatsapp: '919567964340',
+    address: 'Nadapuram Road, Kallachi, Kozhikode, Kerala',
+    timings: 'Morning: 06:00 AM - 08:30 AM | Evening: 04:30 PM - 08:30 PM',
+    disciplines: ['Wushu', 'Karate', 'MMA', 'Kickboxing', 'Judo']
+  },
+  {
+    id: 'orkatteri',
+    name: 'Orkkatteri',
+    tag: 'Branch',
+    phone: '9995422610',
+    whatsapp: '919567964340',
+    address: 'Orkkatteri Town, Vadakara, Kozhikode, Kerala',
+    timings: 'Morning: 06:30 AM - 08:30 AM | Evening: 05:00 PM - 08:30 PM',
+    disciplines: ['Kung Fu', 'Karate', 'Boxing', 'Wrestling', 'Fitness']
+  },
+  {
+    id: 'paarakadav',
+    name: 'Parakkadavu',
+    tag: 'Branch',
+    phone: '9995422610',
+    whatsapp: '919567964340',
+    address: 'Parakkadavu Junction, Kozhikode / Kannur Border, Kerala',
+    timings: 'Morning: 06:00 AM - 08:00 AM | Evening: 04:30 PM - 08:00 PM',
+    disciplines: ['Karate', 'Wushu', 'Kickboxing', 'Sports Martial Arts']
+  },
+  {
+    id: 'chembra',
+    name: 'Chembra',
+    tag: 'Branch',
+    phone: '9995422610',
+    whatsapp: '919567964340',
+    address: 'Chembra Town, Kozhikode District, Kerala',
+    timings: 'Morning: 06:30 AM - 08:30 AM | Evening: 05:00 PM - 08:30 PM',
+    disciplines: ['Kung Fu', 'Karate', 'MMA', 'Fitness Training']
+  },
+  {
+    id: 'kallikandi',
+    name: 'Kallikkandy',
+    tag: 'Branch',
+    phone: '9995422610',
+    whatsapp: '919567964340',
+    address: 'Kallikkandy Town, Kannur District, Kerala',
+    timings: 'Morning: 06:00 AM - 08:30 AM | Evening: 04:30 PM - 08:30 PM',
+    disciplines: ['Wushu', 'Karate', 'Boxing', 'Kickboxing', 'Judo']
+  },
+  {
+    id: 'devargovil',
+    name: 'Devarcovil',
+    tag: 'Branch',
+    phone: '9995422610',
+    whatsapp: '919567964340',
+    address: 'Devarcovil Center, Kozhikode, Kerala',
+    timings: 'Morning: 06:30 AM - 08:30 AM | Evening: 05:00 PM - 08:30 PM',
+    disciplines: ['Karate', 'Kung Fu', 'Taekwondo', 'Fitness Training']
+  },
+  {
+    id: 'thuvakunne',
+    name: 'Thuvakkunnu',
+    tag: 'Branch',
+    phone: '9995422610',
+    whatsapp: '919567964340',
+    address: 'Thuvakkunnu Town, Kannur / Kozhikode Border, Kerala',
+    timings: 'Morning: 06:00 AM - 08:00 AM | Evening: 04:30 PM - 08:00 PM',
+    disciplines: ['MMA', 'Boxing', 'Kickboxing', 'Wrestling', 'Sports Martial Arts']
+  },
+  {
+    id: 'elankode',
+    name: 'Elankode',
+    tag: 'Branch',
+    phone: '9995422610',
+    whatsapp: '919567964340',
+    address: 'Elankode Junction, Kozhikode, Kerala',
+    timings: 'Morning: 06:30 AM - 08:30 AM | Evening: 05:00 PM - 08:30 PM',
+    disciplines: ['Karate', 'Wushu', 'Judo', 'Fitness Training']
+  },
+  {
+    id: 'perigathur',
+    name: 'Peringathur',
+    tag: 'Branch',
+    phone: '9995422610',
+    whatsapp: '919567964340',
+    address: 'Peringathur Town, Kannur / Thalassery Region, Kerala',
+    timings: 'Morning: 06:00 AM - 08:30 AM | Evening: 04:30 PM - 08:30 PM',
+    disciplines: ['Kung Fu', 'Karate', 'Boxing', 'MMA', 'Taekwondo']
+  }
+];
 
 const DEFAULT_BATCH_OPTIONS = [];
 
@@ -290,6 +407,8 @@ function App() {
       return 'login'; // No session? Force login
     } else if (hash === '#/about' || hash === '#about') {
       return 'about';
+    } else if (hash === '#/branches' || hash === '#branches') {
+      return 'branches';
     }
     return 'website';
   });
@@ -300,6 +419,7 @@ function App() {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [studentToDelete, setStudentToDelete] = useState(null);
   const [scrolled, setScrolled] = useState(false);
+  const [branchSearchQuery, setBranchSearchQuery] = useState('');
   const [loginData, setLoginData] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -7001,6 +7121,7 @@ function App() {
         </button>
         <div className={`nav-links ${isMobileMenuOpen ? 'open' : ''}`}>
           <a href="#about" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('about'); setIsMobileMenuOpen(false); window.scrollTo(0, 0); }}>About Us</a>
+          <a href="#branches" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('branches'); setIsMobileMenuOpen(false); window.scrollTo(0, 0); }}>Branches</a>
           <a href="#disciplines" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Disciplines</a>
           <a href="#instructors" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Instructors</a>
           <a href="#gallery" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Gallery</a>
@@ -7127,6 +7248,90 @@ function App() {
         </div>
       </section>
 
+      <section id="branches" className="section" style={{ background: '#080808' }}>
+        <div className="section-header" style={{ marginBottom: '2.5rem' }}>
+          <span className="section-subtitle">11 Training Centers Across Kerala</span>
+          <h2 className="section-title">Our Branches & Locations</h2>
+          <p style={{ color: '#888', maxWidth: '650px', margin: '0 auto', fontSize: '0.95rem', lineHeight: '1.6' }}>
+            Find your nearest Master Fit Academy branch across Kozhikode and Kannur. Click to call or WhatsApp your branch coordinator directly.
+          </p>
+        </div>
+        <div className="branches-grid">
+          {BRANCHES_DATA.map((branch) => {
+            const waMessage = encodeURIComponent(`Hi Master Fit Academy, I would like to inquire about training classes and batch timings at the ${branch.name} branch.`);
+            return (
+              <div key={branch.id} className={`branch-card ${branch.isHeadOffice ? 'is-head-office' : ''}`}>
+                <div>
+                  <div className="branch-card-header">
+                    <div className="branch-title-wrap">
+                      <div className="branch-pin-icon">
+                        <MapPin size={20} />
+                      </div>
+                      <div>
+                        <h3 className="branch-name">{branch.name}</h3>
+                        <span style={{ fontSize: '0.78rem', color: '#888' }}>Kerala</span>
+                      </div>
+                    </div>
+                    <span className={`branch-tag ${branch.isHeadOffice ? 'tag-head-office' : 'tag-branch'}`}>
+                      {branch.tag}
+                    </span>
+                  </div>
+
+                  <div className="branch-info-list">
+                    <div className="branch-info-row">
+                      <Phone size={17} />
+                      <div>
+                        <div style={{ fontSize: '0.75rem', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Contact Phone</div>
+                        <a href={`tel:${branch.phone}`} className="branch-phone-number">{branch.phone}</a>
+                      </div>
+                    </div>
+
+                    <div className="branch-info-row">
+                      <MapPin size={17} />
+                      <div>
+                        <div style={{ fontSize: '0.75rem', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Address / Landmark</div>
+                        <span>{branch.address}</span>
+                      </div>
+                    </div>
+
+                    <div className="branch-info-row">
+                      <Activity size={17} />
+                      <div>
+                        <div style={{ fontSize: '0.75rem', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Daily Batches</div>
+                        <span>{branch.timings}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="branch-disciplines-section">
+                    <div className="branch-disciplines-label">Offered Disciplines</div>
+                    <div className="branch-chips-wrap">
+                      {branch.disciplines.map((d, i) => (
+                        <span key={i} className="branch-chip">{d}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="branch-card-actions">
+                  <a href={`tel:${branch.phone}`} className="branch-btn-call">
+                    <Phone size={16} /> Call Now
+                  </a>
+                  <a
+                    href={`https://wa.me/${branch.whatsapp}?text=${waMessage}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="branch-btn-wa"
+                  >
+                    <MessageCircle size={16} /> WhatsApp
+                  </a>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
       <section id="instructors" className="section">
         <div className="section-header">
           <span className="section-subtitle">Learn from the best</span>
@@ -7215,6 +7420,7 @@ function App() {
         <div className={`nav-links ${isMobileMenuOpen ? 'open' : ''}`}>
           <a href="/" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); window.scrollTo(0, 0); setIsMobileMenuOpen(false); }}>Home</a>
           <a href="#about" className="nav-link active" style={{ color: 'var(--color-primary)' }} onClick={(e) => { e.preventDefault(); setIsMobileMenuOpen(false); }}>About Us</a>
+          <a href="#branches" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('branches'); setIsMobileMenuOpen(false); window.scrollTo(0, 0); }}>Branches</a>
           <a href="/#disciplines" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('disciplines')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Disciplines</a>
           <a href="/#instructors" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('instructors')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Instructors</a>
           <a href="/#gallery" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('gallery')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Gallery</a>
@@ -7455,6 +7661,185 @@ function App() {
       </section>
     </div>
   );
+
+  // --- Dedicated Branches Page View ---
+  const renderPublicBranchesPage = () => {
+    const filteredBranches = BRANCHES_DATA.filter((b) => {
+      const q = (branchSearchQuery || '').toLowerCase().trim();
+      if (!q) return true;
+      return (
+        b.name.toLowerCase().includes(q) ||
+        b.address.toLowerCase().includes(q) ||
+        b.phone.includes(q) ||
+        b.disciplines.some((d) => d.toLowerCase().includes(q))
+      );
+    });
+
+    return (
+      <div className={`branches-page-layout ${isMaintenanceUpcoming ? 'has-maintenance-banner' : ''}`}>
+        {isMaintenanceUpcoming && (
+          <div className="maintenance-alert-banner" style={{ zIndex: 1200, top: '0px' }}>
+            <AlertTriangle size={18} className="pulse-icon" />
+            <span>Upcoming Maintenance: Portal login will be restricted from {formatMaintenanceTime(maintenanceStart)} to {formatMaintenanceTime(maintenanceEnd)}.</span>
+          </div>
+        )}
+        <nav className={`public-nav ${scrolled ? 'scrolled' : ''}`}>
+          <div className="brand" style={{ cursor: 'pointer' }} onClick={() => { setAppMode('website'); window.scrollTo(0, 0); setIsMobileMenuOpen(false); }}>
+            <span className="brand-accent">MASTER</span> FIT
+          </div>
+          <button className="mobile-menu-btn" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
+            {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+          </button>
+          <div className={`nav-links ${isMobileMenuOpen ? 'open' : ''}`}>
+            <a href="/" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); window.scrollTo(0, 0); setIsMobileMenuOpen(false); }}>Home</a>
+            <a href="#about" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('about'); setIsMobileMenuOpen(false); window.scrollTo(0, 0); }}>About Us</a>
+            <a href="#branches" className="nav-link active" style={{ color: 'var(--color-primary)' }} onClick={(e) => { e.preventDefault(); setIsMobileMenuOpen(false); }}>Branches</a>
+            <a href="/#disciplines" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('disciplines')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Disciplines</a>
+            <a href="/#instructors" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('instructors')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Instructors</a>
+            <a href="/#gallery" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('gallery')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Gallery</a>
+            <a href="/#contact" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Contact</a>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button className="btn-outline-primary" onClick={() => { setAppMode('login'); setIsMobileMenuOpen(false); }}>
+                Login
+              </button>
+            </div>
+          </div>
+        </nav>
+
+        {/* Branches Hero */}
+        <section className="branches-hero-section">
+          <div className="branches-hero-content">
+            <div className="about-badge" style={{ background: 'rgba(255, 215, 0, 0.15)', borderColor: 'rgba(255, 215, 0, 0.4)', color: '#FFD700' }}>
+              <MapPin size={16} /> 11 LOCATIONS ACROSS KERALA
+            </div>
+            <h1 className="about-hero-title">
+              Our <span>Academy Branches</span>
+            </h1>
+            <p className="about-hero-subtitle">
+              Locate your nearest Master Fit Academy center across Kozhikode and Kannur. Contact our branch coordinators directly to schedule your trial class and check batch timings.
+            </p>
+
+            <div className="branches-search-wrapper">
+              <Search className="branches-search-icon" size={20} />
+              <input
+                type="text"
+                className="branches-search-input"
+                placeholder="Search by branch name, location, or art (e.g. Kuttiady, Perambra, MMA)..."
+                value={branchSearchQuery}
+                onChange={(e) => setBranchSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* Branches Listing */}
+        <section className="branches-container">
+          <div className="branches-grid">
+            {filteredBranches.map((branch) => {
+              const waMessage = encodeURIComponent(`Hi Master Fit Academy, I would like to inquire about training classes and batch timings at the ${branch.name} branch.`);
+              return (
+                <div key={branch.id} className={`branch-card ${branch.isHeadOffice ? 'is-head-office' : ''}`}>
+                  <div>
+                    <div className="branch-card-header">
+                      <div className="branch-title-wrap">
+                        <div className="branch-pin-icon">
+                          <MapPin size={20} />
+                        </div>
+                        <div>
+                          <h3 className="branch-name">{branch.name}</h3>
+                          <span style={{ fontSize: '0.78rem', color: '#888' }}>Kerala</span>
+                        </div>
+                      </div>
+                      <span className={`branch-tag ${branch.isHeadOffice ? 'tag-head-office' : 'tag-branch'}`}>
+                        {branch.tag}
+                      </span>
+                    </div>
+
+                    <div className="branch-info-list">
+                      <div className="branch-info-row">
+                        <Phone size={17} />
+                        <div>
+                          <div style={{ fontSize: '0.75rem', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Contact Phone</div>
+                          <a href={`tel:${branch.phone}`} className="branch-phone-number">{branch.phone}</a>
+                        </div>
+                      </div>
+
+                      <div className="branch-info-row">
+                        <MapPin size={17} />
+                        <div>
+                          <div style={{ fontSize: '0.75rem', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Address / Landmark</div>
+                          <span>{branch.address}</span>
+                        </div>
+                      </div>
+
+                      <div className="branch-info-row">
+                        <Activity size={17} />
+                        <div>
+                          <div style={{ fontSize: '0.75rem', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Daily Batches</div>
+                          <span>{branch.timings}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="branch-disciplines-section">
+                      <div className="branch-disciplines-label">Offered Disciplines</div>
+                      <div className="branch-chips-wrap">
+                        {branch.disciplines.map((d, i) => (
+                          <span key={i} className="branch-chip">{d}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="branch-card-actions">
+                    <a href={`tel:${branch.phone}`} className="branch-btn-call">
+                      <Phone size={16} /> Call Now
+                    </a>
+                    <a
+                      href={`https://wa.me/${branch.whatsapp}?text=${waMessage}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="branch-btn-wa"
+                    >
+                      <MessageCircle size={16} /> WhatsApp
+                    </a>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {filteredBranches.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '4rem 2rem', color: '#888' }}>
+              <MapPin size={48} style={{ margin: '0 auto 1rem auto', opacity: 0.4 }} />
+              <h3 style={{ color: '#fff', marginBottom: '0.5rem' }}>No branches matching "{branchSearchQuery}"</h3>
+              <p>Try searching for Kuttiady, Perambra, Kallachi, or another location name.</p>
+              <button className="btn-outline-primary" style={{ marginTop: '1rem' }} onClick={() => setBranchSearchQuery('')}>Clear Search</button>
+            </div>
+          )}
+
+          <div style={{ marginTop: '4.5rem', textAlign: 'center' }}>
+            <div className="glass-panel panel" style={{ maxWidth: '800px', margin: '0 auto', padding: '2.5rem 2rem' }}>
+              <h3 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.6rem', color: '#fff', marginBottom: '0.75rem' }}>
+                Can't find your location or have a custom batch request?
+              </h3>
+              <p style={{ color: '#aaa', marginBottom: '1.5rem', fontSize: '0.95rem' }}>
+                Contact our Kuttiady Head Office directly. We provide centralized admissions, batch transfers, and trial class bookings for all branches across Kerala.
+              </p>
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                <a href="tel:9995422610" className="btn-primary" style={{ padding: '0.85rem 1.8rem' }}>
+                  <Phone size={18} /> Call Head Office (9995422610)
+                </a>
+                <button className="btn-outline-primary" style={{ padding: '0.85rem 1.8rem' }} onClick={() => { setAppMode('website'); window.scrollTo(0, 0); }}>
+                  Back to Main Home
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  };
 
   const renderYearCalendar = () => {
     const year = new Date().getFullYear();
@@ -15499,6 +15884,10 @@ function App() {
 
   if (appMode === 'about') {
     return renderAboutPage();
+  }
+
+  if (appMode === 'branches') {
+    return renderPublicBranchesPage();
   }
 
   if (appMode === 'login') {

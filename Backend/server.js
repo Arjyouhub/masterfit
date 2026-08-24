@@ -1339,7 +1339,7 @@ app.get('/api/public/branches', async (req, res) => {
     }
 
     if (rawNames.length === 0) {
-      rawNames = ['Kuttiady', 'Perambra', 'Kallachi', 'Chambra', 'Devargovil', 'Orkatteri', 'Paarakadav'];
+      rawNames = ['Kuttiady', 'Perambra', 'Kallachi', 'Orkatteri', 'Paarakadav', 'Chembra', 'Kallikandi', 'Devargovil', 'Thuvakunne', 'Elankode', 'Peringathur'];
     }
 
     // Deduplicate case-insensitively while preserving proper case
