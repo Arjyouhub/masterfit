@@ -288,6 +288,8 @@ function App() {
       return 'login';
     } else if (hash === '#/admin') {
       return 'login'; // No session? Force login
+    } else if (hash === '#/about' || hash === '#about') {
+      return 'about';
     }
     return 'website';
   });
@@ -6998,6 +7000,7 @@ function App() {
           {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
         </button>
         <div className={`nav-links ${isMobileMenuOpen ? 'open' : ''}`}>
+          <a href="#about" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('about'); setIsMobileMenuOpen(false); window.scrollTo(0, 0); }}>About Us</a>
           <a href="#disciplines" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Disciplines</a>
           <a href="#instructors" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Instructors</a>
           <a href="#gallery" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Gallery</a>
@@ -7016,12 +7019,28 @@ function App() {
         <div className="hero-content">
           <span className="hero-subtitle">GRAB YOUR BETTER VERSION</span>
           <h1 className="hero-title">MASTER FIT <span>Academy</span></h1>
-          <p className="hero-desc">
-            Train with elite instructors in a premium facility. Master Kung Fu, Karate, and Wushu, and embark on your journey from white to black belt.
-          </p>
-          <button className="btn-primary" style={{ padding: '1rem 2rem', fontSize: '1.1rem' }} onClick={() => document.getElementById('contact').scrollIntoView({ behavior: 'smooth' })}>
-            Start Your Journey <ArrowRight size={20} />
-          </button>
+          <div className="hero-desc">
+            <p style={{ marginBottom: '0.85rem' }}>
+              At Master Fit Academy, we are dedicated to building stronger bodies, sharper minds, and confident individuals. We provide professional training in Wushu, Boxing, Karate, Kung Fu, Wrestling, Kickboxing, Judo, MMA, Taekwondo, Fitness Training, and Sports Martial Arts.
+            </p>
+            <p style={{ marginBottom: '0.85rem' }}>
+              Our comprehensive training programs are designed for students of different ages, abilities, and fitness levels. We combine traditional martial arts values with modern training techniques to develop complete physical and mental fitness. Through discipline, determination, and focused training, we help every student discover and develop their true potential.
+            </p>
+            <p style={{ marginBottom: '0.85rem' }}>
+              Our programs encourage students to achieve excellence not only in sports but also in their education, personal development, and competitive performance. Martial arts and sports achievements can help eligible students gain sports-related benefits and grace marks in accordance with applicable rules and institutional policies. We also prepare and guide students to develop the fitness, discipline, skills, and confidence that can support them in pursuing eligible government and career opportunities.
+            </p>
+            <p style={{ marginBottom: '1.25rem', color: '#fff', fontWeight: 500 }}>
+              At Master Fit Academy, we don't just teach martial arts—we build confidence, character, discipline, and champions for life. Join Master Fit Academy and take the first step toward a stronger, healthier, more confident, and successful future.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
+            <button className="btn-primary" style={{ padding: '1rem 2rem', fontSize: '1.05rem' }} onClick={() => document.getElementById('contact').scrollIntoView({ behavior: 'smooth' })}>
+              Start Your Journey <ArrowRight size={20} />
+            </button>
+            <button className="btn-outline-primary" style={{ padding: '1rem 1.75rem', fontSize: '1.05rem', background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.2)' }} onClick={() => { setAppMode('about'); window.scrollTo(0, 0); }}>
+              About Academy
+            </button>
+          </div>
         </div>
       </section>
 
@@ -7031,36 +7050,80 @@ function App() {
           <h2 className="section-title">Training Programs</h2>
         </div>
         <div className="disciplines-grid">
-          <div className="discipline-card">
-            <img src="/kungfu.png" alt="Kung Fu" className="discipline-img" />
-            <div className="discipline-overlay"></div>
-            <div className="discipline-info">
-              <h3 className="discipline-title">Kung Fu</h3>
-              <p className="discipline-desc">
-                Develop exceptional agility, focus, and traditional forms. Master the flow of energy and strike with precision.
-              </p>
+          {[
+            {
+              title: 'Kung Fu',
+              desc: 'Develop exceptional agility, focus, and traditional forms. Master the flow of energy and strike with precision.',
+              img: '/kungfu.png'
+            },
+            {
+              title: 'Karate',
+              desc: 'Build self-discipline, speed, and raw power. Learn effective striking techniques, blocks, and core defensive patterns.',
+              img: '/karate.png'
+            },
+            {
+              title: 'Wushu',
+              desc: 'Combine acrobatics and martial arts. Learn high-flying jumps, fluid weapon routines, and dynamic performance elements.',
+              img: '/wushu.png'
+            },
+            {
+              title: 'MMA',
+              desc: 'Full-spectrum mixed martial arts integrating striking, clinch control, takedowns, and comprehensive ground defense.',
+              img: 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&q=80&w=800'
+            },
+            {
+              title: 'Kickboxing',
+              desc: 'High-energy striking fusing explosive kicks, rapid punch combinations, and relentless cardiovascular conditioning.',
+              img: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&q=80&w=800'
+            },
+            {
+              title: 'Boxing',
+              desc: 'Master the sweet science: precision punching mechanics, head movement, agile footwork, and counter-strike defense.',
+              img: 'https://images.unsplash.com/photo-1549719386-74dfcbf7dbed?auto=format&fit=crop&q=80&w=800'
+            },
+            {
+              title: 'Judo',
+              desc: 'Master powerful throws, foot sweeps, leverage control, and breakfall techniques for maximum efficiency and defense.',
+              img: 'https://images.unsplash.com/photo-1555597673-b21d5c935865?auto=format&fit=crop&q=80&w=800'
+            },
+            {
+              title: 'Wrestling',
+              desc: 'Build supreme physical strength, explosive takedowns, control holds, pinning mastery, and unstoppable endurance.',
+              img: 'https://images.unsplash.com/photo-1599058917212-d750089bc07e?auto=format&fit=crop&q=80&w=800'
+            },
+            {
+              title: 'Taekwondo',
+              desc: 'Fast-paced Olympic-style high kicking, dynamic jumping spinning kicks, agile footwork, and precise sparring tactics.',
+              img: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?auto=format&fit=crop&q=80&w=800'
+            },
+            {
+              title: 'Fitness Training',
+              desc: 'Functional strength conditioning, high-intensity endurance, athletic agility drills, and total body transformation.',
+              img: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80&w=800'
+            },
+            {
+              title: 'Sports Martial Arts',
+              desc: 'Tournament competition coaching, national/state championship preparation, and sports grace marks eligibility guidance.',
+              img: 'https://images.unsplash.com/photo-1564415315949-7a0c4c73aab4?auto=format&fit=crop&q=80&w=800'
+            }
+          ].map((item, idx) => (
+            <div key={idx} className="discipline-card">
+              <img
+                src={item.img}
+                alt={item.title}
+                className="discipline-img"
+                onError={(e) => {
+                  e.target.onerror = null;
+                  e.target.src = 'https://images.unsplash.com/photo-1555597673-b21d5c935865?auto=format&fit=crop&q=80&w=800';
+                }}
+              />
+              <div className="discipline-overlay"></div>
+              <div className="discipline-info">
+                <h3 className="discipline-title">{item.title}</h3>
+                <p className="discipline-desc">{item.desc}</p>
+              </div>
             </div>
-          </div>
-          <div className="discipline-card">
-            <img src="/karate.png" alt="Karate" className="discipline-img" />
-            <div className="discipline-overlay"></div>
-            <div className="discipline-info">
-              <h3 className="discipline-title">Karate</h3>
-              <p className="discipline-desc">
-                Build self-discipline, speed, and raw power. Learn effective striking techniques, blocks, and core defensive patterns.
-              </p>
-            </div>
-          </div>
-          <div className="discipline-card">
-            <img src="/wushu.png" alt="Wushu" className="discipline-img" />
-            <div className="discipline-overlay"></div>
-            <div className="discipline-info">
-              <h3 className="discipline-title">Wushu</h3>
-              <p className="discipline-desc">
-                Combine acrobatics and martial arts. Learn high-flying jumps, fluid weapon routines, and dynamic performance elements.
-              </p>
-            </div>
-          </div>
+          ))}
         </div>
       </section>
 
@@ -7124,6 +7187,266 @@ function App() {
           <button className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Send Registration Request</button>
 
           <div className="contact-info">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted)' }}><Phone size={18} color="var(--color-primary)" /> 9995422610</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted)' }}><MapPin size={18} color="var(--color-primary)" /> KUTTIADY HEAD OFFICE</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted)' }}><span style={{ color: 'var(--color-primary)', fontWeight: 600 }}>IG</span> <a href="https://www.instagram.com/master_fit__?igsh=ZTZta2dsMjJpeXR3" target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>@master_fit__</a></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+
+  // --- Dedicated About Us Page View ---
+  const renderAboutPage = () => (
+    <div className={`about-page-layout ${isMaintenanceUpcoming ? 'has-maintenance-banner' : ''}`}>
+      {isMaintenanceUpcoming && (
+        <div className="maintenance-alert-banner" style={{ zIndex: 1200, top: '0px' }}>
+          <AlertTriangle size={18} className="pulse-icon" />
+          <span>Upcoming Maintenance: Portal login will be restricted from {formatMaintenanceTime(maintenanceStart)} to {formatMaintenanceTime(maintenanceEnd)}.</span>
+        </div>
+      )}
+      <nav className={`public-nav ${scrolled ? 'scrolled' : ''}`}>
+        <div className="brand" style={{ cursor: 'pointer' }} onClick={() => { setAppMode('website'); window.scrollTo(0, 0); setIsMobileMenuOpen(false); }}>
+          <span className="brand-accent">MASTER</span> FIT
+        </div>
+        <button className="mobile-menu-btn" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
+          {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+        </button>
+        <div className={`nav-links ${isMobileMenuOpen ? 'open' : ''}`}>
+          <a href="/" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); window.scrollTo(0, 0); setIsMobileMenuOpen(false); }}>Home</a>
+          <a href="#about" className="nav-link active" style={{ color: 'var(--color-primary)' }} onClick={(e) => { e.preventDefault(); setIsMobileMenuOpen(false); }}>About Us</a>
+          <a href="/#disciplines" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('disciplines')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Disciplines</a>
+          <a href="/#instructors" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('instructors')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Instructors</a>
+          <a href="/#gallery" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('gallery')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Gallery</a>
+          <a href="/#contact" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Contact</a>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button className="btn-outline-primary" onClick={() => { setAppMode('login'); setIsMobileMenuOpen(false); }}>
+              Login
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      {/* About Hero */}
+      <section className="about-hero-section">
+        <div className="about-hero-content">
+          <div className="about-badge">
+            <Shield size={16} /> MASTER FIT ACADEMY
+          </div>
+          <h1 className="about-hero-title">
+            About <span>Master Fit</span> Academy
+          </h1>
+          <p className="about-hero-subtitle">
+            Dedicated to building stronger bodies, sharper minds, and confident individuals through world-class martial arts instruction, character development, and champion-level sports conditioning.
+          </p>
+          <div style={{ display: 'flex', gap: '14px', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button className="btn-primary" style={{ padding: '0.85rem 1.8rem' }} onClick={() => { setAppMode('website'); setTimeout(() => document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>
+              Join Our Academy <ArrowRight size={18} />
+            </button>
+            <button className="btn-outline-primary" style={{ padding: '0.85rem 1.8rem', background: 'rgba(255,255,255,0.06)' }} onClick={() => { setAppMode('website'); window.scrollTo(0, 0); }}>
+              Back to Home
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Key Stats Bar */}
+      <div className="about-stats-container">
+        <div className="about-stats-grid">
+          <div className="about-stat-card">
+            <div className="about-stat-icon"><Award size={22} /></div>
+            <div className="about-stat-number">11+ Arts</div>
+            <div className="about-stat-label">Combat Disciplines</div>
+          </div>
+          <div className="about-stat-card">
+            <div className="about-stat-icon"><Users size={22} /></div>
+            <div className="about-stat-number">500+</div>
+            <div className="about-stat-label">Students Trained</div>
+          </div>
+          <div className="about-stat-card">
+            <div className="about-stat-icon"><Shield size={22} /></div>
+            <div className="about-stat-number">100%</div>
+            <div className="about-stat-label">Certified Masters</div>
+          </div>
+          <div className="about-stat-card">
+            <div className="about-stat-icon"><Star size={22} /></div>
+            <div className="about-stat-number">Grace Marks</div>
+            <div className="about-stat-label">& Career Guidance</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Comprehensive Story Section */}
+      <section className="about-story-section">
+        <div className="about-story-text">
+          <span className="section-subtitle" style={{ textAlign: 'left', marginBottom: '0.5rem' }}>Our Heritage & Philosophy</span>
+          <h2>Empowering Champions For Life</h2>
+          <p>
+            At Master Fit Academy, we are dedicated to building stronger bodies, sharper minds, and confident individuals. We provide professional training in Wushu, Boxing, Karate, Kung Fu, Wrestling, Kickboxing, Judo, MMA, Taekwondo, Fitness Training, and Sports Martial Arts.
+          </p>
+          <p>
+            Our comprehensive training programs are designed for students of different ages, abilities, and fitness levels. We combine traditional martial arts values with modern training techniques to develop complete physical and mental fitness.
+          </p>
+          <p>
+            Through discipline, determination, and focused training, we help every student discover and develop their true potential. Our programs encourage students to achieve excellence not only in sports but also in their education, personal development, and competitive performance.
+          </p>
+          <p style={{ color: '#fff', fontWeight: 600 }}>
+            At Master Fit Academy, we don't just teach martial arts—we build confidence, character, discipline, and champions for life.
+          </p>
+        </div>
+
+        <div className="about-feature-box">
+          <h3 style={{ margin: '0 0 1.5rem 0', fontFamily: 'Outfit, sans-serif', fontSize: '1.4rem', color: '#fff' }}>
+            Why Choose Master Fit?
+          </h3>
+          <div className="about-feature-item">
+            <div className="about-feature-icon"><CheckCircle size={18} /></div>
+            <div>
+              <h4>Authentic Martial Arts Mastery</h4>
+              <p>Certified black belt instructors preserving the highest technical standards of traditional forms and practical self-defense.</p>
+            </div>
+          </div>
+          <div className="about-feature-item">
+            <div className="about-feature-icon"><CheckCircle size={18} /></div>
+            <div>
+              <h4>Multi-Discipline Training Facility</h4>
+              <p>Specialized training areas with high-grade mats, punching bags, agility equipment, and protective sparring gear.</p>
+            </div>
+          </div>
+          <div className="about-feature-item">
+            <div className="about-feature-icon"><CheckCircle size={18} /></div>
+            <div>
+              <h4>Anti-Bullying & Character Growth</h4>
+              <p>Instilling unshakable self-confidence, emotional poise, respect for peers, and situational awareness.</p>
+            </div>
+          </div>
+          <div className="about-feature-item">
+            <div className="about-feature-icon"><CheckCircle size={18} /></div>
+            <div>
+              <h4>Tournament & Championship Coaching</h4>
+              <p>Structured pathway from white belt to black belt, with dedicated coaching for district, state, and national tournaments.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Mission, Vision, Values */}
+      <section className="about-values-section">
+        <div className="section-header" style={{ marginBottom: '3rem' }}>
+          <span className="section-subtitle">Our Guiding Principles</span>
+          <h2 className="section-title">Mission, Vision & Core Values</h2>
+        </div>
+        <div className="about-values-grid">
+          <div className="about-value-card">
+            <div className="about-value-header">
+              <div style={{ color: '#E50914' }}><Activity size={24} /></div>
+              <h3 className="about-value-title">Our Mission</h3>
+            </div>
+            <p className="about-value-desc">
+              To cultivate mental resilience, physical strength, and unshakeable confidence in students of all ages through disciplined, scientifically-backed martial arts instruction and character mentorship.
+            </p>
+          </div>
+
+          <div className="about-value-card">
+            <div className="about-value-header">
+              <div style={{ color: '#FFD700' }}><TrendingUp size={24} /></div>
+              <h3 className="about-value-title">Our Vision</h3>
+            </div>
+            <p className="about-value-desc">
+              To be the gold standard of martial arts and fitness academies in Kerala, producing state and national champions while empowering every individual to lead a healthier, disciplined, and purposeful life.
+            </p>
+          </div>
+
+          <div className="about-value-card">
+            <div className="about-value-header">
+              <div style={{ color: '#E50914' }}><Shield size={24} /></div>
+              <h3 className="about-value-title">Our Values</h3>
+            </div>
+            <p className="about-value-desc">
+              <strong>Respect:</strong> Honor for masters, peers, and opponents.<br />
+              <strong>Discipline:</strong> Consistency in mind and body.<br />
+              <strong>Perseverance:</strong> Overcoming challenges on and off the mat.<br />
+              <strong>Integrity:</strong> Upholding moral excellence always.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Sports Grace Marks & Career Opportunities Banner */}
+      <div className="about-grace-banner">
+        <div className="about-grace-inner">
+          <div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', color: '#FFD700', fontWeight: 700, fontSize: '0.85rem', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '1px' }}>
+              <Award size={18} /> Academic & Government Career Pathways
+            </div>
+            <h3 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.8rem', fontWeight: 800, margin: '0 0 1rem 0', color: '#fff' }}>
+              Sports Grace Marks & Career Guidance
+            </h3>
+            <p style={{ color: '#b5b5b5', lineHeight: '1.6', margin: '0 0 1rem 0' }}>
+              Martial arts and sports achievements can help eligible students gain sports-related benefits and grace marks in accordance with applicable rules and institutional policies.
+            </p>
+            <p style={{ color: '#b5b5b5', lineHeight: '1.6', margin: 0 }}>
+              We also prepare and guide students to develop the fitness, discipline, skills, and confidence that can support them in pursuing eligible government and career opportunities.
+            </p>
+          </div>
+          <div style={{ background: 'rgba(5,5,5,0.7)', borderRadius: '16px', padding: '1.75rem', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <h4 style={{ margin: '0 0 1rem 0', color: '#fff', fontSize: '1.1rem' }}>How We Guide Our Athletes</h4>
+            <ul style={{ margin: 0, paddingLeft: '1.2rem', color: '#a0a0a0', lineHeight: '1.8', fontSize: '0.92rem' }}>
+              <li>Guidance for official state & national tournament certifications.</li>
+              <li>Support for academic grace mark application processes.</li>
+              <li>Physical fitness training tailored for police & defense services.</li>
+              <li>Lifelong leadership & sportsmanship credentials.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      {/* Category Levels Grid */}
+      <div className="section-header" style={{ marginBottom: '2.5rem' }}>
+        <span className="section-subtitle">Programs For Everyone</span>
+        <h2 className="section-title">Age Groups & Training Levels</h2>
+      </div>
+      <div className="about-levels-grid">
+        <div className="about-level-card">
+          <span className="about-level-badge">Ages 4 - 12</span>
+          <h3 className="about-level-title">Kids & Juniors</h3>
+          <p className="about-level-desc">Foundational coordination, agility drills, anti-bullying awareness, discipline, and fun martial arts movements.</p>
+        </div>
+        <div className="about-level-card">
+          <span className="about-level-badge">Ages 13 - 19</span>
+          <h3 className="about-level-title">Teens & Youth</h3>
+          <p className="about-level-desc">Advanced combat arts, belt rank gradings, stamina building, tournament preparation, and academic sports guidance.</p>
+        </div>
+        <div className="about-level-card">
+          <span className="about-level-badge">All Ages</span>
+          <h3 className="about-level-title">Adults & Fitness</h3>
+          <p className="about-level-desc">MMA, Kickboxing, functional conditioning, stress relief, self-defense, weight loss, and core strength.</p>
+        </div>
+        <div className="about-level-card">
+          <span className="about-level-badge">Selection Basis</span>
+          <h3 className="about-level-title">Elite Championship Squad</h3>
+          <p className="about-level-desc">Intensive tournament sparring, weapon katas, and national coaching for gold-medal aspirations.</p>
+        </div>
+      </div>
+
+      {/* Call to Action Banner */}
+      <section style={{ maxWidth: '900px', margin: '0 auto 5rem auto', padding: '0 2rem' }}>
+        <div className="glass-panel panel" style={{ textAlign: 'center', padding: '3rem 2rem', background: 'linear-gradient(135deg, rgba(20,20,20,0.95), rgba(10,10,10,0.98))', border: '1px solid rgba(229,9,20,0.35)', borderRadius: '20px' }}>
+          <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '2.2rem', textTransform: 'uppercase', margin: '0 0 1rem 0', color: '#fff' }}>
+            Ready to Begin Your Transformation?
+          </h2>
+          <p style={{ color: '#aaa', fontSize: '1.05rem', maxWidth: '600px', margin: '0 auto 2rem auto', lineHeight: '1.6' }}>
+            Join Master Fit Academy and take the first step toward a stronger, healthier, more confident, and successful future.
+          </p>
+          <div style={{ display: 'flex', gap: '14px', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button className="btn-primary" style={{ padding: '0.9rem 2rem', fontSize: '1.05rem' }} onClick={() => { setAppMode('website'); setTimeout(() => document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>
+              Schedule Free Trial Class <ArrowRight size={18} />
+            </button>
+            <button className="btn-outline-primary" style={{ padding: '0.9rem 1.8rem', fontSize: '1.05rem' }} onClick={() => { setAppMode('website'); window.scrollTo(0, 0); }}>
+              Explore Disciplines
+            </button>
+          </div>
+          <div className="contact-info" style={{ marginTop: '2.5rem', justifyContent: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted)' }}><Phone size={18} color="var(--color-primary)" /> 9995422610</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted)' }}><MapPin size={18} color="var(--color-primary)" /> KUTTIADY HEAD OFFICE</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted)' }}><span style={{ color: 'var(--color-primary)', fontWeight: 600 }}>IG</span> <a href="https://www.instagram.com/master_fit__?igsh=ZTZta2dsMjJpeXR3" target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>@master_fit__</a></div>
@@ -15172,6 +15495,10 @@ function App() {
 
   if (appMode === 'website') {
     return renderPublic();
+  }
+
+  if (appMode === 'about') {
+    return renderAboutPage();
   }
 
   if (appMode === 'login') {
