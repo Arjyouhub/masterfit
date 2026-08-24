@@ -587,6 +587,7 @@ function App() {
   const [gradeResult, setGradeResult] = useState('Pass');
   const [gradeLetter, setGradeLetter] = useState('A');
   const [gradeDate, setGradeDate] = useState(new Date().toISOString().split('T')[0]);
+  const [targetBelt, setTargetBelt] = useState('');
 
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [selectedHistoryStudent, setSelectedHistoryStudent] = useState(null);
@@ -9325,11 +9326,20 @@ function App() {
   };
 
   const handleToggleTrainerApproval = (student, approvedStatus) => {
-    setGradingActionLoading(true);
     setGradingError('');
     setGradingSuccess('');
 
-    fetch(`${API_BASE_URL}/students/${student.id}/trainer-approval`, {
+    const targetId = String(student.id || student._id || '');
+
+    // Instant optimistic update (0ms UI lag)
+    const optimisticUpdate = {
+      trainerApprovedForGrading: approvedStatus,
+      trainerApprovedAt: approvedStatus ? new Date().toISOString() : ''
+    };
+    setGradingStudents(prev => prev.map(s => (String(s.id || s._id) === targetId) ? { ...s, ...optimisticUpdate } : s));
+    setStudents(prev => prev.map(s => (String(s.id || s._id) === targetId) ? { ...s, ...optimisticUpdate } : s));
+
+    fetch(`${API_BASE_URL}/students/${encodeURIComponent(targetId)}/trainer-approval`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ approved: approvedStatus })
@@ -9337,15 +9347,16 @@ function App() {
       .then(async res => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to update trainer approval status');
-        setGradingStudents(prev => prev.map(s => s.id === data.id ? data : s));
+        const resId = String(data.id || data._id || targetId);
+        setGradingStudents(prev => prev.map(s => (String(s.id || s._id) === resId) ? { ...s, ...data } : s));
+        setStudents(prev => prev.map(s => (String(s.id || s._id) === resId) ? { ...s, ...data } : s));
         setGradingSuccess(`Updated trainer approval status for ${data.name}.`);
         setTimeout(() => setGradingSuccess(''), 3500);
       })
       .catch(err => {
         console.error(err);
         setGradingError(err.message);
-      })
-      .finally(() => setGradingActionLoading(false));
+      });
   };
 
   const handleToggleEligibility = (student) => {
@@ -9456,7 +9467,8 @@ function App() {
       body: JSON.stringify({
         result: gradeResult,
         gradeLetter: gradeResult === 'Pass' ? gradeLetter : '',
-        gradingDate: gradeDate
+        gradingDate: gradeDate,
+        targetBelt: gradeResult === 'Pass' ? targetBelt : ''
       })
     })
       .then(async res => {
@@ -10198,14 +10210,16 @@ function App() {
                               History
                             </button>
 
-                            {(!isTrainer || student.trainerApprovedForGrading) && (
+                            {!isTrainer && (
                               <button
                                 className="btn-primary action-btn-pill"
                                 style={{ background: 'var(--color-primary)', padding: '5px 12px', fontSize: '0.75rem', borderRadius: '8px', fontWeight: 600, whiteSpace: 'nowrap' }}
                                 onClick={() => {
                                   setSelectedGradeStudent(student);
                                   setGradeResult('Pass');
+                                  setGradeLetter('A');
                                   setGradeDate(new Date().toISOString().split('T')[0]);
+                                  setTargetBelt(student.nextBelt && student.nextBelt !== 'None' ? student.nextBelt : (student.belt || 'Yellow Belt'));
                                   setIsGradeModalOpen(true);
                                 }}
                               >
@@ -10405,6 +10419,33 @@ function App() {
                     required
                   />
                 </div>
+
+                {gradeResult === 'Pass' && (
+                  <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>
+                      Target Belt / Level to Assign *
+                    </label>
+                    <select
+                      className="form-control"
+                      style={{ height: '42px', borderRadius: '10px', fontSize: '0.88rem', width: '100%', background: 'rgba(255, 255, 255, 0.05)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.15)' }}
+                      value={targetBelt}
+                      onChange={(e) => setTargetBelt(e.target.value)}
+                      required
+                    >
+                      <option value="">-- Choose Target Belt / Level --</option>
+                      <optgroup label="🥋 Traditional Belts">
+                        {['White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Red Belt', 'Brown Belt', 'Black Belt', 'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Red', 'Brown', 'Black'].map(b => (
+                          <option key={b} value={b} style={{ background: '#12141d', color: '#fff' }}>{b}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="🥊 Kickboxing / Boxing Levels">
+                        {['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
+                          <option key={b} value={b} style={{ background: '#12141d', color: '#fff' }}>{b}</option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </div>
+                )}
 
                 <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                   <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>Test Result</label>

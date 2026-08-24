@@ -208,7 +208,7 @@ const parseUserAgent = (ua) => {
 const originalLog = console.log;
 console.log = (...args) => {
   addLog('info', args.join(' '));
-  originalLog(...args);
+  // Keep terminal output clean and silent
 };
 const originalError = console.error;
 console.error = (...args) => {
@@ -363,6 +363,23 @@ function calculateNextEligibleDate(baseDateStr) {
   } catch (e) {
     return '';
   }
+}
+
+async function findStudentById(idParam) {
+  if (!idParam) return null;
+  const numId = Number(idParam);
+  const conditions = [];
+
+  if (!isNaN(numId)) {
+    conditions.push({ id: numId });
+  }
+  conditions.push({ id: String(idParam) });
+
+  if (mongoose.Types.ObjectId.isValid(idParam)) {
+    conditions.push({ _id: idParam });
+  }
+
+  return await Student.findOne({ $or: conditions });
 }
 
 const BELT_ORDER = [
@@ -591,8 +608,6 @@ app.use((req, res, next) => {
     } else {
       addLog('info', logMsg);
     }
-    
-    originalLog(`[${new Date().toISOString()}] ${logMsg}`);
   });
   next();
 });
@@ -2917,14 +2932,8 @@ app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin
         dec.nextEligibleGradingDate = calculateNextEligibleDate(dec.joinDate);
       }
       
-      // Calculate eligibility status based on override or date check (defaults to Eligible if no previous test)
-      if (dec.eligibilityOverride) {
-        dec.eligibilityStatus = dec.eligibilityOverride;
-      } else if (!dec.lastGradingDate || dec.lastGradingDate === 'N/A' || !dec.nextEligibleGradingDate) {
-        dec.eligibilityStatus = 'Eligible';
-      } else {
-        dec.eligibilityStatus = (todayStr >= dec.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
-      }
+      // Calculate eligibility status (defaults to Eligible unless overridden)
+      dec.eligibilityStatus = dec.eligibilityOverride || 'Eligible';
       
       // Next belt auto computation
       dec.nextBelt = getNextBelt(dec.belt);
@@ -2952,7 +2961,7 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
       return res.status(400).json({ error: 'Valid grading date (YYYY-MM-DD) is required.' });
     }
 
-    const student = await Student.findOne({ id: Number(id) });
+    const student = await findStudentById(id);
     if (!student) {
       return res.status(404).json({ error: 'Student not found.' });
     }
@@ -2985,12 +2994,17 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
     let beltAfter = beltBefore;
 
     if (result === 'Pass') {
-      const nextBelt = getNextBelt(beltBefore);
-      if (nextBelt !== 'None') {
-        beltAfter = nextBelt;
-        student.belt = nextBelt;
+      const chosenBelt = req.body.targetBelt || getNextBelt(beltBefore);
+      if (chosenBelt && chosenBelt !== 'None') {
+        beltAfter = chosenBelt;
+        student.belt = chosenBelt;
       }
     }
+
+    // Always reset trainer approval flag when exam result is submitted so Revoke button disappears for next belt
+    student.trainerApprovedForGrading = false;
+    student.trainerApprovedBy = '';
+    student.trainerApprovedAt = '';
 
     const nextEligibleDate = calculateNextEligibleDate(gradingDate);
     const assignedGradeLetter = result === 'Pass' ? (gradeLetter || 'A') : '';
@@ -3018,8 +3032,7 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
 
     const returnedStudent = decryptStudent(student);
     returnedStudent.nextBelt = getNextBelt(returnedStudent.belt);
-    const todayStr = new Date().toISOString().split('T')[0];
-    returnedStudent.eligibilityStatus = (returnedStudent.nextEligibleGradingDate && todayStr >= returnedStudent.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
+    returnedStudent.eligibilityStatus = returnedStudent.eligibilityOverride || 'Eligible';
 
     res.json(returnedStudent);
   } catch (err) {
@@ -3031,7 +3044,7 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
 app.delete('/api/students/:id/grading-history/:historyId', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
   try {
     const { id, historyId } = req.params;
-    const student = await Student.findOne({ id: Number(id) });
+    const student = await findStudentById(id);
     if (!student) return res.status(404).json({ error: 'Student not found.' });
 
     let entryIndex = -1;
@@ -3092,7 +3105,7 @@ app.put('/api/students/:id/trainer-approval', authenticateSession, authorizeRole
     const { approved } = req.body;
     const { username } = req.user;
 
-    const student = await Student.findOne({ id: Number(id) });
+    const student = await findStudentById(id);
     if (!student) {
       return res.status(404).json({ error: 'Student not found.' });
     }
@@ -3101,39 +3114,11 @@ app.put('/api/students/:id/trainer-approval', authenticateSession, authorizeRole
     student.trainerApprovedBy = approved ? username : '';
     student.trainerApprovedAt = approved ? new Date().toISOString() : '';
 
-    // When revoking approval (approved === false), remove latest grading history attempt & revert belt if any test was recorded
-    if (!approved && student.gradingHistory && student.gradingHistory.length > 0) {
-      const removedEntry = student.gradingHistory.pop();
-      if (student.gradingHistory.length > 0) {
-        const lastAttempt = student.gradingHistory[student.gradingHistory.length - 1];
-        student.belt = lastAttempt.beltAfter;
-        student.lastGradingDate = lastAttempt.gradingDate;
-        student.lastGradingResult = lastAttempt.result;
-        student.lastGradeLetter = lastAttempt.gradeLetter || '';
-        student.nextEligibleGradingDate = calculateNextEligibleDate(lastAttempt.gradingDate);
-      } else {
-        if (removedEntry && removedEntry.beltBefore) {
-          student.belt = removedEntry.beltBefore;
-        }
-        student.lastGradingDate = 'N/A';
-        student.lastGradingResult = 'N/A';
-        student.lastGradeLetter = '';
-        student.nextEligibleGradingDate = calculateNextEligibleDate(student.joinDate);
-      }
-    }
-
     await student.save();
 
     const returnedStudent = decryptStudent(student);
     returnedStudent.nextBelt = getNextBelt(returnedStudent.belt);
-    const todayStr = new Date().toISOString().split('T')[0];
-    if (returnedStudent.eligibilityOverride) {
-      returnedStudent.eligibilityStatus = returnedStudent.eligibilityOverride;
-    } else if (!returnedStudent.lastGradingDate || returnedStudent.lastGradingDate === 'N/A' || !returnedStudent.nextEligibleGradingDate) {
-      returnedStudent.eligibilityStatus = 'Eligible';
-    } else {
-      returnedStudent.eligibilityStatus = (todayStr >= returnedStudent.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
-    }
+    returnedStudent.eligibilityStatus = returnedStudent.eligibilityOverride || 'Eligible';
 
     addLog('api', `Trainer approval updated for student ${decrypt(student.name)} (ID: ${student.id}) - Approved: ${approved}`);
 
@@ -3228,14 +3213,7 @@ app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('s
 
     const returnedStudent = decryptStudent(student);
     returnedStudent.nextBelt = getNextBelt(returnedStudent.belt);
-    const todayStr = new Date().toISOString().split('T')[0];
-    if (returnedStudent.eligibilityOverride) {
-      returnedStudent.eligibilityStatus = returnedStudent.eligibilityOverride;
-    } else if (!returnedStudent.lastGradingDate || returnedStudent.lastGradingDate === 'N/A' || !returnedStudent.nextEligibleGradingDate) {
-      returnedStudent.eligibilityStatus = 'Eligible';
-    } else {
-      returnedStudent.eligibilityStatus = (todayStr >= returnedStudent.nextEligibleGradingDate) ? 'Eligible' : 'Not Eligible';
-    }
+    returnedStudent.eligibilityStatus = returnedStudent.eligibilityOverride || 'Eligible';
 
     res.json(returnedStudent);
   } catch (err) {
@@ -3247,7 +3225,7 @@ app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('s
 app.put('/api/students/:id/toggle-eligibility', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
   try {
     const { id } = req.params;
-    const student = await Student.findOne({ id: Number(id) });
+    const student = await findStudentById(id);
     if (!student) return res.status(404).json({ error: 'Student not found.' });
 
     const todayStr = new Date().toISOString().split('T')[0];
@@ -6708,6 +6686,6 @@ app.post('/api/admin/allocate-batch', authenticateSession, authorizeRoles('super
 app.use('/api/developer', developerRouter);
 
 app.listen(PORT, () => {
-  console.log(`Express server is running on port ${PORT}`);
+  originalLog(`Server is running on port ${PORT}`);
 });
 // Nodemon reload trigger 1
