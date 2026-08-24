@@ -7161,6 +7161,9 @@ function App() {
             <button className="btn-outline-primary" style={{ padding: '1rem 1.75rem', fontSize: '1.05rem', background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.2)' }} onClick={() => { setAppMode('about'); window.scrollTo(0, 0); }}>
               About Academy
             </button>
+            <button className="btn-outline-primary" style={{ padding: '1rem 1.75rem', fontSize: '1.05rem', background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.2)' }} onClick={() => { setAppMode('branches'); window.scrollTo(0, 0); }}>
+              <MapPin size={18} style={{ marginRight: '6px' }} /> Our Branches
+            </button>
           </div>
         </div>
       </section>
@@ -7245,90 +7248,6 @@ function App() {
               </div>
             </div>
           ))}
-        </div>
-      </section>
-
-      <section id="branches" className="section" style={{ background: '#080808' }}>
-        <div className="section-header" style={{ marginBottom: '2.5rem' }}>
-          <span className="section-subtitle">11 Training Centers Across Kerala</span>
-          <h2 className="section-title">Our Branches & Locations</h2>
-          <p style={{ color: '#888', maxWidth: '650px', margin: '0 auto', fontSize: '0.95rem', lineHeight: '1.6' }}>
-            Find your nearest Master Fit Academy branch across Kozhikode and Kannur. Click to call or WhatsApp your branch coordinator directly.
-          </p>
-        </div>
-        <div className="branches-grid">
-          {BRANCHES_DATA.map((branch) => {
-            const waMessage = encodeURIComponent(`Hi Master Fit Academy, I would like to inquire about training classes and batch timings at the ${branch.name} branch.`);
-            return (
-              <div key={branch.id} className={`branch-card ${branch.isHeadOffice ? 'is-head-office' : ''}`}>
-                <div>
-                  <div className="branch-card-header">
-                    <div className="branch-title-wrap">
-                      <div className="branch-pin-icon">
-                        <MapPin size={20} />
-                      </div>
-                      <div>
-                        <h3 className="branch-name">{branch.name}</h3>
-                        <span style={{ fontSize: '0.78rem', color: '#888' }}>Kerala</span>
-                      </div>
-                    </div>
-                    <span className={`branch-tag ${branch.isHeadOffice ? 'tag-head-office' : 'tag-branch'}`}>
-                      {branch.tag}
-                    </span>
-                  </div>
-
-                  <div className="branch-info-list">
-                    <div className="branch-info-row">
-                      <Phone size={17} />
-                      <div>
-                        <div style={{ fontSize: '0.75rem', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Contact Phone</div>
-                        <a href={`tel:${branch.phone}`} className="branch-phone-number">{branch.phone}</a>
-                      </div>
-                    </div>
-
-                    <div className="branch-info-row">
-                      <MapPin size={17} />
-                      <div>
-                        <div style={{ fontSize: '0.75rem', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Address / Landmark</div>
-                        <span>{branch.address}</span>
-                      </div>
-                    </div>
-
-                    <div className="branch-info-row">
-                      <Activity size={17} />
-                      <div>
-                        <div style={{ fontSize: '0.75rem', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Daily Batches</div>
-                        <span>{branch.timings}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="branch-disciplines-section">
-                    <div className="branch-disciplines-label">Offered Disciplines</div>
-                    <div className="branch-chips-wrap">
-                      {branch.disciplines.map((d, i) => (
-                        <span key={i} className="branch-chip">{d}</span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="branch-card-actions">
-                  <a href={`tel:${branch.phone}`} className="branch-btn-call">
-                    <Phone size={16} /> Call Now
-                  </a>
-                  <a
-                    href={`https://wa.me/${branch.whatsapp}?text=${waMessage}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="branch-btn-wa"
-                  >
-                    <MessageCircle size={16} /> WhatsApp
-                  </a>
-                </div>
-              </div>
-            );
-          })}
         </div>
       </section>
 
@@ -7647,6 +7566,9 @@ function App() {
           <div style={{ display: 'flex', gap: '14px', justifyContent: 'center', flexWrap: 'wrap' }}>
             <button className="btn-primary" style={{ padding: '0.9rem 2rem', fontSize: '1.05rem' }} onClick={() => { setAppMode('website'); setTimeout(() => document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>
               Schedule Free Trial Class <ArrowRight size={18} />
+            </button>
+            <button className="btn-outline-primary" style={{ padding: '0.9rem 1.8rem', fontSize: '1.05rem' }} onClick={() => { setAppMode('branches'); window.scrollTo(0, 0); }}>
+              <MapPin size={18} style={{ marginRight: '6px' }} /> View All Branches
             </button>
             <button className="btn-outline-primary" style={{ padding: '0.9rem 1.8rem', fontSize: '1.05rem' }} onClick={() => { setAppMode('website'); window.scrollTo(0, 0); }}>
               Explore Disciplines
