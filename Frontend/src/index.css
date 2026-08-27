@@ -4539,7 +4539,7 @@ mark.search-highlight {
   align-items: center;
   padding: 8.5rem 4rem 4.5rem 4rem;
   background: linear-gradient(135deg, rgba(5, 5, 5, 0.95) 0%, rgba(20, 5, 5, 0.88) 50%, rgba(5, 5, 5, 0.95) 100%),
-              url('https://images.unsplash.com/photo-1555597673-b21d5c935865?auto=format&fit=crop&q=80') center/cover no-repeat;
+              url('/hero-banner.jpeg') center/cover no-repeat;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 

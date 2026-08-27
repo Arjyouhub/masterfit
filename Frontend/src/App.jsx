@@ -7146,7 +7146,7 @@ function App() {
       </nav>
 
       <section className="hero-section">
-        <img src="https://images.unsplash.com/photo-1555597673-b21d5c935865?auto=format&fit=crop&q=80" alt="Martial Arts" className="hero-bg" />
+        <img src="/hero-banner.jpeg" alt="Master Fit Academy - Grab Your Better Version" className="hero-bg" />
         <div className="hero-overlay"></div>
         <div className="hero-content">
           <span className="hero-subtitle">GRAB YOUR BETTER VERSION</span>
