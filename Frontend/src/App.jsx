@@ -7317,6 +7317,16 @@ function App() {
               <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>MMA & Conditioning Coach</p>
             </div>
           </div>
+
+          {/* Coach 4 */}
+          <div className="instructor-card glass-panel">
+            <span className="instructor-role-tag">Coach</span>
+            <img src="https://images.unsplash.com/photo-1548690312-e3b507d8c110?auto=format&fit=crop&q=80" alt="Coach Elena Rostova" className="instructor-img" />
+            <div className="instructor-info">
+              <h3>Elena Rostova</h3>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Taekwondo & Fitness Coach</p>
+            </div>
+          </div>
         </div>
       </section>
 
