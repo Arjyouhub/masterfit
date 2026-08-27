@@ -7268,25 +7268,53 @@ function App() {
           <h2 className="section-title">TEAM MASTERFIT</h2>
         </div>
         <div className="instructor-grid">
+          {/* Sensei */}
           <div className="instructor-card glass-panel">
-            <img src="https://images.unsplash.com/photo-1599058945522-28d584b6f0ff?auto=format&fit=crop&q=80" alt="Sensei" className="instructor-img" />
+            <span className="instructor-role-tag">Sensei</span>
+            <img src="https://images.unsplash.com/photo-1599058945522-28d584b6f0ff?auto=format&fit=crop&q=80" alt="Sensei Master Wei" className="instructor-img" />
             <div className="instructor-info">
-              <h3 style={{ margin: '0 0 0.5rem 0' }}>Master Wei</h3>
-              <p style={{ color: 'var(--color-primary)', margin: 0, fontWeight: 600 }}>8th Dan Black Belt</p>
+              <h3>Master Wei</h3>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>8th Dan Black Belt</p>
             </div>
           </div>
+
+          {/* Instructor */}
           <div className="instructor-card glass-panel">
-            <img src="https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?auto=format&fit=crop&q=80" alt="Instructor" className="instructor-img" />
+            <span className="instructor-role-tag">Instructor</span>
+            <img src="https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?auto=format&fit=crop&q=80" alt="Instructor Sarah Chen" className="instructor-img" />
             <div className="instructor-info">
-              <h3 style={{ margin: '0 0 0.5rem 0' }}>Sarah Chen</h3>
-              <p style={{ color: 'var(--color-primary)', margin: 0, fontWeight: 600 }}>5th Dan Black Belt</p>
+              <h3>Sarah Chen</h3>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>5th Dan Black Belt</p>
             </div>
           </div>
+
+          {/* Coach 1 */}
           <div className="instructor-card glass-panel">
-            <img src="https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&q=80" alt="Coach" className="instructor-img" />
+            <span className="instructor-role-tag">Coach</span>
+            <img src="https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&q=80" alt="Coach Marcus Silva" className="instructor-img" />
             <div className="instructor-info">
-              <h3 style={{ margin: '0 0 0.5rem 0' }}>Marcus Silva</h3>
-              <p style={{ color: 'var(--color-primary)', margin: 0, fontWeight: 600 }}>Head Coach</p>
+              <h3>Marcus Silva</h3>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Head Coach</p>
+            </div>
+          </div>
+
+          {/* Coach 2 */}
+          <div className="instructor-card glass-panel">
+            <span className="instructor-role-tag">Coach</span>
+            <img src="https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80" alt="Coach Alex Rivera" className="instructor-img" />
+            <div className="instructor-info">
+              <h3>Alex Rivera</h3>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Boxing & Striking Coach</p>
+            </div>
+          </div>
+
+          {/* Coach 3 */}
+          <div className="instructor-card glass-panel">
+            <span className="instructor-role-tag">Coach</span>
+            <img src="https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?auto=format&fit=crop&q=80" alt="Coach David Miller" className="instructor-img" />
+            <div className="instructor-info">
+              <h3>David Miller</h3>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>MMA & Conditioning Coach</p>
             </div>
           </div>
         </div>
