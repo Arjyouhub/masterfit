@@ -7134,7 +7134,7 @@ function App() {
           <a href="#about" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('about'); setIsMobileMenuOpen(false); window.scrollTo(0, 0); }}>About Us</a>
           <a href="#branches" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('branches'); setIsMobileMenuOpen(false); window.scrollTo(0, 0); }}>Branches</a>
           <a href="#disciplines" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Disciplines</a>
-          <a href="#instructors" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>MASTERFIT TEAM</a>
+          <a href="#instructors" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>TEAM MASTERFIT</a>
           <a href="#gallery" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Gallery</a>
           <a href="#contact" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Contact</a>
           <div style={{ display: 'flex', gap: '10px' }}>
@@ -7264,8 +7264,8 @@ function App() {
 
       <section id="instructors" className="section">
         <div className="section-header">
-          <span className="section-subtitle">Learn from the best</span>
-          <h2 className="section-title">MASTERFIT TEAM</h2>
+          <span className="section-subtitle">TEAM MASTERFIT</span>
+          <h2 className="section-title">TEAM MASTERFIT</h2>
         </div>
         <div className="instructor-grid">
           <div className="instructor-card glass-panel">
@@ -7352,7 +7352,7 @@ function App() {
           <a href="#about" className="nav-link active" style={{ color: 'var(--color-primary)' }} onClick={(e) => { e.preventDefault(); setIsMobileMenuOpen(false); }}>About Us</a>
           <a href="#branches" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('branches'); setIsMobileMenuOpen(false); window.scrollTo(0, 0); }}>Branches</a>
           <a href="/#disciplines" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('disciplines')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Disciplines</a>
-          <a href="/#instructors" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('instructors')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>MASTERFIT TEAM</a>
+          <a href="/#instructors" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('instructors')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>TEAM MASTERFIT</a>
           <a href="/#gallery" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('gallery')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Gallery</a>
           <a href="/#contact" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Contact</a>
           <div style={{ display: 'flex', gap: '10px' }}>
@@ -7628,7 +7628,7 @@ function App() {
             <a href="#about" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('about'); setIsMobileMenuOpen(false); window.scrollTo(0, 0); }}>About Us</a>
             <a href="#branches" className="nav-link active" style={{ color: 'var(--color-primary)' }} onClick={(e) => { e.preventDefault(); setIsMobileMenuOpen(false); }}>Branches</a>
             <a href="/#disciplines" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('disciplines')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Disciplines</a>
-            <a href="/#instructors" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('instructors')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>MASTERFIT TEAM</a>
+            <a href="/#instructors" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('instructors')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>TEAM MASTERFIT</a>
             <a href="/#gallery" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('gallery')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Gallery</a>
             <a href="/#contact" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Contact</a>
             <div style={{ display: 'flex', gap: '10px' }}>
