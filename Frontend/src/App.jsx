@@ -7424,7 +7424,7 @@ function App() {
           </div>
           <div className="about-stat-card">
             <div className="about-stat-icon"><Users size={22} /></div>
-            <div className="about-stat-number">500+</div>
+            <div className="about-stat-number">5000+</div>
             <div className="about-stat-label">Students Trained</div>
           </div>
           <div className="about-stat-card">
