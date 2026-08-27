@@ -7271,10 +7271,10 @@ function App() {
           {/* Sensei */}
           <div className="instructor-card glass-panel">
             <span className="instructor-role-tag">Sensei</span>
-            <img src="https://images.unsplash.com/photo-1599058945522-28d584b6f0ff?auto=format&fit=crop&q=80" alt="Sensei Master Wei" className="instructor-img" />
+            <img src="/navas-kc.jpg" alt="Sensei MR NAVAS KC" className="instructor-img" style={{ objectPosition: 'center 15%' }} />
             <div className="instructor-info">
-              <h3>Master Wei</h3>
-              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>8th Dan Black Belt</p>
+              <h3>MR NAVAS KC</h3>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Founder & Chief Sensei</p>
             </div>
           </div>
 
