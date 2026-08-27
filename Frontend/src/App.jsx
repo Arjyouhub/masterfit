@@ -4397,19 +4397,29 @@ function App() {
 
   const getBeltColorClass = (belt) => {
     const b = String(belt || '').toLowerCase().trim();
+    if (b.includes('brown')) return 'badge-brown';
     switch (b) {
-      case 'white': return 'badge-white';
-      case 'yellow': case 'level 1': return 'badge-yellow';
-      case 'orange': case 'level 2': return 'badge-orange';
-      case 'green': case 'level 3': return 'badge-green';
-      case 'blue': case 'level 4': return 'badge-blue';
-      case 'purple': case 'level 5': return 'badge-purple';
-      case 'brown': return 'badge-brown';
-      case 'red': case 'coach c': return 'badge-purple';
+      case 'white': case 'white belt': return 'badge-white';
+      case 'yellow': case 'yellow belt': case 'level 1': return 'badge-yellow';
+      case 'orange': case 'orange belt': case 'level 2': return 'badge-orange';
+      case 'green': case 'green belt': case 'level 3': return 'badge-green';
+      case 'blue': case 'blue belt': case 'level 4': return 'badge-blue';
+      case 'purple': case 'purple belt': case 'level 5': return 'badge-purple';
+      case 'red': case 'red belt': case 'coach c': return 'badge-red';
+      case 'brown': case 'brown belt': case 'brown 1': case 'brown 2': case 'brown 3': case 'brown 4': case 'brown 1 belt': case 'brown 2 belt': case 'brown 3 belt': case 'brown 4 belt': return 'badge-brown';
       case 'coach b': return 'badge-blue';
       case 'coach a': return 'badge-gold';
-      case 'black': case 'pro level': return 'badge-black';
-      default: return 'badge-white';
+      case 'black': case 'black belt': case 'pro level': return 'badge-black';
+      default:
+        if (b.includes('white')) return 'badge-white';
+        if (b.includes('yellow')) return 'badge-yellow';
+        if (b.includes('orange')) return 'badge-orange';
+        if (b.includes('green')) return 'badge-green';
+        if (b.includes('blue')) return 'badge-blue';
+        if (b.includes('purple')) return 'badge-purple';
+        if (b.includes('red')) return 'badge-red';
+        if (b.includes('black')) return 'badge-black';
+        return 'badge-white';
     }
   };
 
@@ -7124,7 +7134,7 @@ function App() {
           <a href="#about" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('about'); setIsMobileMenuOpen(false); window.scrollTo(0, 0); }}>About Us</a>
           <a href="#branches" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('branches'); setIsMobileMenuOpen(false); window.scrollTo(0, 0); }}>Branches</a>
           <a href="#disciplines" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Disciplines</a>
-          <a href="#instructors" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Instructors</a>
+          <a href="#instructors" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>MASTERFIT TEAM</a>
           <a href="#gallery" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Gallery</a>
           <a href="#contact" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Contact</a>
           <div style={{ display: 'flex', gap: '10px' }}>
@@ -7255,7 +7265,7 @@ function App() {
       <section id="instructors" className="section">
         <div className="section-header">
           <span className="section-subtitle">Learn from the best</span>
-          <h2 className="section-title">Our Instructors</h2>
+          <h2 className="section-title">MASTERFIT TEAM</h2>
         </div>
         <div className="instructor-grid">
           <div className="instructor-card glass-panel">
@@ -7342,7 +7352,7 @@ function App() {
           <a href="#about" className="nav-link active" style={{ color: 'var(--color-primary)' }} onClick={(e) => { e.preventDefault(); setIsMobileMenuOpen(false); }}>About Us</a>
           <a href="#branches" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('branches'); setIsMobileMenuOpen(false); window.scrollTo(0, 0); }}>Branches</a>
           <a href="/#disciplines" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('disciplines')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Disciplines</a>
-          <a href="/#instructors" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('instructors')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Instructors</a>
+          <a href="/#instructors" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('instructors')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>MASTERFIT TEAM</a>
           <a href="/#gallery" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('gallery')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Gallery</a>
           <a href="/#contact" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Contact</a>
           <div style={{ display: 'flex', gap: '10px' }}>
@@ -7618,7 +7628,7 @@ function App() {
             <a href="#about" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('about'); setIsMobileMenuOpen(false); window.scrollTo(0, 0); }}>About Us</a>
             <a href="#branches" className="nav-link active" style={{ color: 'var(--color-primary)' }} onClick={(e) => { e.preventDefault(); setIsMobileMenuOpen(false); }}>Branches</a>
             <a href="/#disciplines" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('disciplines')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Disciplines</a>
-            <a href="/#instructors" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('instructors')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Instructors</a>
+            <a href="/#instructors" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('instructors')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>MASTERFIT TEAM</a>
             <a href="/#gallery" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('gallery')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Gallery</a>
             <a href="/#contact" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Contact</a>
             <div style={{ display: 'flex', gap: '10px' }}>
@@ -9204,15 +9214,22 @@ function App() {
 
   // Grading Module Actions and Handlers
   const getNextBelt = (currentBelt) => {
-    const belts = ['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'];
+    const belts = [
+      'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Red',
+      'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black'
+    ];
     const levels = ['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'];
 
     const curr = String(currentBelt || '').toLowerCase().trim();
+    const cleanCurr = curr.replace(/\s*belt$/i, '').trim();
 
-    const beltIdx = belts.findIndex(b => b.toLowerCase() === curr);
+    // Legacy fallback if student currently has 'Brown' or 'Brown Belt'
+    if (cleanCurr === 'brown') return 'Brown 1';
+
+    const beltIdx = belts.findIndex(b => b.toLowerCase() === curr || b.toLowerCase() === cleanCurr);
     if (beltIdx !== -1) return beltIdx < belts.length - 1 ? belts[beltIdx + 1] : 'None';
 
-    const levelIdx = levels.findIndex(l => l.toLowerCase() === curr);
+    const levelIdx = levels.findIndex(l => l.toLowerCase() === curr || l.toLowerCase() === cleanCurr);
     if (levelIdx !== -1) return levelIdx < levels.length - 1 ? levels[levelIdx + 1] : 'None';
 
     return 'None';
@@ -9879,12 +9896,27 @@ function App() {
     const passedCount = filtered.filter(s => s.lastGradingResult === 'Pass').length;
     const failedCount = filtered.filter(s => s.lastGradingResult === 'Fail').length;
 
-    const beltCounts = { White: 0, Yellow: 0, Orange: 0, Green: 0, Blue: 0, Brown: 0, Black: 0 };
+    const beltCounts = {
+      White: 0,
+      Yellow: 0,
+      Orange: 0,
+      Green: 0,
+      Blue: 0,
+      Purple: 0,
+      Red: 0,
+      Brown: 0,
+      'Brown 1': 0,
+      'Brown 2': 0,
+      'Brown 3': 0,
+      'Brown 4': 0,
+      Black: 0
+    };
     filtered.forEach(s => {
-      const b = s.belt || 'White';
-      const normalized = b.charAt(0).toUpperCase() + b.slice(1).toLowerCase();
-      if (beltCounts[normalized] !== undefined) {
-        beltCounts[normalized]++;
+      const b = (s.belt || 'White').trim();
+      const clean = b.replace(/\s*belt$/i, '').trim();
+      const matchedKey = Object.keys(beltCounts).find(k => k.toLowerCase() === b.toLowerCase() || k.toLowerCase() === clean.toLowerCase());
+      if (matchedKey) {
+        beltCounts[matchedKey]++;
       }
     });
 
@@ -10086,7 +10118,7 @@ function App() {
               <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }} value={gradingFilterBelt} onChange={(e) => setGradingFilterBelt(e.target.value)}>
                 <option value="All">All Belts & Levels</option>
                 <optgroup label="🥋 Traditional Belts">
-                  {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
+                  {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Red', 'Brown', 'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black'].map(b => (
                     <option key={b} value={b}>{b} Belt</option>
                   ))}
                 </optgroup>
@@ -10599,7 +10631,12 @@ function App() {
                     >
                       <option value="">-- Quick Select --</option>
                       <optgroup label="🥋 Traditional Belts">
-                        {['White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Brown Belt', 'Black Belt', 'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'].map(b => (
+                        {[
+                          'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Red Belt',
+                          'Brown Belt', 'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt',
+                          'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Red',
+                          'Brown', 'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black'
+                        ].map(b => (
                           <option key={b} value={b}>{b}</option>
                         ))}
                       </optgroup>
@@ -10611,7 +10648,11 @@ function App() {
                     </select>
                   </div>
                   <datalist id="grading-belt-options-list">
-                    {['White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Red Belt', 'Brown Belt', 'Black Belt', 'Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
+                    {[
+                      'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Red Belt',
+                      'Brown Belt', 'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt',
+                      'Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'
+                    ].map(b => (
                       <option key={b} value={b} />
                     ))}
                   </datalist>
@@ -17099,15 +17140,32 @@ function App() {
                         value={editingStudentData.belt}
                         onChange={(e) => setEditingStudentData({ ...editingStudentData, belt: e.target.value })}
                       >
-                        <option value="White">White Belt</option>
-                        <option value="Yellow">Yellow Belt</option>
-                        <option value="Orange">Orange Belt</option>
-                        <option value="Green">Green Belt</option>
-                        <option value="Blue">Blue Belt</option>
-                        <option value="Purple">Purple Belt</option>
-                        <option value="Brown">Brown Belt</option>
-                        <option value="Red">Red Belt</option>
-                        <option value="Black">Black Belt</option>
+                        <optgroup label="🥋 Traditional Belts">
+                          <option value="White">White Belt</option>
+                          <option value="Yellow">Yellow Belt</option>
+                          <option value="Orange">Orange Belt</option>
+                          <option value="Green">Green Belt</option>
+                          <option value="Blue">Blue Belt</option>
+                          <option value="Purple">Purple Belt</option>
+                          <option value="Red">Red Belt</option>
+                          <option value="Brown">Brown Belt</option>
+                          <option value="Brown 1">Brown 1 Belt</option>
+                          <option value="Brown 2">Brown 2 Belt</option>
+                          <option value="Brown 3">Brown 3 Belt</option>
+                          <option value="Brown 4">Brown 4 Belt</option>
+                          <option value="Black">Black Belt</option>
+                        </optgroup>
+                        <optgroup label="🥊 Kickboxing / Boxing Levels">
+                          <option value="Level 1">Level 1</option>
+                          <option value="Level 2">Level 2</option>
+                          <option value="Level 3">Level 3</option>
+                          <option value="Level 4">Level 4</option>
+                          <option value="Level 5">Level 5</option>
+                          <option value="Pro Level">Pro Level</option>
+                        </optgroup>
+                        {editingStudentData.belt && !['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Red', 'Brown', 'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black', 'Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].includes(editingStudentData.belt) && (
+                          <option value={editingStudentData.belt}>{editingStudentData.belt}</option>
+                        )}
                       </select>
                     </div>
                   </div>
@@ -18130,14 +18188,29 @@ function App() {
                 <div className="form-group">
                   <label>Present Grad</label>
                   <select className="form-control" value={newStudent.belt} onChange={(e) => setNewStudent({ ...newStudent, belt: e.target.value })}>
-                    <option value="White">White Belt</option>
-                    <option value="Yellow">Yellow Belt</option>
-                    <option value="Orange">Orange Belt</option>
-                    <option value="Green">Green Belt</option>
-                    <option value="Blue">Blue Belt</option>
-                    <option value="Purple">Purple Belt</option>
-                    <option value="Brown">Brown Belt</option>
-                    <option value="Black">Black Belt</option>
+                    <optgroup label="🥋 Traditional Belts">
+                      <option value="White">White Belt</option>
+                      <option value="Yellow">Yellow Belt</option>
+                      <option value="Orange">Orange Belt</option>
+                      <option value="Green">Green Belt</option>
+                      <option value="Blue">Blue Belt</option>
+                      <option value="Purple">Purple Belt</option>
+                      <option value="Red">Red Belt</option>
+                      <option value="Brown">Brown Belt</option>
+                      <option value="Brown 1">Brown 1 Belt</option>
+                      <option value="Brown 2">Brown 2 Belt</option>
+                      <option value="Brown 3">Brown 3 Belt</option>
+                      <option value="Brown 4">Brown 4 Belt</option>
+                      <option value="Black">Black Belt</option>
+                    </optgroup>
+                    <optgroup label="🥊 Kickboxing / Boxing Levels">
+                      <option value="Level 1">Level 1</option>
+                      <option value="Level 2">Level 2</option>
+                      <option value="Level 3">Level 3</option>
+                      <option value="Level 4">Level 4</option>
+                      <option value="Level 5">Level 5</option>
+                      <option value="Pro Level">Pro Level</option>
+                    </optgroup>
                   </select>
                 </div>
               </div>

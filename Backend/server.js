@@ -383,20 +383,28 @@ async function findStudentById(idParam) {
 }
 
 const BELT_ORDER = [
-  'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black',
+  'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Red', 'Brown', 'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black',
+  'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Red Belt', 'Brown Belt', 'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt',
   'Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'
 ];
 
 function getNextBelt(currentBelt) {
-  const belts = ['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Brown', 'Black'];
+  const belts = [
+    'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Red',
+    'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black'
+  ];
   const levels = ['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'];
 
   const curr = String(currentBelt || '').toLowerCase().trim();
+  const cleanCurr = curr.replace(/\s*belt$/i, '').trim();
 
-  const beltIdx = belts.findIndex(b => b.toLowerCase() === curr);
+  // Legacy fallback if student currently has 'Brown' or 'Brown Belt'
+  if (cleanCurr === 'brown') return 'Brown 1';
+
+  const beltIdx = belts.findIndex(b => b.toLowerCase() === curr || b.toLowerCase() === cleanCurr);
   if (beltIdx !== -1) return beltIdx < belts.length - 1 ? belts[beltIdx + 1] : 'None';
 
-  const levelIdx = levels.findIndex(l => l.toLowerCase() === curr);
+  const levelIdx = levels.findIndex(l => l.toLowerCase() === curr || l.toLowerCase() === cleanCurr);
   if (levelIdx !== -1) return levelIdx < levels.length - 1 ? levels[levelIdx + 1] : 'None';
 
   return 'None';
@@ -3194,10 +3202,11 @@ app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('s
     }
 
     if (belt !== undefined && belt !== student.belt) {
-      if (!BELT_ORDER.includes(belt)) {
+      const matchedBelt = BELT_ORDER.find(b => b.toLowerCase() === String(belt).toLowerCase().trim());
+      if (!matchedBelt) {
         return res.status(400).json({ error: `Invalid belt level. Choose from: ${BELT_ORDER.join(', ')}` });
       }
-      student.belt = belt;
+      student.belt = matchedBelt;
       modified = true;
     }
 
