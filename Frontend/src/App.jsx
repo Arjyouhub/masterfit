@@ -7311,9 +7311,9 @@ function App() {
           {/* Coach 3 */}
           <div className="instructor-card glass-panel">
             <span className="instructor-role-tag">Coach</span>
-            <img src="https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?auto=format&fit=crop&q=80" alt="Coach David Miller" className="instructor-img" />
+            <img src="/hisham.jpg" alt="Coach Hisham" className="instructor-img" style={{ objectPosition: 'center 10%' }} />
             <div className="instructor-info">
-              <h3>David Miller</h3>
+              <h3>Hisham</h3>
               <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>MMA & Conditioning Coach</p>
             </div>
           </div>
