@@ -7271,7 +7271,7 @@ function App() {
           {/* Sensei */}
           <div className="instructor-card glass-panel">
             <span className="instructor-role-tag">Sensei</span>
-            <img src="/navas-kc.jpg" alt="Sensei MR NAVAS KC" className="instructor-img" style={{ objectPosition: 'center 15%' }} />
+            <img src="/navas-kc.jpg" alt="Sensei MR NAVAS KC" className="instructor-img" style={{ objectPosition: 'center 12%' }} />
             <div className="instructor-info">
               <h3>MR NAVAS KC</h3>
               <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Founder & Chief Sensei</p>
