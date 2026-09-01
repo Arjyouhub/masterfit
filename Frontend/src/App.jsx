@@ -7278,13 +7278,13 @@ function App() {
             </div>
           </div>
 
-          {/* Legal Advisor */}
+          {/* Advocate / Legal Advisor */}
           <div className="instructor-card glass-panel">
-            <span className="instructor-role-tag">Legal Advisor</span>
-            <img src="/rashed-kavil.jpg" alt="ADV. Rashed Kavil" className="instructor-img" style={{ objectPosition: 'center 10%' }} />
+            <span className="instructor-role-tag">Advocate</span>
+            <img src="/rashed-kavil.jpg" alt="ADV RASHED KAVIL" className="instructor-img" style={{ objectPosition: 'center 15%' }} />
             <div className="instructor-info">
-              <h3>ADV. RASHED KAVIL</h3>
-              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Legal Advisor & Patron</p>
+              <h3>ADV RASHED KAVIL</h3>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Legal Advisor & Chief Patron</p>
             </div>
           </div>
 
