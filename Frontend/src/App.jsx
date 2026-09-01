@@ -7224,7 +7224,7 @@ function App() {
             {
               title: 'Wrestling',
               desc: 'Build supreme physical strength, explosive takedowns, control holds, pinning mastery, and unstoppable endurance.',
-              img: 'https://images.unsplash.com/photo-1599058917212-d750089bc07e?auto=format&fit=crop&q=80&w=800'
+              img: '/wrestling.jpg'
             },
             {
               title: 'Taekwondo',
