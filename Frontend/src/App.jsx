@@ -7301,10 +7301,10 @@ function App() {
           {/* Coach 2 */}
           <div className="instructor-card glass-panel">
             <span className="instructor-role-tag">Coach</span>
-            <img src="https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80" alt="Coach Alex Rivera" className="instructor-img" />
+            <img src="/munaib.jpg" alt="Coach Munaib" className="instructor-img" style={{ objectPosition: 'center 12%' }} />
             <div className="instructor-info">
-              <h3>Alex Rivera</h3>
-              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Boxing & Striking Coach</p>
+              <h3>Munaib</h3>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Striking & Fitness Coach</p>
             </div>
           </div>
 
