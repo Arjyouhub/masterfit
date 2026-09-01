@@ -7278,13 +7278,13 @@ function App() {
             </div>
           </div>
 
-          {/* Instructor */}
+          {/* Legal Advisor */}
           <div className="instructor-card glass-panel">
-            <span className="instructor-role-tag">Instructor</span>
-            <img src="https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?auto=format&fit=crop&q=80" alt="Instructor Sarah Chen" className="instructor-img" />
+            <span className="instructor-role-tag">Legal Advisor</span>
+            <img src="/rashed-kavil.jpg" alt="ADV. Rashed Kavil" className="instructor-img" style={{ objectPosition: 'center 10%' }} />
             <div className="instructor-info">
-              <h3>Sarah Chen</h3>
-              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>5th Dan Black Belt</p>
+              <h3>ADV. RASHED KAVIL</h3>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Legal Advisor & Patron</p>
             </div>
           </div>
 
