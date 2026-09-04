@@ -58,7 +58,9 @@ const studentSchema = new mongoose.Schema({
   isPriority: { type: Boolean, default: false },
   trainerApprovedForGrading: { type: Boolean, default: false },
   trainerApprovedBy: { type: String, default: '' },
-  trainerApprovedAt: { type: String, default: '' }
+  trainerApprovedAt: { type: String, default: '' },
+  trainerSuggestedBelt: { type: String, default: '' },
+  trainerGradingNotes: { type: String, default: '' }
 }, { timestamps: true });
 
 studentSchema.index({ branch: 1, status: 1 });

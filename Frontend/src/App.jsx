@@ -595,6 +595,13 @@ function App() {
   const [isEditGradingModalOpen, setIsEditGradingModalOpen] = useState(false);
   const [selectedEditGradingStudent, setSelectedEditGradingStudent] = useState(null);
   const [editGradingForm, setEditGradingForm] = useState({ joinDate: '', lastGradingDate: '', belt: '' });
+
+  // Trainer Approval & Belt Suggestion Modal
+  const [isTrainerApprovalModalOpen, setIsTrainerApprovalModalOpen] = useState(false);
+  const [selectedTrainerApprovalStudent, setSelectedTrainerApprovalStudent] = useState(null);
+  const [trainerSuggestedBeltInput, setTrainerSuggestedBeltInput] = useState('');
+  const [trainerGradingNotesInput, setTrainerGradingNotesInput] = useState('');
+
   const [classFormSlotType, setClassFormSlotType] = useState('Morning');
 
   // Financial Performance / Profit Filters States
@@ -1147,7 +1154,7 @@ function App() {
     }
 
     const branchKey = String(targetBranch || 'All').toLowerCase().trim();
-    
+
     let filtered = batchOptions;
     if (branchKey !== 'all') {
       filtered = batchOptions.filter(opt => {
@@ -1175,7 +1182,7 @@ function App() {
       const normSched = String(opt.schedule || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       const comboKey = `${bKey}_${normName}_${normSched}`;
       const idCombo = `${bKey}_${idKey}`;
-      
+
       if (seenCombos.has(comboKey) || (idKey && seenCombos.has(idCombo))) return false;
       seenCombos.add(comboKey);
       if (idKey) seenCombos.add(idCombo);
@@ -4169,12 +4176,30 @@ function App() {
       }
     });
 
+    // Calculate fee collection strictly by actual paymentDate received in current month
+    const currentMonthStr = getLocalMonthString();
+    let paymentDateCollection = 0;
+    if (revenueSummaryData && revenueSummaryData.targetMonth === currentMonthStr && revenueSummaryData.totalCollected > 0) {
+      paymentDateCollection = revenueSummaryData.totalCollected;
+    } else if (feePaymentsList && feePaymentsList.length > 0) {
+      paymentDateCollection = feePaymentsList
+        .filter(p => {
+          if (p.revenueMonth !== currentMonthStr) return false;
+          if (activeBranch !== 'All' && p.branch && p.branch.toLowerCase().trim() !== activeBranch.toLowerCase().trim()) return false;
+          if (activeBatch !== 'All' && p.batch && p.batch.toLowerCase().trim() !== activeBatch.toLowerCase().trim()) return false;
+          return true;
+        })
+        .reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
+    }
+
+    const finalCollection = paymentDateCollection > 0 ? paymentDateCollection : Math.round(feeCollection);
+
     return {
       totalStudents: totalStudentsCount,
       presentToday,
       absentToday,
       attendancePercentage,
-      feeCollection: Math.round(feeCollection),
+      feeCollection: finalCollection,
       pendingFees: Math.round(pendingFees),
       filteredClasses: sortedClasses
     };
@@ -4204,7 +4229,71 @@ function App() {
 
   // Fee Filter State
   const [feeBatchFilter, setFeeBatchFilter] = useState('All');
+  const [paymentMonth, setPaymentMonth] = useState(getLocalMonthString());
+  const [feeStatusFilter, setFeeStatusFilter] = useState('All');
+  const [feeMethodFilter, setFeeMethodFilter] = useState('All');
+  const [feePaymentsList, setFeePaymentsList] = useState([]);
+  const [revenueSummaryData, setRevenueSummaryData] = useState({
+    totalCollected: 0,
+    monthlyFeeCollected: 0,
+    admissionFeeCollected: 0,
+    dailyBreakdown: {},
+    methodBreakdown: {},
+    branchBreakdown: {}
+  });
 
+  const [isRecordPaymentModalOpen, setIsRecordPaymentModalOpen] = useState(false);
+  const [paymentFormData, setPaymentFormData] = useState({
+    studentId: '',
+    studentName: '',
+    branch: '',
+    batch: '',
+    feeType: 'monthly',
+    feeMonth: getLocalMonthString(),
+    amountDue: 600,
+    amountPaid: 600,
+    paymentDate: getLocalDateString(),
+    paymentMethod: 'Cash',
+    transactionRef: '',
+    notes: ''
+  });
+
+  const [activeReceipt, setActiveReceipt] = useState(null);
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+
+  const fetchRevenueAndPayments = () => {
+    const token = getSessionToken();
+    if (!token) return;
+
+    const targetBranch = branchFilter !== 'All' ? branchFilter : '';
+    const targetBatch = batchFilter !== 'All' ? batchFilter : '';
+
+    fetch(`${API_BASE_URL}/revenue/summary?month=${paymentMonth}&feeMonth=${feeMonth}&branch=${encodeURIComponent(targetBranch)}&batch=${encodeURIComponent(targetBatch)}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data && !data.error) {
+          setRevenueSummaryData(data);
+        }
+      })
+      .catch(err => console.error("Error loading revenue summary:", err));
+
+    fetch(`${API_BASE_URL}/payments?branch=${encodeURIComponent(targetBranch)}&batch=${encodeURIComponent(targetBatch)}&limit=1000`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.payments) {
+          setFeePaymentsList(data.payments);
+        }
+      })
+      .catch(err => console.error("Error loading payments:", err));
+  };
+
+  useEffect(() => {
+    fetchRevenueAndPayments();
+  }, [paymentMonth, feeMonth, branchFilter, batchFilter, loggedInUser]);
 
   // Form State
   const [newStudent, setNewStudent] = useState({
@@ -4640,6 +4729,52 @@ function App() {
   };
 
   const markFeePaid = (id, feeType) => {
+    const student = students.find(s => s.id === id);
+    let dueAmount = monthlyFeeRate;
+    if (student) {
+      if (feeType === 'admissionPaid') {
+        const rateAdmission = student.customAdmissionRate !== undefined && student.customAdmissionRate !== null
+          ? student.customAdmissionRate
+          : admissionFeeRate;
+        const admissionCoupon = resolveCouponCode(student.appliedAdmissionCoupon);
+        let admissionDiscountAmount = 0;
+        if (admissionCoupon) {
+          admissionDiscountAmount = admissionCoupon.type === 'percentage'
+            ? Math.round(rateAdmission * admissionCoupon.value / 100)
+            : admissionCoupon.value;
+        }
+        dueAmount = Math.max(0, rateAdmission - admissionDiscountAmount);
+      } else {
+        const rateMonthly = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
+          ? student.customMonthlyRate
+          : monthlyFeeRate;
+        const discountAmount = getStudentDiscountForMonth(student, rateMonthly, feeMonth);
+        dueAmount = Math.max(0, rateMonthly - discountAmount);
+      }
+    }
+
+    // Call payment record API
+    const token = getSessionToken();
+    fetch(`${API_BASE_URL}/payments/record`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({
+        studentId: id,
+        feeType: feeType === 'admissionPaid' ? 'admission' : 'monthly',
+        feeMonth: feeMonth,
+        amountDue: dueAmount,
+        amountPaid: dueAmount,
+        paymentDate: getLocalDateString(),
+        paymentMethod: 'Cash'
+      })
+    })
+      .then(res => res.json())
+      .then(() => fetchRevenueAndPayments())
+      .catch(err => console.error("Error recording fee payment:", err));
+
     let updatedStudent = null;
     const updatedStudentsList = students.map(s => {
       if (s.id === id) {
@@ -4661,25 +4796,27 @@ function App() {
     if (selectedStudent && selectedStudent.id === id) {
       setSelectedStudent(updatedStudent);
     }
-
-    if (updatedStudent) {
-      fetch(`${API_BASE_URL}/students/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedStudent)
-      })
-        .then(res => res.json())
-        .catch(err => console.error("Error updating fee status:", err));
-    }
   };
 
   const unmarkFeePaid = (id, feeType) => {
+    const token = getSessionToken();
+
+    // 1. Immediately remove from local feePaymentsList
+    setFeePaymentsList(prev => prev.filter(p => {
+      if (p.studentId !== id) return true;
+      if (feeType === 'admissionPaid' && p.feeType === 'admission') return false;
+      if (feeType === 'currentMonthPaid' && p.feeType === 'monthly' && p.feeMonth === feeMonth) return false;
+      return true;
+    }));
+
+    // 2. Immediately update student in state
     let updatedStudent = null;
     const updatedStudentsList = students.map(s => {
       if (s.id === id) {
         let updated = { ...s };
         if (feeType === 'currentMonthPaid') {
-          const newPaidMonths = { ...s.paidMonths };
+          const rawPaid = s.paidMonths instanceof Map ? Object.fromEntries(s.paidMonths) : (s.paidMonths || {});
+          const newPaidMonths = { ...rawPaid };
           delete newPaidMonths[feeMonth];
           updated.paidMonths = newPaidMonths;
         } else if (feeType === 'admissionPaid') {
@@ -4698,23 +4835,81 @@ function App() {
       setSelectedStudent(updatedStudent);
     }
 
+    // 3. Cancel payment on backend
+    fetch(`${API_BASE_URL}/payments/cancel`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({
+        studentId: id,
+        feeType: feeType === 'admissionPaid' ? 'admission' : 'monthly',
+        ...(feeType === 'currentMonthPaid' ? { feeMonth } : {})
+      })
+    })
+      .then(res => res.json())
+      .then(() => fetchRevenueAndPayments())
+      .catch(err => console.error("Error cancelling fee payment:", err));
+
+    // 4. Update student document directly in MongoDB via PUT /api/students/:id
     if (updatedStudent) {
       fetch(`${API_BASE_URL}/students/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(updatedStudent)
       })
         .then(res => res.json())
-        .catch(err => console.error("Error updating fee status:", err));
+        .catch(err => console.error("Error saving updated student status:", err));
     }
   };
 
   const markFeePaidCustomMonth = (id, targetMonth) => {
+    const student = students.find(s => s.id === id);
+    let dueAmount = monthlyFeeRate;
+    if (student) {
+      const rateMonthly = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
+        ? student.customMonthlyRate
+        : monthlyFeeRate;
+      const discountAmount = getStudentDiscountForMonth(student, rateMonthly, targetMonth);
+      dueAmount = Math.max(0, rateMonthly - discountAmount);
+    }
+
+    const token = getSessionToken();
+    fetch(`${API_BASE_URL}/payments/record`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({
+        studentId: id,
+        feeType: 'monthly',
+        feeMonth: targetMonth,
+        amountDue: dueAmount,
+        amountPaid: dueAmount,
+        paymentDate: getLocalDateString(),
+        paymentMethod: 'Cash'
+      })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.payment) {
+          setFeePaymentsList(prev => [data.payment, ...prev.filter(p => !(p.studentId === id && p.feeMonth === targetMonth && p.feeType === 'monthly'))]);
+        }
+        fetchRevenueAndPayments();
+      })
+      .catch(err => console.error("Error recording custom fee payment:", err));
+
     let updatedStudent = null;
     const updatedStudentsList = students.map(s => {
       if (s.id === id) {
         let updated = { ...s };
-        updated.paidMonths = { ...(s.paidMonths || {}), [targetMonth]: true };
+        const rawPaid = s.paidMonths instanceof Map ? Object.fromEntries(s.paidMonths) : (s.paidMonths || {});
+        updated.paidMonths = { ...rawPaid, [targetMonth]: true };
         updatedStudent = updated;
         return updated;
       }
@@ -4729,20 +4924,30 @@ function App() {
     if (updatedStudent) {
       fetch(`${API_BASE_URL}/students/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(updatedStudent)
       })
         .then(res => res.json())
-        .catch(err => console.error("Error updating fee status:", err));
+        .catch(err => console.error("Error updating student status:", err));
     }
   };
 
   const unmarkFeePaidCustomMonth = (id, targetMonth) => {
+    const token = getSessionToken();
+
+    // 1. Immediately remove from local fee payments list
+    setFeePaymentsList(prev => prev.filter(p => !(p.studentId === id && p.feeMonth === targetMonth && p.feeType === 'monthly')));
+
+    // 2. Immediately update student paidMonths in local state
     let updatedStudent = null;
     const updatedStudentsList = students.map(s => {
       if (s.id === id) {
         let updated = { ...s };
-        const newPaidMonths = { ...s.paidMonths };
+        const rawPaid = s.paidMonths instanceof Map ? Object.fromEntries(s.paidMonths) : (s.paidMonths || {});
+        const newPaidMonths = { ...rawPaid };
         delete newPaidMonths[targetMonth];
         updated.paidMonths = newPaidMonths;
         updatedStudent = updated;
@@ -4756,23 +4961,131 @@ function App() {
       setSelectedStudent(updatedStudent);
     }
 
+    // 3. Call backend /api/payments/cancel (unsets paidMonths in DB and deletes payment records)
+    fetch(`${API_BASE_URL}/payments/cancel`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({
+        studentId: id,
+        feeType: 'monthly',
+        feeMonth: targetMonth
+      })
+    })
+      .then(res => res.json())
+      .then(() => fetchRevenueAndPayments())
+      .catch(err => console.error("Error cancelling custom fee payment:", err));
+
+    // 4. Update student document directly via PUT /api/students/:id with auth token
     if (updatedStudent) {
       fetch(`${API_BASE_URL}/students/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(updatedStudent)
       })
         .then(res => res.json())
-        .catch(err => console.error("Error updating fee status:", err));
+        .catch(err => console.error("Error saving updated student paidMonths:", err));
     }
   };
 
+  const openRecordPaymentModal = (student, targetMonth = feeMonth, feeType = 'monthly') => {
+    let dueAmount = 600;
+    if (student) {
+      if (feeType === 'admission') {
+        const rateAdmission = student.customAdmissionRate !== undefined && student.customAdmissionRate !== null
+          ? student.customAdmissionRate
+          : admissionFeeRate;
+        const admissionCoupon = resolveCouponCode(student.appliedAdmissionCoupon);
+        let admissionDiscountAmount = 0;
+        if (admissionCoupon) {
+          admissionDiscountAmount = admissionCoupon.type === 'percentage'
+            ? Math.round(rateAdmission * admissionCoupon.value / 100)
+            : admissionCoupon.value;
+        }
+        dueAmount = Math.max(0, rateAdmission - admissionDiscountAmount);
+      } else {
+        const rateMonthly = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
+          ? student.customMonthlyRate
+          : monthlyFeeRate;
+        const discountAmount = getStudentDiscountForMonth(student, rateMonthly, targetMonth);
+        dueAmount = Math.max(0, rateMonthly - discountAmount);
+      }
+    }
+
+    setPaymentFormData({
+      studentId: student ? student.id : '',
+      studentName: student ? (student.studentName || student.name) : '',
+      branch: student ? student.branch : '',
+      batch: student ? student.batch : '',
+      feeType,
+      feeMonth: targetMonth,
+      amountDue: dueAmount,
+      amountPaid: dueAmount,
+      paymentDate: getLocalDateString(),
+      paymentMethod: 'Cash',
+      transactionRef: '',
+      notes: ''
+    });
+    setIsRecordPaymentModalOpen(true);
+  };
+
+  const handleRecordPaymentSubmit = (e) => {
+    e.preventDefault();
+    const token = getSessionToken();
+    fetch(`${API_BASE_URL}/payments/record`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(paymentFormData)
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) {
+          alert(`Error recording payment: ${data.error}`);
+          return;
+        }
+        setIsRecordPaymentModalOpen(false);
+        setActiveReceipt(data.payment);
+        setIsReceiptModalOpen(true);
+
+        // Update student local state
+        const targetId = Number(paymentFormData.studentId);
+        const updatedList = students.map(s => {
+          if (s.id === targetId) {
+            const updated = { ...s };
+            if (paymentFormData.feeType === 'monthly') {
+              updated.paidMonths = { ...(s.paidMonths || {}), [paymentFormData.feeMonth]: true };
+            } else if (paymentFormData.feeType === 'admission') {
+              updated.admissionPaid = paymentFormData.paymentDate.slice(0, 7);
+            }
+            return updated;
+          }
+          return s;
+        });
+        setStudents(updatedList);
+        fetchRevenueAndPayments();
+      })
+      .catch(err => {
+        console.error("Error submitting payment:", err);
+        alert("Network error recording payment.");
+      });
+  };
+
   const markAllFeesPaid = (id) => {
+    const token = getSessionToken();
     let updatedStudent = null;
     const updatedStudentsList = students.map(s => {
       if (s.id === id) {
         const fees = calculateStudentFees(s);
-        const newPaidMonths = { ...(s.paidMonths || {}) };
+        const rawPaid = s.paidMonths instanceof Map ? Object.fromEntries(s.paidMonths) : (s.paidMonths || {});
+        const newPaidMonths = { ...rawPaid };
         fees.unpaidMonths.forEach(m => {
           newPaidMonths[m] = true;
         });
@@ -4791,15 +5104,25 @@ function App() {
     if (updatedStudent) {
       fetch(`${API_BASE_URL}/students/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(updatedStudent)
       })
         .then(res => res.json())
+        .then(() => fetchRevenueAndPayments())
         .catch(err => console.error("Error updating fee status:", err));
     }
   };
 
   const markAllFeesUnpaid = (id) => {
+    const token = getSessionToken();
+
+    // 1. Immediately remove from local feePaymentsList
+    setFeePaymentsList(prev => prev.filter(p => !(p.studentId === id && p.feeType === 'monthly')));
+
+    // 2. Immediately clear student paidMonths in state
     let updatedStudent = null;
     const updatedStudentsList = students.map(s => {
       if (s.id === id) {
@@ -4815,10 +5138,30 @@ function App() {
       setSelectedStudent(updatedStudent);
     }
 
+    // 3. Cancel all monthly payments in backend
+    fetch(`${API_BASE_URL}/payments/cancel`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({
+        studentId: id,
+        feeType: 'monthly'
+      })
+    })
+      .then(res => res.json())
+      .then(() => fetchRevenueAndPayments())
+      .catch(err => console.error("Error cancelling all payments:", err));
+
+    // 4. Update student document via PUT /api/students/:id with auth token
     if (updatedStudent) {
       fetch(`${API_BASE_URL}/students/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(updatedStudent)
       })
         .then(res => res.json())
@@ -8108,7 +8451,7 @@ function App() {
 
       // 1. Day of Week filter: Only show students whose batch/schedule runs on this day of the week
       const studentSched = s.schedule || (() => {
-        const bObj = batchOptions.find(b => 
+        const bObj = batchOptions.find(b =>
           (b.id && String(b.id).toLowerCase() === String(s.batch || '').toLowerCase()) ||
           (b.code && String(b.code).toLowerCase() === String(s.batch || '').toLowerCase()) ||
           (b.name && String(b.name).toLowerCase() === String(s.batch || '').toLowerCase())
@@ -8127,7 +8470,7 @@ function App() {
       const matchBatchSlot = attendanceBatchFilter === 'All' ||
         (s.batch && String(s.batch).toLowerCase() === attendanceBatchFilter.toLowerCase()) ||
         (() => {
-          const batchObj = batchOptions.find(b => 
+          const batchObj = batchOptions.find(b =>
             (b.id && String(b.id).toLowerCase() === String(s.batch || '').toLowerCase()) ||
             (b.code && String(b.code).toLowerCase() === String(s.batch || '').toLowerCase()) ||
             (b.name && String(b.name).toLowerCase() === String(s.batch || '').toLowerCase())
@@ -8136,9 +8479,9 @@ function App() {
         })();
 
       // 3. Branch filter (case-insensitive & fallback)
-      const matchBranch = branchFilter === 'All' || 
-        !s.branch || 
-        !branchFilter || 
+      const matchBranch = branchFilter === 'All' ||
+        !s.branch ||
+        !branchFilter ||
         String(s.branch).toLowerCase().trim() === String(branchFilter).toLowerCase().trim() ||
         String(s.branch).toLowerCase().includes(String(branchFilter).toLowerCase().trim()) ||
         String(branchFilter).toLowerCase().includes(String(s.branch).toLowerCase().trim());
@@ -8150,7 +8493,7 @@ function App() {
         const selectedIdLower = String(batchFilter).toLowerCase().trim();
         if (studentBatchLower === selectedIdLower) return true;
 
-        const selectedBatchObj = batchOptions.find(b => 
+        const selectedBatchObj = batchOptions.find(b =>
           (b.id && String(b.id).toLowerCase() === selectedIdLower) ||
           (b.code && String(b.code).toLowerCase() === selectedIdLower) ||
           (b.name && String(b.name).toLowerCase() === selectedIdLower)
@@ -8270,281 +8613,280 @@ function App() {
                 </div>
               </div>
 
-                {/* Filters Grid */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginBottom: '1rem' }}>
-                  {/* Branch Selector */}
-                  <div>
-                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Branch</label>
-                    <select
-                      className="form-control"
-                      style={{ width: '100%', height: '40px', borderRadius: '8px', fontSize: '0.88rem', padding: '0 10px' }}
-                      value={branchFilter}
-                      onChange={(e) => setBranchFilter(e.target.value)}
-                      disabled={!isAdminUser(loggedInUser)}
-                    >
-                      {isAdminUser(loggedInUser) ? (
-                        <>
-                          {branches.map(b => (
-                            <option key={b} value={b}>{b}</option>
-                          ))}
-                          <option value="All">All Branches</option>
-                        </>
-                      ) : (
-                        <option value={branchFilter}>{branchFilter}</option>
-                      )}
-                    </select>
-                  </div>
+              {/* Filters Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginBottom: '1rem' }}>
+                {/* Branch Selector */}
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Branch</label>
+                  <select
+                    className="form-control"
+                    style={{ width: '100%', height: '40px', borderRadius: '8px', fontSize: '0.88rem', padding: '0 10px' }}
+                    value={branchFilter}
+                    onChange={(e) => setBranchFilter(e.target.value)}
+                    disabled={!isAdminUser(loggedInUser)}
+                  >
+                    {isAdminUser(loggedInUser) ? (
+                      <>
+                        {branches.map(b => (
+                          <option key={b} value={b}>{b}</option>
+                        ))}
+                        <option value="All">All Branches</option>
+                      </>
+                    ) : (
+                      <option value={branchFilter}>{branchFilter}</option>
+                    )}
+                  </select>
+                </div>
 
-                  {/* Batch Selector */}
-                  <div>
-                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Batch</label>
-                    <select
-                      className="form-control"
-                      style={{ width: '100%', height: '40px', borderRadius: '8px', fontSize: '0.88rem', padding: '0 10px' }}
-                      value={batchFilter}
-                      onChange={(e) => setBatchFilter(e.target.value)}
-                      disabled={isBatchAdminUser(loggedInUser)}
-                    >
-                      <option value="All">All Batches</option>
-                      {getFilteredBatchOptions().map(opt => (
-                        <option key={opt.id} value={opt.id}>{opt.name}</option>
-                      ))}
-                    </select>
-                  </div>
+                {/* Batch Selector */}
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Batch</label>
+                  <select
+                    className="form-control"
+                    style={{ width: '100%', height: '40px', borderRadius: '8px', fontSize: '0.88rem', padding: '0 10px' }}
+                    value={batchFilter}
+                    onChange={(e) => setBatchFilter(e.target.value)}
+                    disabled={isBatchAdminUser(loggedInUser)}
+                  >
+                    <option value="All">All Batches</option>
+                    {getFilteredBatchOptions().map(opt => (
+                      <option key={opt.id} value={opt.id}>{opt.name}</option>
+                    ))}
+                  </select>
+                </div>
 
-                  {/* Date Input */}
-                  <div>
-                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Date</label>
+                {/* Date Input */}
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Date</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    style={{ width: '100%', height: '40px', borderRadius: '8px', fontSize: '0.88rem', padding: '0 10px' }}
+                    value={markingDate}
+                    onChange={(e) => setMarkingDate(e.target.value)}
+                  />
+                </div>
+
+                {/* Search Input */}
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Search</label>
+                  <div style={{ position: 'relative' }}>
                     <input
-                      type="date"
-                      className="form-control"
-                      style={{ width: '100%', height: '40px', borderRadius: '8px', fontSize: '0.88rem', padding: '0 10px' }}
-                      value={markingDate}
-                      onChange={(e) => setMarkingDate(e.target.value)}
+                      type="text"
+                      placeholder="Search student..."
+                      className="form-control search-input-box"
+                      style={{ width: '100%', height: '40px', borderRadius: '8px', fontSize: '0.88rem' }}
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
                     />
                   </div>
-
-                  {/* Search Input */}
-                  <div>
-                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Search</label>
-                    <div style={{ position: 'relative' }}>
-                      <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none', zIndex: 2 }} />
-                      <input
-                        type="text"
-                        placeholder="Search student..."
-                        className="form-control search-input-box"
-                        style={{ paddingLeft: '38px', width: '100%', height: '40px', borderRadius: '8px', fontSize: '0.88rem' }}
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Time Slot Filter Pills */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '4px' }}>
-                  <span style={{ color: 'var(--color-text-muted)', fontSize: '0.78rem', fontWeight: 600, flexShrink: 0 }}>Slot:</span>
-                  <button
-                    type="button"
-                    className={`quick-chip ${attendanceBatchFilter === 'All' ? 'active' : ''}`}
-                    style={{ padding: '4px 12px', fontSize: '0.75rem', borderRadius: '6px' }}
-                    onClick={() => setAttendanceBatchFilter('All')}
-                  >
-                    All Slots
-                  </button>
-                  <button
-                    type="button"
-                    className={`quick-chip ${attendanceBatchFilter === 'Morning' ? 'active' : ''}`}
-                    style={{ padding: '4px 12px', fontSize: '0.75rem', borderRadius: '6px' }}
-                    onClick={() => setAttendanceBatchFilter('Morning')}
-                  >
-                    🌅 Morning
-                  </button>
-                  <button
-                    type="button"
-                    className={`quick-chip ${attendanceBatchFilter === 'Evening' ? 'active' : ''}`}
-                    style={{ padding: '4px 12px', fontSize: '0.75rem', borderRadius: '6px' }}
-                    onClick={() => setAttendanceBatchFilter('Evening')}
-                  >
-                    🌇 Evening
-                  </button>
-                  <button
-                    type="button"
-                    className={`quick-chip ${attendanceBatchFilter === 'Night' ? 'active' : ''}`}
-                    style={{ padding: '4px 12px', fontSize: '0.75rem', borderRadius: '6px' }}
-                    onClick={() => setAttendanceBatchFilter('Night')}
-                  >
-                    🌙 Night
-                  </button>
                 </div>
               </div>
 
-              {/* Student Attendance List / Cards */}
-              <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', overflow: 'hidden', padding: 0 }}>
-                {filteredAttendanceStudents.length > 0 ? (
-                  <div className="premium-table-container" style={{ border: 'none', background: 'transparent' }}>
-                    <table className="premium-table responsive-table-cards">
-                      <thead>
-                        <tr>
-                          <th>Student</th>
-                          <th>Batch Schedule</th>
-                          <th>Status</th>
-                          <th style={{ textAlign: 'center' }}>Mark Attendance</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredAttendanceStudents.map(student => {
-                          const status = attendanceRecords[markingDate]?.[student.id];
-                          const initials = (student.studentName || student.name || 'S').split(' ').map(n => n[0]).slice(0, 2).join('');
+              {/* Time Slot Filter Pills */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '4px' }}>
+                <span style={{ color: 'var(--color-text-muted)', fontSize: '0.78rem', fontWeight: 600, flexShrink: 0 }}>Slot:</span>
+                <button
+                  type="button"
+                  className={`quick-chip ${attendanceBatchFilter === 'All' ? 'active' : ''}`}
+                  style={{ padding: '4px 12px', fontSize: '0.75rem', borderRadius: '6px' }}
+                  onClick={() => setAttendanceBatchFilter('All')}
+                >
+                  All Slots
+                </button>
+                <button
+                  type="button"
+                  className={`quick-chip ${attendanceBatchFilter === 'Morning' ? 'active' : ''}`}
+                  style={{ padding: '4px 12px', fontSize: '0.75rem', borderRadius: '6px' }}
+                  onClick={() => setAttendanceBatchFilter('Morning')}
+                >
+                  🌅 Morning
+                </button>
+                <button
+                  type="button"
+                  className={`quick-chip ${attendanceBatchFilter === 'Evening' ? 'active' : ''}`}
+                  style={{ padding: '4px 12px', fontSize: '0.75rem', borderRadius: '6px' }}
+                  onClick={() => setAttendanceBatchFilter('Evening')}
+                >
+                  🌇 Evening
+                </button>
+                <button
+                  type="button"
+                  className={`quick-chip ${attendanceBatchFilter === 'Night' ? 'active' : ''}`}
+                  style={{ padding: '4px 12px', fontSize: '0.75rem', borderRadius: '6px' }}
+                  onClick={() => setAttendanceBatchFilter('Night')}
+                >
+                  🌙 Night
+                </button>
+              </div>
+            </div>
 
-                          return (
-                            <tr key={student.id}>
-                              <td data-label="Student" style={{ fontWeight: 700, color: '#fff' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                  <div className="student-avatar-badge">{initials}</div>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSelectStudent(student)}
-                                    style={{
-                                      background: 'none',
-                                      border: 'none',
-                                      padding: 0,
-                                      fontWeight: 700,
-                                      color: '#fff',
-                                      cursor: 'pointer',
-                                      fontFamily: 'inherit',
-                                      fontSize: 'inherit',
-                                      textAlign: 'left',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '4px'
-                                    }}
-                                  >
-                                    {renderHighlightedName(student.studentName || student.name, searchQuery)}
-                                    {student.isPriority && (
-                                      <Star size={13} fill="#FFD700" color="#FFD700" title="Priority Student" />
-                                    )}
-                                  </button>
-                                </div>
-                              </td>
-                              <td data-label="Batch Info">
-                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
-                                  <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', fontSize: '0.72rem', padding: '2px 6px' }}>
-                                    {student.branch}
-                                  </span>
-                                  <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: '0.72rem', padding: '2px 6px' }}>
-                                    {getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}
-                                  </span>
-                                </div>
-                              </td>
-                              <td data-label="Status">
-                                {status === 'present' && <span className="badge badge-green" style={{ fontSize: '0.75rem', padding: '3px 8px' }}>Present</span>}
-                                {status === 'absent' && <span className="badge badge-red" style={{ fontSize: '0.75rem', padding: '3px 8px' }}>Absent</span>}
-                                {!status && <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem', fontStyle: 'italic' }}>Pending</span>}
-                              </td>
-                              <td data-label="Action">
-                                <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                                  <button
-                                    type="button"
-                                    className={`btn-small ${status === 'present' ? 'btn-primary' : ''}`}
-                                    style={{
-                                      backgroundColor: status === 'present' ? '#4CAF50' : 'rgba(76, 175, 80, 0.12)',
-                                      borderColor: status === 'present' ? '#4CAF50' : 'rgba(76, 175, 80, 0.3)',
-                                      color: status === 'present' ? '#fff' : '#4CAF50',
-                                      fontWeight: 600,
-                                      padding: '6px 14px',
-                                      borderRadius: '6px',
-                                      cursor: 'pointer',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '4px',
-                                      transition: 'all 0.2s ease',
-                                      boxShadow: status === 'present' ? '0 2px 8px rgba(76, 175, 80, 0.35)' : 'none'
-                                    }}
-                                    onClick={() => markAttendance(student.id, status === 'present' ? 'none' : 'present')}
-                                  >
-                                    <CheckCircle size={13} /> Present
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={`btn-small ${status === 'absent' ? 'btn-primary' : ''}`}
-                                    style={{
-                                      backgroundColor: status === 'absent' ? '#F44336' : 'rgba(244, 67, 54, 0.12)',
-                                      borderColor: status === 'absent' ? '#F44336' : 'rgba(244, 67, 54, 0.3)',
-                                      color: status === 'absent' ? '#fff' : '#ff453a',
-                                      fontWeight: 600,
-                                      padding: '6px 14px',
-                                      borderRadius: '6px',
-                                      cursor: 'pointer',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '4px',
-                                      transition: 'all 0.2s ease',
-                                      boxShadow: status === 'absent' ? '0 2px 8px rgba(244, 67, 54, 0.35)' : 'none'
-                                    }}
-                                    onClick={() => markAttendance(student.id, status === 'absent' ? 'none' : 'absent')}
-                                  >
-                                    <XCircle size={13} /> Absent
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div style={{ textAlign: 'center', padding: '3.5rem 2rem', color: 'var(--color-text-muted)' }}>
-                    <Users size={32} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
-                    <div style={{ fontSize: '0.95rem', color: '#fff', fontWeight: 600 }}>No Students Found</div>
-                    <p style={{ fontSize: '0.8rem', margin: 0, marginTop: '4px' }}>No student records match the selected attendance filters.</p>
-                  </div>
-                )}
+            {/* Student Attendance List / Cards */}
+            <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', overflow: 'hidden', padding: 0 }}>
+              {filteredAttendanceStudents.length > 0 ? (
+                <div className="premium-table-container" style={{ border: 'none', background: 'transparent' }}>
+                  <table className="premium-table responsive-table-cards">
+                    <thead>
+                      <tr>
+                        <th>Student</th>
+                        <th>Batch Schedule</th>
+                        <th>Status</th>
+                        <th style={{ textAlign: 'center' }}>Mark Attendance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAttendanceStudents.map(student => {
+                        const status = attendanceRecords[markingDate]?.[student.id];
+                        const initials = (student.studentName || student.name || 'S').split(' ').map(n => n[0]).slice(0, 2).join('');
+
+                        return (
+                          <tr key={student.id}>
+                            <td data-label="Student" style={{ fontWeight: 700, color: '#fff' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <div className="student-avatar-badge">{initials}</div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectStudent(student)}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    padding: 0,
+                                    fontWeight: 700,
+                                    color: '#fff',
+                                    cursor: 'pointer',
+                                    fontFamily: 'inherit',
+                                    fontSize: 'inherit',
+                                    textAlign: 'left',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px'
+                                  }}
+                                >
+                                  {renderHighlightedName(student.studentName || student.name, searchQuery)}
+                                  {student.isPriority && (
+                                    <Star size={13} fill="#FFD700" color="#FFD700" title="Priority Student" />
+                                  )}
+                                </button>
+                              </div>
+                            </td>
+                            <td data-label="Batch Info">
+                              <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+                                <span className="badge" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', fontSize: '0.72rem', padding: '2px 6px' }}>
+                                  {student.branch}
+                                </span>
+                                <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: '0.72rem', padding: '2px 6px' }}>
+                                  {getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}
+                                </span>
+                              </div>
+                            </td>
+                            <td data-label="Status">
+                              {status === 'present' && <span className="badge badge-green" style={{ fontSize: '0.75rem', padding: '3px 8px' }}>Present</span>}
+                              {status === 'absent' && <span className="badge badge-red" style={{ fontSize: '0.75rem', padding: '3px 8px' }}>Absent</span>}
+                              {!status && <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem', fontStyle: 'italic' }}>Pending</span>}
+                            </td>
+                            <td data-label="Action">
+                              <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                                <button
+                                  type="button"
+                                  className={`btn-small ${status === 'present' ? 'btn-primary' : ''}`}
+                                  style={{
+                                    backgroundColor: status === 'present' ? '#4CAF50' : 'rgba(76, 175, 80, 0.12)',
+                                    borderColor: status === 'present' ? '#4CAF50' : 'rgba(76, 175, 80, 0.3)',
+                                    color: status === 'present' ? '#fff' : '#4CAF50',
+                                    fontWeight: 600,
+                                    padding: '6px 14px',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    transition: 'all 0.2s ease',
+                                    boxShadow: status === 'present' ? '0 2px 8px rgba(76, 175, 80, 0.35)' : 'none'
+                                  }}
+                                  onClick={() => markAttendance(student.id, status === 'present' ? 'none' : 'present')}
+                                >
+                                  <CheckCircle size={13} /> Present
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`btn-small ${status === 'absent' ? 'btn-primary' : ''}`}
+                                  style={{
+                                    backgroundColor: status === 'absent' ? '#F44336' : 'rgba(244, 67, 54, 0.12)',
+                                    borderColor: status === 'absent' ? '#F44336' : 'rgba(244, 67, 54, 0.3)',
+                                    color: status === 'absent' ? '#fff' : '#ff453a',
+                                    fontWeight: 600,
+                                    padding: '6px 14px',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    transition: 'all 0.2s ease',
+                                    boxShadow: status === 'absent' ? '0 2px 8px rgba(244, 67, 54, 0.35)' : 'none'
+                                  }}
+                                  onClick={() => markAttendance(student.id, status === 'absent' ? 'none' : 'absent')}
+                                >
+                                  <XCircle size={13} /> Absent
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '3.5rem 2rem', color: 'var(--color-text-muted)' }}>
+                  <Users size={32} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
+                  <div style={{ fontSize: '0.95rem', color: '#fff', fontWeight: 600 }}>No Students Found</div>
+                  <p style={{ fontSize: '0.8rem', margin: 0, marginTop: '4px' }}>No student records match the selected attendance filters.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Monthly Calendar View */}
+            <div className="calendar-container panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1.25rem' }}>
+              <div className="calendar-header" style={{ marginBottom: '0.75rem' }}>
+                <button className="btn-icon" onClick={() => setCurrentDate(new Date(year, month - 1, 1))}>
+                  <ChevronLeft size={22} />
+                </button>
+                <h2 className="calendar-title" style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.25rem', color: '#fff', margin: 0 }}>{monthNames[month]} {year}</h2>
+                <button className="btn-icon" onClick={() => setCurrentDate(new Date(year, month + 1, 1))}>
+                  <ChevronRight size={22} />
+                </button>
               </div>
 
-              {/* Monthly Calendar View */}
-              <div className="calendar-container panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1.25rem' }}>
-                <div className="calendar-header" style={{ marginBottom: '0.75rem' }}>
-                  <button className="btn-icon" onClick={() => setCurrentDate(new Date(year, month - 1, 1))}>
-                    <ChevronLeft size={22} />
-                  </button>
-                  <h2 className="calendar-title" style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.25rem', color: '#fff', margin: 0 }}>{monthNames[month]} {year}</h2>
-                  <button className="btn-icon" onClick={() => setCurrentDate(new Date(year, month + 1, 1))}>
-                    <ChevronRight size={22} />
-                  </button>
-                </div>
-
-                {/* Calendar Legend */}
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1rem', fontSize: '0.75rem', color: 'var(--color-text-muted)', paddingBottom: '0.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4CAF50' }}></span> Present
-                  </span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ff453a' }}></span> Absent
-                  </span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#38bdf8' }}></span> Class Day
-                  </span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#636366', border: '1px dashed rgba(255,255,255,0.2)' }}></span> No Batch (Off Day)
-                  </span>
-                </div>
-
-                <div className="calendar-grid-header">
-                  <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
-                </div>
-                <div className="calendar-grid">
-                  {days}
-                </div>
+              {/* Calendar Legend */}
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1rem', fontSize: '0.75rem', color: 'var(--color-text-muted)', paddingBottom: '0.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4CAF50' }}></span> Present
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ff453a' }}></span> Absent
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#38bdf8' }}></span> Class Day
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#636366', border: '1px dashed rgba(255,255,255,0.2)' }}></span> No Batch (Off Day)
+                </span>
               </div>
-            </>
-          ) : (
-            renderYearCalendar()
-          )}
-        </div>
-      );
-    };
+
+              <div className="calendar-grid-header">
+                <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+              </div>
+              <div className="calendar-grid">
+                {days}
+              </div>
+            </div>
+          </>
+        ) : (
+          renderYearCalendar()
+        )}
+      </div>
+    );
+  };
 
   const renderFees = () => {
     const isPaid = (student) => student.paidMonths && student.paidMonths[feeMonth];
@@ -8571,48 +8913,77 @@ function App() {
         }
         return schedulesMatch(s.schedule, selectedBatchObj.schedule);
       })();
-      return matchBatch && matchSchedule;
+
+      // Status filter
+      let matchStatus = true;
+      if (feeStatusFilter !== 'All') {
+        const paidStatus = isPaid(s);
+        const pRec = feePaymentsList.find(p => p.studentId === s.id && p.feeMonth === feeMonth && p.feeType === 'monthly');
+        const effectiveStatus = pRec ? pRec.status : (paidStatus ? 'Paid' : 'Pending');
+        matchStatus = effectiveStatus.toLowerCase() === feeStatusFilter.toLowerCase();
+      }
+
+      // Method filter
+      let matchMethod = true;
+      if (feeMethodFilter !== 'All') {
+        const pRec = feePaymentsList.find(p => p.studentId === s.id && p.feeMonth === feeMonth && p.feeType === 'monthly');
+        matchMethod = pRec && pRec.paymentMethod && pRec.paymentMethod.toLowerCase() === feeMethodFilter.toLowerCase();
+      }
+
+      return matchBatch && matchSchedule && matchStatus && matchMethod;
     });
 
     const totalUnpaid = filteredFeeStudents.filter(s => !isPaid(s)).length;
     const totalPaid = filteredFeeStudents.filter(s => isPaid(s)).length;
 
-    const monthlyCollected = filteredFeeStudents
-      .filter(s => isPaid(s))
-      .reduce((sum, s) => {
-        const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null
-          ? s.customMonthlyRate
-          : monthlyFeeRate;
+    // Revenue strictly based on paymentDate (revenueMonth === paymentMonth)
+    let paymentMonthRevenue = 0;
+    let paymentMonthMonthly = 0; // Strictly feeMonth === feeMonth (selected due month)
+    let paymentMonthAdmission = 0;
+    let paymentCount = 0;
+
+    if (revenueSummaryData && revenueSummaryData.targetMonth === paymentMonth && revenueSummaryData.activeFeeMonth === feeMonth && revenueSummaryData.totalCollected > 0) {
+      paymentMonthRevenue = revenueSummaryData.totalCollected;
+      paymentMonthMonthly = revenueSummaryData.monthlyFeeCollected;
+      paymentMonthAdmission = revenueSummaryData.admissionFeeCollected;
+      paymentCount = revenueSummaryData.paymentCount || 0;
+    } else {
+      const targetPayments = feePaymentsList.filter(p => {
+        if (p.revenueMonth !== paymentMonth) return false;
+        if (branchFilter !== 'All' && p.branch && p.branch.toLowerCase().trim() !== branchFilter.toLowerCase().trim()) return false;
+        if (batchFilter !== 'All' && p.batch && p.batch.toLowerCase().trim() !== batchFilter.toLowerCase().trim()) return false;
+        return true;
+      });
+      // All money physically received in this paymentMonth (including past dues like August paid in Sep)
+      paymentMonthRevenue = targetPayments.reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
+      // ONLY monthly fees for the selected fee month (e.g. September fee paid in Sep):
+      paymentMonthMonthly = targetPayments.filter(p => p.feeType === 'monthly' && p.feeMonth === feeMonth).reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
+      paymentMonthAdmission = targetPayments.filter(p => p.feeType === 'admission').reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
+      paymentCount = targetPayments.length;
+    }
+
+    // Direct fallback: If no revenue records returned from server yet, calculate from students marked paid for feeMonth
+    if (paymentMonthMonthly === 0 && totalPaid > 0) {
+      const paidMonthlySum = filteredFeeStudents.filter(s => isPaid(s)).reduce((sum, s) => {
+        const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null ? s.customMonthlyRate : monthlyFeeRate;
         const discountAmount = getStudentDiscountForMonth(s, rateToUse, feeMonth);
-        const finalRate = Math.max(0, rateToUse - discountAmount);
-        return sum + finalRate;
+        return sum + Math.max(0, rateToUse - discountAmount);
       }, 0);
-    const admissionCollected = filteredFeeStudents
-      .filter(s => s.admissionPaid === feeMonth)
-      .reduce((sum, s) => {
-        const rateAdmission = s.customAdmissionRate !== undefined && s.customAdmissionRate !== null
-          ? s.customAdmissionRate
-          : admissionFeeRate;
-        const admissionCoupon = resolveCouponCode(s.appliedAdmissionCoupon);
-        let admissionDiscountAmount = 0;
-        if (admissionCoupon) {
-          if (admissionCoupon.type === 'percentage') {
-            admissionDiscountAmount = Math.round(rateAdmission * admissionCoupon.value / 100);
-          } else {
-            admissionDiscountAmount = admissionCoupon.value;
-          }
+      if (paidMonthlySum > 0) {
+        paymentMonthMonthly = paidMonthlySum;
+        if (paymentMonthRevenue === 0) {
+          paymentMonthRevenue = paidMonthlySum;
+          paymentCount = totalPaid;
         }
-        const finalAdmissionRate = Math.max(0, rateAdmission - admissionDiscountAmount);
-        return sum + finalAdmissionRate;
-      }, 0);
-    const totalCollected = monthlyCollected + admissionCollected;
+      }
+    }
 
     return (
       <div className="fees-container">
-        {/* Month Selector Header */}
-        <div className="panel panel-header-flex" style={{ marginBottom: '2rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <h2 className="panel-title" style={{ margin: 0 }}>Fee Management</h2>
+        {/* Month Selectors Header */}
+        <div className="panel fees-header-panel">
+          <div className="fees-title-group">
+            <h2 className="panel-title" style={{ margin: 0 }}>Fee & Revenue Management</h2>
             <button className="btn-primary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }} onClick={() => {
               const defaultBranch = getLoggedInUserBranch();
               setNewStudent(prev => ({ ...prev, branch: defaultBranch }));
@@ -8621,130 +8992,165 @@ function App() {
               <UserPlus size={14} /> Add Student
             </button>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ color: 'var(--color-text-muted)' }}>Select Month:</span>
-            <input
-              type="month"
-              className="form-control"
-              style={{ width: 'auto', padding: '0.4rem 0.75rem' }}
-              value={feeMonth}
-              onChange={(e) => setFeeMonth(e.target.value)}
-            />
+
+          <div className="fees-month-selectors">
+            {/* Revenue / Collection Month */}
+            <div className="fees-month-box revenue-month-box">
+              <span className="fees-month-label">💰 Revenue Month:</span>
+              <input
+                type="month"
+                className="form-control fees-month-input"
+                value={paymentMonth}
+                onChange={(e) => setPaymentMonth(e.target.value)}
+              />
+            </div>
+
+            {/* Fee Due Month */}
+            <div className="fees-month-box due-month-box">
+              <span className="fees-month-label">📅 Fee Due Month:</span>
+              <input
+                type="month"
+                className="form-control fees-month-input"
+                value={feeMonth}
+                onChange={(e) => setFeeMonth(e.target.value)}
+              />
+            </div>
           </div>
         </div>
 
+
         {/* Global Fee Rates Config */}
         {isAdminUser(loggedInUser) && (
-          <div className="panel" style={{ marginBottom: '2rem', display: 'flex', flexWrap: 'wrap', gap: '2rem', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="panel fees-rates-panel">
             <div>
-              <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-text-light)', fontFamily: 'var(--font-heading)' }}>Configure Fee Amounts</h3>
-              <p style={{ margin: '0.25rem 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>Set global admission and monthly rates</p>
+              <h3 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--color-text-light)', fontFamily: 'var(--font-heading)' }}>Standard Fee Rates</h3>
+              <p style={{ margin: '0.2rem 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.78rem' }}>Set global admission and monthly rates</p>
             </div>
-            <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-              {/* Admission Fee Rate Control */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255,255,255,0.02)', padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid var(--glass-border)' }}>
-                <span style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)' }}>Admission Fee:</span>
-                <strong style={{ fontSize: '1rem', color: '#FFD700', minWidth: '60px', textAlign: 'center' }}>₹{admissionFeeRate}</strong>
-                <div style={{ display: 'flex', gap: '5px' }}>
-                  <button
-                    type="button"
-                    className="btn-small"
-                    style={{ padding: '0.25rem 0.5rem', minWidth: '30px' }}
-                    onClick={() => {
-                      const newRate = Math.max(0, admissionFeeRate - 100);
-                      setAdmissionFeeRate(newRate);
-                      updateFeeRatesInDB(monthlyFeeRate, newRate);
-                    }}
-                  >
-                    -
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-small"
-                    style={{ padding: '0.25rem 0.5rem', minWidth: '30px' }}
-                    onClick={() => {
-                      const newRate = admissionFeeRate + 100;
-                      setAdmissionFeeRate(newRate);
-                      updateFeeRatesInDB(monthlyFeeRate, newRate);
-                    }}
-                  >
-                    +
-                  </button>
+            <div className="fees-rates-controls">
+              <div className="fee-rate-item">
+                <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>Admission:</span>
+                <strong style={{ fontSize: '0.95rem', color: '#FFD700', minWidth: '55px', textAlign: 'center' }}>₹{admissionFeeRate}</strong>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button type="button" className="btn-small btn-rate-step" onClick={() => {
+                    const newRate = Math.max(0, admissionFeeRate - 100);
+                    setAdmissionFeeRate(newRate);
+                    updateFeeRatesInDB(monthlyFeeRate, newRate);
+                  }}>-</button>
+                  <button type="button" className="btn-small btn-rate-step" onClick={() => {
+                    const newRate = admissionFeeRate + 100;
+                    setAdmissionFeeRate(newRate);
+                    updateFeeRatesInDB(monthlyFeeRate, newRate);
+                  }}>+</button>
                 </div>
               </div>
 
-              {/* Monthly Fee Rate Control */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255,255,255,0.02)', padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid var(--glass-border)' }}>
-                <span style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)' }}>Monthly Fee:</span>
-                <strong style={{ fontSize: '1rem', color: '#4CAF50', minWidth: '60px', textAlign: 'center' }}>₹{monthlyFeeRate}</strong>
-                <div style={{ display: 'flex', gap: '5px' }}>
-                  <button
-                    type="button"
-                    className="btn-small"
-                    style={{ padding: '0.25rem 0.5rem', minWidth: '30px' }}
-                    onClick={() => {
-                      const newRate = Math.max(0, monthlyFeeRate - 100);
-                      setMonthlyFeeRate(newRate);
-                      updateFeeRatesInDB(newRate, admissionFeeRate);
-                    }}
-                  >
-                    -
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-small"
-                    style={{ padding: '0.25rem 0.5rem', minWidth: '30px' }}
-                    onClick={() => {
-                      const newRate = monthlyFeeRate + 100;
-                      setMonthlyFeeRate(newRate);
-                      updateFeeRatesInDB(newRate, admissionFeeRate);
-                    }}
-                  >
-                    +
-                  </button>
+              <div className="fee-rate-item">
+                <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>Monthly:</span>
+                <strong style={{ fontSize: '0.95rem', color: '#4CAF50', minWidth: '55px', textAlign: 'center' }}>₹{monthlyFeeRate}</strong>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button type="button" className="btn-small btn-rate-step" onClick={() => {
+                    const newRate = Math.max(0, monthlyFeeRate - 100);
+                    setMonthlyFeeRate(newRate);
+                    updateFeeRatesInDB(newRate, admissionFeeRate);
+                  }}>-</button>
+                  <button type="button" className="btn-small btn-rate-step" onClick={() => {
+                    const newRate = monthlyFeeRate + 100;
+                    setMonthlyFeeRate(newRate);
+                    updateFeeRatesInDB(newRate, admissionFeeRate);
+                  }}>+</button>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Unified Fee Student List Panel */}
+        {/* Revenue Cards based on Payment Date */}
+        <div className="stats-grid fees-stats-grid">
+          <div className="stat-card" style={{ borderLeft: '4px solid #38bdf8' }}>
+            <div className="stat-details">
+              <h3 style={{ color: '#38bdf8', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>
+                Revenue Received in {formatMonthName(paymentMonth)}
+              </h3>
+              <p className="stat-value" style={{ color: '#fff', margin: 0 }}>₹{paymentMonthRevenue.toLocaleString()}</p>
+              <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
+                Strictly based on payment date
+              </span>
+            </div>
+          </div>
+          <div className="stat-card" style={{ borderLeft: '4px solid #4CAF50' }}>
+            <div className="stat-details">
+              <h3 style={{ color: '#4CAF50', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Monthly Fees Collected</h3>
+              <p className="stat-value" style={{ color: '#4CAF50', margin: 0 }}>₹{paymentMonthMonthly.toLocaleString()}</p>
+              <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
+                For {formatMonthName(feeMonth)}
+              </span>
+            </div>
+          </div>
+          <div className="stat-card" style={{ borderLeft: '4px solid #FFD700' }}>
+            <div className="stat-details">
+              <h3 style={{ color: '#FFD700', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Admission Fees Collected</h3>
+              <p className="stat-value" style={{ color: '#FFD700', margin: 0 }}>₹{paymentMonthAdmission.toLocaleString()}</p>
+              <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
+                Received in {formatMonthName(paymentMonth)}
+              </span>
+            </div>
+          </div>
+          <div className="stat-card" style={{ borderLeft: '4px solid #c084fc' }}>
+            <div className="stat-details">
+              <h3 style={{ color: '#c084fc', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Total Payments Received</h3>
+              <p className="stat-value" style={{ color: '#fff', margin: 0 }}>{paymentCount}</p>
+              <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
+                Receipt transactions
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Student Fee Roster Panel */}
         <div className="panel">
-          <div className="panel-header">
-            <h3 className="panel-title">Fee Details ({formatMonthName(feeMonth)})</h3>
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <span className="badge badge-green">{totalPaid} Paid Monthly</span>
-              <span className="badge badge-orange">{totalUnpaid} Pending Monthly</span>
+          <div className="panel-header" style={{ flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <h3 className="panel-title">Student Fee Status ({formatMonthName(feeMonth)})</h3>
+              <p style={{ margin: '2px 0 0 0', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                Showing students and dues for the due month: <strong>{formatMonthName(feeMonth)}</strong>
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+              <span className="badge badge-green">{totalPaid} Paid</span>
+              <span className="badge badge-orange">{totalUnpaid} Pending</span>
             </div>
           </div>
 
-          <div className="filter-row" style={{ marginBottom: (!userRole || (userRole !== 'trainer' && userRole !== 'coordinator')) ? '0.75rem' : '1.5rem', marginTop: '1.25rem', paddingBottom: '0.25rem' }}>
-            <span style={{ color: 'var(--color-text-muted)', width: '80px', fontSize: '0.85rem' }}>Time:</span>
-            <button className={`btn-small ${feeBatchFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('All')}>All</button>
-            <button className={`btn-small ${feeBatchFilter === 'Morning' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Morning')}>Morning</button>
-            <button className={`btn-small ${feeBatchFilter === 'Evening' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Evening')}>Evening</button>
-            <button className={`btn-small ${feeBatchFilter === 'Night' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Night')}>Night</button>
-          </div>
-
-
-
-          <div className="stats-grid" style={{ marginBottom: '1.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-            <div className="stat-card" style={{ borderLeft: '4px solid #E50914', padding: '1.5rem' }}>
-              <div className="stat-details">
-                <h3 style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem' }}>Monthly Fees Collected</h3>
-                <p className="stat-value" style={{ fontSize: '1.5rem', color: '#E50914' }}>₹{monthlyCollected}</p>
-              </div>
+          {/* Filter Row */}
+          <div className="fees-filters-row">
+            <div className="fees-filter-group-time">
+              <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem', marginRight: '4px' }}>Time:</span>
+              <button className={`btn-small ${feeBatchFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('All')}>All</button>
+              <button className={`btn-small ${feeBatchFilter === 'Morning' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Morning')}>Morning</button>
+              <button className={`btn-small ${feeBatchFilter === 'Evening' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Evening')}>Evening</button>
+              <button className={`btn-small ${feeBatchFilter === 'Night' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Night')}>Night</button>
             </div>
-            <div className="stat-card" style={{ borderLeft: '4px solid #FFD700', padding: '1.5rem' }}>
-              <div className="stat-details">
-                <h3 style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem' }}>Admission Fees Collected</h3>
-                <p className="stat-value" style={{ fontSize: '1.5rem', color: '#FFD700' }}>₹{admissionCollected}</p>
+
+            <div className="fees-filter-dropdowns">
+              <div className="fees-filter-select-wrapper">
+                <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>Status:</span>
+                <select className="form-control" value={feeStatusFilter} onChange={e => setFeeStatusFilter(e.target.value)}>
+                  <option value="All">All Status</option>
+                  <option value="Paid">Paid</option>
+                  <option value="Partial">Partial</option>
+                  <option value="Pending">Pending</option>
+                </select>
               </div>
-            </div>
-            <div className="stat-card" style={{ borderLeft: '4px solid #4CAF50', padding: '1.5rem' }}>
-              <div className="stat-details">
-                <h3 style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem' }}>Total Collected</h3>
-                <p className="stat-value" style={{ fontSize: '1.5rem', color: '#4CAF50' }}>₹{totalCollected}</p>
+
+              <div className="fees-filter-select-wrapper">
+                <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>Method:</span>
+                <select className="form-control" value={feeMethodFilter} onChange={e => setFeeMethodFilter(e.target.value)}>
+                  <option value="All">All Methods</option>
+                  <option value="Cash">Cash</option>
+                  <option value="UPI">UPI</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Card">Card</option>
+                </select>
               </div>
             </div>
           </div>
@@ -8757,16 +9163,18 @@ function App() {
                     <th>Student</th>
                     {isAdminUser(loggedInUser) && <th>Branch</th>}
                     <th>Batch Time</th>
-                    <th style={{ textAlign: 'center' }}>Admission (₹{admissionFeeRate})</th>
-                    <th style={{ textAlign: 'center' }}>Monthly ({formatMonthName(feeMonth)})</th>
-                    <th style={{ textAlign: 'center' }}>Monthly Coupon</th>
-                    <th style={{ textAlign: 'center' }}>Fee Details</th>
-                    <th style={{ textAlign: 'center' }}>Outstanding Dues</th>
+                    <th style={{ textAlign: 'center' }}>Monthly Due</th>
+                    <th style={{ textAlign: 'center' }}>Payment Status</th>
+                    <th style={{ textAlign: 'center' }}>Payment Date / Receipt</th>
+                    <th style={{ textAlign: 'center' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredFeeStudents.map(student => {
                     const feeDetails = calculateStudentFees(student, feeMonth);
+                    const pRec = feePaymentsList.find(p => p.studentId === student.id && p.feeMonth === feeMonth && p.feeType === 'monthly');
+                    const paid = isPaid(student);
+
                     return (
                       <tr key={student.id}>
                         <td data-label="Student">
@@ -8795,23 +9203,10 @@ function App() {
                                   activeMsg = `Active for ${formatMonthName(feeMonth)}: ${couponForMonth.couponCode} (${display} Off)`;
                                 }
                                 setCouponMessage(activeMsg);
-
-                                let activeAdmMsg = '';
-                                if (student.appliedAdmissionCoupon) {
-                                  const resolved = resolveCouponCode(student.appliedAdmissionCoupon);
-                                  if (resolved) {
-                                    const display = resolved.type === 'amount' ? `₹${resolved.value}` : `${resolved.value}%`;
-                                    activeAdmMsg = `Active: ${student.appliedAdmissionCoupon} (${display} Off)`;
-                                  }
-                                }
-                                setAdmissionCouponMessage(activeAdmMsg);
                                 setIsFeeEditModalOpen(true);
                               }}
-                              className="btn-icon"
-                              style={{ padding: '2px', background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)', transition: 'color 0.15s ease' }}
-                              onMouseEnter={(e) => e.currentTarget.style.color = '#FFD700'}
-                              onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255,255,255,0.4)'}
-                              title="Customize Fees & Coupon"
+                              className="btn-icon btn-fee-student-settings"
+                              title="Customize Rates & Coupon"
                             >
                               <Settings size={13} />
                             </button>
@@ -8822,170 +9217,92 @@ function App() {
                             <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{student.branch}</span>
                           </td>
                         )}
-                        <td data-label="Batch Time"><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>{getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}</span></td>
-                        <td data-label="Admission" style={{ textAlign: 'center' }}>
-                          <select
-                            value={student.admissionPaid ? "paid" : "pending"}
-                            onChange={(e) => {
-                              if (e.target.value === 'paid') {
-                                markFeePaid(student.id, 'admissionPaid');
-                              } else {
-                                unmarkFeePaid(student.id, 'admissionPaid');
-                              }
-                            }}
-                            className="form-control"
-                            style={{
-                              padding: '0.3rem 0.6rem',
-                              fontSize: '0.8rem',
-                              width: '95px',
-                              background: student.admissionPaid ? 'rgba(76, 175, 80, 0.12)' : 'rgba(229, 9, 20, 0.12)',
-                              color: student.admissionPaid ? '#51CF66' : '#FF6B6B',
-                              border: `1px solid ${student.admissionPaid ? 'rgba(76, 175, 80, 0.3)' : 'rgba(229, 9, 20, 0.3)'}`,
-                              borderRadius: '20px',
-                              cursor: 'pointer',
-                              fontWeight: 600,
-                              textAlign: 'center',
-                              outline: 'none'
-                            }}
-                          >
-                            <option value="paid" style={{ background: '#181818', color: '#51CF66' }}>Paid</option>
-                            <option value="pending" style={{ background: '#181818', color: '#FF6B6B' }}>Pending</option>
-                          </select>
+                        <td data-label="Batch Time">
+                          <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>
+                            {getBatchNameFromSchedule(student.schedule, student.branch)} • {student.schedule}
+                          </span>
                         </td>
-                        <td data-label="Monthly Fee" style={{ textAlign: 'center' }}>
-                          <select
-                            value={isPaid(student) ? "paid" : "pending"}
-                            onChange={(e) => {
-                              if (e.target.value === 'paid') {
-                                markFeePaid(student.id, 'currentMonthPaid');
-                              } else {
-                                unmarkFeePaid(student.id, 'currentMonthPaid');
-                              }
-                            }}
-                            className="form-control"
-                            style={{
-                              padding: '0.3rem 0.6rem',
-                              fontSize: '0.8rem',
-                              width: '95px',
-                              background: isPaid(student) ? 'rgba(76, 175, 80, 0.12)' : 'rgba(229, 9, 20, 0.12)',
-                              color: isPaid(student) ? '#51CF66' : '#FF6B6B',
-                              border: `1px solid ${isPaid(student) ? 'rgba(76, 175, 80, 0.3)' : 'rgba(229, 9, 20, 0.3)'}`,
-                              borderRadius: '20px',
-                              cursor: 'pointer',
-                              fontWeight: 600,
-                              textAlign: 'center',
-                              outline: 'none'
-                            }}
-                          >
-                            <option value="paid" style={{ background: '#181818', color: '#51CF66' }}>Paid</option>
-                            <option value="pending" style={{ background: '#181818', color: '#FF6B6B' }}>Pending</option>
-                          </select>
+                        <td data-label="Monthly Due" style={{ textAlign: 'center' }}>
+                          <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.9rem' }}>
+                            ₹{(() => {
+                              const rateToUse = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null ? student.customMonthlyRate : monthlyFeeRate;
+                              const discountAmount = getStudentDiscountForMonth(student, rateToUse, feeMonth);
+                              return Math.max(0, rateToUse - discountAmount);
+                            })()}
+                          </span>
                         </td>
-                        <td data-label="Monthly Coupon" style={{ textAlign: 'center' }}>
-                          {(() => {
-                            const couponForMonth = getAppliedCouponForMonth(student, feeMonth);
-                            const couponCodeForMonth = couponForMonth ? couponForMonth.couponCode : '';
-                            return (
-                              <input
-                                type="text"
-                                defaultValue={couponCodeForMonth}
-                                key={student.id + '_mly_' + feeMonth + '_' + couponCodeForMonth}
-                                placeholder="Code"
-                                className="form-control"
-                                style={{
-                                  padding: '0.3rem 0.6rem',
-                                  fontSize: '0.8rem',
-                                  width: '90px',
-                                  textAlign: 'center',
-                                  background: 'rgba(255,255,255,0.02)',
-                                  border: '1px solid rgba(255,255,255,0.1)',
-                                  borderRadius: '20px',
-                                  color: 'white',
-                                  outline: 'none'
-                                }}
-                                onBlur={(e) => {
-                                  if (e.target.value !== couponCodeForMonth) {
-                                    handleCouponBlurForMonth(student, feeMonth, e.target.value);
-                                  }
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.target.blur();
-                                  }
-                                }}
-                              />
-                            );
-                          })()}
+                        <td data-label="Payment Status" style={{ textAlign: 'center' }}>
+                          {pRec && pRec.status === 'Partial' ? (
+                            <span className="badge badge-orange" style={{ padding: '4px 10px', fontSize: '0.8rem' }}>
+                              Partial (Paid: ₹{pRec.amountPaid})
+                            </span>
+                          ) : (paid || (pRec && pRec.status === 'Paid') ? (
+                            <span className="badge badge-green" style={{ padding: '4px 10px', fontSize: '0.8rem' }}>
+                              Paid ✓
+                            </span>
+                          ) : (
+                            <span className="badge badge-red" style={{ padding: '4px 10px', fontSize: '0.8rem' }}>
+                              Pending
+                            </span>
+                          ))}
                         </td>
-                        <td data-label="Fee Details" style={{ textAlign: 'center' }}>
-                          <div style={{ display: 'inline-block' }}>
-                            {feeDetails.unpaidMonths.length === 0 && feeDetails.paidMonthsList.length === 0 ? (
-                              <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>No record</span>
+                        <td data-label="Payment Date / Receipt" style={{ textAlign: 'center' }}>
+                          {pRec ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+                              <span style={{ fontSize: '0.78rem', color: '#38bdf8', fontWeight: 600 }}>
+                                📅 {pRec.paymentDate}
+                              </span>
+                              <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+                                Mode: {pRec.paymentMethod || 'Cash'}
+                              </span>
+                              {pRec.receiptNumber && (
+                                <button
+                                  className="btn-small btn-receipt-badge"
+                                  onClick={() => {
+                                    setActiveReceipt(pRec);
+                                    setIsReceiptModalOpen(true);
+                                  }}
+                                >
+                                  Receipt #{pRec.receiptNumber.slice(-5)}
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            paid ? (
+                              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Recorded</span>
+                            ) : (
+                              <span style={{ fontSize: '0.75rem', color: '#ff6b6b' }}>Not Paid</span>
+                            )
+                          )}
+                        </td>
+                        <td data-label="Actions" style={{ textAlign: 'center' }}>
+                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                            {paid ? (
+                              <button
+                                className="btn-secondary btn-card-action"
+                                style={{ color: '#ff6b6b', borderColor: 'rgba(255,107,107,0.3)', background: 'rgba(255,107,107,0.06)' }}
+                                onClick={() => unmarkFeePaidCustomMonth(student.id, feeMonth)}
+                              >
+                                Mark Unpaid
+                              </button>
                             ) : (
                               <button
-                                className="btn-small"
-                                style={{
-                                  padding: '0.35rem 0.75rem',
-                                  fontSize: '0.8rem',
-                                  background: feeDetails.unpaidMonths.length > 0 ? 'rgba(229, 9, 20, 0.12)' : 'rgba(76, 175, 80, 0.12)',
-                                  color: feeDetails.unpaidMonths.length > 0 ? '#FF6B6B' : '#51CF66',
-                                  border: `1px solid ${feeDetails.unpaidMonths.length > 0 ? 'rgba(229, 9, 20, 0.3)' : 'rgba(76, 175, 80, 0.3)'}`,
-                                  borderRadius: '20px',
-                                  cursor: 'pointer',
-                                  fontWeight: 600,
-                                  transition: 'all 0.15s ease'
-                                }}
-                                onClick={() => {
-                                  setFeeDetailsStudentId(student.id);
-                                  setCurrentView('student-fees');
-                                }}
+                                className="btn-primary btn-card-action"
+                                style={{ background: '#4CAF50', borderColor: '#4CAF50' }}
+                                onClick={() => openRecordPaymentModal(student, feeMonth, 'monthly')}
                               >
-                                {feeDetails.unpaidMonths.length > 0
-                                  ? `Pending (${feeDetails.unpaidMonths.length}m)`
-                                  : 'All Paid ✓'}
+                                + Pay / Record
                               </button>
                             )}
-                          </div>
-                        </td>
-                        <td data-label="Outstanding Dues" style={{ textAlign: 'center' }}>
-                          <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
-                            {feeDetails.totalDue > 0 ? (
-                              <>
-                                <span style={{
-                                  fontWeight: 600,
-                                  color: '#FF6B6B',
-                                  fontSize: '0.85rem',
-                                  background: 'rgba(229, 9, 20, 0.12)',
-                                  padding: '3px 9px',
-                                  borderRadius: '20px',
-                                  border: '1px solid rgba(229, 9, 20, 0.25)',
-                                  display: 'inline-block'
-                                }}>
-                                  ₹{feeDetails.totalDue}
-                                </span>
-                                <span style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                                  Adm: ₹{feeDetails.admissionDue} | Mly: ₹{feeDetails.monthlyDue}
-                                </span>
-                              </>
-                            ) : (
-                              <>
-                                <span style={{
-                                  fontWeight: 600,
-                                  color: '#51CF66',
-                                  fontSize: '0.85rem',
-                                  background: 'rgba(76, 175, 80, 0.12)',
-                                  padding: '3px 9px',
-                                  borderRadius: '20px',
-                                  border: '1px solid rgba(76, 175, 80, 0.25)',
-                                  display: 'inline-block'
-                                }}>
-                                  ₹0
-                                </span>
-                                <span style={{ fontSize: '0.68rem', color: 'rgba(76, 175, 80, 0.7)', marginTop: '4px' }}>
-                                  Settled
-                                </span>
-                              </>
-                            )}
+                            <button
+                              className="btn-secondary btn-card-action"
+                              onClick={() => {
+                                setFeeDetailsStudentId(student.id);
+                                setCurrentView('student-fees');
+                              }}
+                            >
+                              History
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -9020,10 +9337,10 @@ function App() {
 
       while (tempYear < currYear || (tempYear === currYear && tempMonth <= currMonth)) {
         const monthStr = `${tempYear}-${String(tempMonth).padStart(2, '0')}`;
-        const isPaid = student.paidMonths && student.paidMonths[monthStr];
+        const rawPaid = student.paidMonths && (student.paidMonths instanceof Map ? student.paidMonths.get(monthStr) : student.paidMonths[monthStr]);
         list.push({
           monthStr,
-          isPaid: !!isPaid
+          isPaid: !!rawPaid
         });
 
         tempMonth++;
@@ -9048,8 +9365,11 @@ function App() {
     }
 
     const months = getMonthsList(student);
-    const unpaidCount = months.filter(m => !m.isPaid).length;
-    const paidCount = months.filter(m => m.isPaid).length;
+    const unpaidCount = months.filter(m => {
+      const pRec = feePaymentsList.find(p => p.studentId === student.id && p.feeMonth === m.monthStr && p.feeType === 'monthly');
+      return !(m.isPaid || (pRec && pRec.status === 'Paid'));
+    }).length;
+    const paidCount = months.length - unpaidCount;
 
     const rateToUse = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
       ? student.customMonthlyRate
@@ -9109,24 +9429,10 @@ function App() {
                 Click any button below to toggle the payment status. Changes are saved immediately.
               </p>
             </div>
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <div className="student-fees-header-actions" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               {unpaidCount > 0 && (
                 <button
-                  className="btn-primary"
-                  style={{
-                    padding: '0.45rem 1rem',
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                    borderRadius: '20px',
-                    background: '#4CAF50',
-                    borderColor: '#4CAF50',
-                    color: 'white',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    boxShadow: '0 4px 12px rgba(76, 175, 80, 0.2)'
-                  }}
+                  className="btn-primary btn-bulk-paid"
                   onClick={() => {
                     if (window.confirm(`Are you sure you want to mark all ${unpaidCount} pending months as paid?`)) {
                       markAllFeesPaid(student.id);
@@ -9138,21 +9444,7 @@ function App() {
               )}
               {paidCount > 0 && (
                 <button
-                  className="btn-secondary"
-                  style={{
-                    padding: '0.45rem 1rem',
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                    borderRadius: '20px',
-                    background: 'rgba(229, 9, 20, 0.15)',
-                    borderColor: 'rgba(229, 9, 20, 0.3)',
-                    color: '#FF6B6B',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    boxShadow: '0 4px 12px rgba(229, 9, 20, 0.1)'
-                  }}
+                  className="btn-secondary btn-bulk-unpaid"
                   onClick={() => {
                     if (window.confirm(`Are you sure you want to mark all ${paidCount} paid months as unpaid?`)) {
                       markAllFeesUnpaid(student.id);
@@ -9170,18 +9462,18 @@ function App() {
               No month history found (Check student join date).
             </div>
           ) : (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-              gap: '1.25rem'
-            }}>
+            <div className="student-fees-grid">
               {months.map(({ monthStr, isPaid }) => {
+                const pRec = feePaymentsList.find(p => p.studentId === student.id && p.feeMonth === monthStr && p.feeType === 'monthly');
+                const monthIsPaid = Boolean(isPaid || (pRec && pRec.status === 'Paid'));
+                const isPartial = !monthIsPaid && pRec && pRec.status === 'Partial';
+
                 return (
                   <div
                     key={monthStr}
                     style={{
-                      background: isPaid ? 'rgba(76, 175, 80, 0.04)' : 'rgba(229, 9, 20, 0.04)',
-                      border: `1px solid ${isPaid ? 'rgba(76, 175, 80, 0.2)' : 'rgba(229, 9, 20, 0.2)'}`,
+                      background: monthIsPaid ? 'rgba(76, 175, 80, 0.04)' : 'rgba(229, 9, 20, 0.04)',
+                      border: `1px solid ${monthIsPaid ? 'rgba(76, 175, 80, 0.2)' : 'rgba(229, 9, 20, 0.2)'}`,
                       borderRadius: '12px',
                       padding: '1.2rem',
                       display: 'flex',
@@ -9189,7 +9481,7 @@ function App() {
                       alignItems: 'center',
                       gap: '12px',
                       transition: 'all 0.2s ease',
-                      boxShadow: isPaid ? 'none' : '0 4px 12px rgba(229, 9, 20, 0.05)'
+                      boxShadow: monthIsPaid ? 'none' : '0 4px 12px rgba(229, 9, 20, 0.05)'
                     }}
                   >
                     <div style={{ fontSize: '1rem', fontWeight: 600, color: 'white' }}>
@@ -9209,37 +9501,59 @@ function App() {
                       );
                     })()}
                     <div>
-                      {isPaid ? (
+                      {monthIsPaid ? (
                         <span className="badge badge-green" style={{ fontSize: '0.8rem', padding: '3px 10px', borderRadius: '20px' }}>Paid ✓</span>
+                      ) : isPartial ? (
+                        <span className="badge badge-orange" style={{ fontSize: '0.8rem', padding: '3px 10px', borderRadius: '20px' }}>Partial (₹{pRec.amountPaid})</span>
                       ) : (
                         <span className="badge badge-red" style={{ fontSize: '0.8rem', padding: '3px 10px', borderRadius: '20px' }}>Pending</span>
                       )}
                     </div>
-                    <button
-                      onClick={() => {
-                        if (isPaid) {
-                          unmarkFeePaidCustomMonth(student.id, monthStr);
-                        } else {
-                          markFeePaidCustomMonth(student.id, monthStr);
-                        }
-                      }}
-                      className="btn-small"
-                      style={{
-                        width: '100%',
-                        padding: '0.4rem 0.5rem',
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        borderRadius: '8px',
-                        background: isPaid ? 'rgba(255,255,255,0.05)' : '#4CAF50',
-                        color: isPaid ? '#FF8787' : 'white',
-                        border: isPaid ? '1px solid rgba(255,255,255,0.1)' : '1px solid #4CAF50',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                        textAlign: 'center'
-                      }}
-                    >
-                      {isPaid ? 'Mark Unpaid' : 'Mark Paid'}
-                    </button>
+                    {pRec && (
+                      <div style={{ fontSize: '0.72rem', color: '#38bdf8', textAlign: 'center' }}>
+                        <div>📅 Paid: <strong>{pRec.paymentDate}</strong></div>
+                        <div style={{ color: 'var(--color-text-muted)', fontSize: '0.68rem' }}>Mode: {pRec.paymentMethod || 'Cash'}</div>
+                        {pRec.receiptNumber && (
+                          <button
+                            type="button"
+                            className="btn-small btn-receipt-badge"
+                            onClick={() => {
+                              setActiveReceipt(pRec);
+                              setIsReceiptModalOpen(true);
+                            }}
+                          >
+                            Receipt #{pRec.receiptNumber.slice(-5)}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: '6px', width: '100%' }}>
+                      <button
+                        onClick={() => {
+                          if (monthIsPaid) {
+                            unmarkFeePaidCustomMonth(student.id, monthStr);
+                          } else {
+                            openRecordPaymentModal(student, monthStr, 'monthly');
+                          }
+                        }}
+                        className="btn-small card-month-action-btn"
+                        style={{
+                          width: '100%',
+                          padding: '0.4rem 0.5rem',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          borderRadius: '8px',
+                          background: monthIsPaid ? 'rgba(255,255,255,0.05)' : '#4CAF50',
+                          color: monthIsPaid ? '#FF8787' : 'white',
+                          border: monthIsPaid ? '1px solid rgba(255,255,255,0.1)' : '1px solid #4CAF50',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          textAlign: 'center'
+                        }}
+                      >
+                        {monthIsPaid ? 'Mark Unpaid' : '+ Record Pay'}
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -9314,7 +9628,7 @@ function App() {
             const batchNameMatch = allowedTrainerBatches.some(b => {
               const opt = safeBatchOptions.find(o => o && (o.id || o.code || '').toLowerCase() === b);
               return (opt && opt.name && opt.name.toLowerCase().trim() === studentBatchLower) ||
-                     (opt && schedulesMatch(opt.schedule, student.schedule));
+                (opt && schedulesMatch(opt.schedule, student.schedule));
             });
             if (!batchNameMatch) return false;
           }
@@ -9347,7 +9661,7 @@ function App() {
           const opt = safeBatchOptions.find(o => o && (o.id || o.code || '').toLowerCase() === filterBatchLower);
           if (opt) {
             matchesBatch = (opt.name && opt.name.toLowerCase().trim() === studentBatchLower) ||
-                           schedulesMatch(opt.schedule, student.schedule);
+              schedulesMatch(opt.schedule, student.schedule);
           }
         }
       }
@@ -9380,7 +9694,15 @@ function App() {
     });
   };
 
-  const handleToggleTrainerApproval = (student, approvedStatus) => {
+  const openTrainerApprovalModal = (student) => {
+    setSelectedTrainerApprovalStudent(student);
+    const naturalNext = student.nextBelt && student.nextBelt !== 'None' ? student.nextBelt : getNextBelt(student.belt);
+    setTrainerSuggestedBeltInput(student.trainerSuggestedBelt || (naturalNext !== 'None' ? naturalNext : (student.belt || 'Yellow Belt')));
+    setTrainerGradingNotesInput(student.trainerGradingNotes || '');
+    setIsTrainerApprovalModalOpen(true);
+  };
+
+  const handleToggleTrainerApproval = (student, approvedStatus, suggestedBelt = '', notes = '') => {
     setGradingError('');
     setGradingSuccess('');
 
@@ -9389,7 +9711,9 @@ function App() {
     // Instant optimistic update (0ms UI lag)
     const optimisticUpdate = {
       trainerApprovedForGrading: approvedStatus,
-      trainerApprovedAt: approvedStatus ? new Date().toISOString() : ''
+      trainerApprovedAt: approvedStatus ? new Date().toISOString() : '',
+      trainerSuggestedBelt: approvedStatus ? suggestedBelt : '',
+      trainerGradingNotes: approvedStatus ? notes : ''
     };
     setGradingStudents(prev => prev.map(s => (String(s.id || s._id) === targetId) ? { ...s, ...optimisticUpdate } : s));
     setStudents(prev => prev.map(s => (String(s.id || s._id) === targetId) ? { ...s, ...optimisticUpdate } : s));
@@ -9397,7 +9721,11 @@ function App() {
     fetch(`${API_BASE_URL}/students/${encodeURIComponent(targetId)}/trainer-approval`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ approved: approvedStatus })
+      body: JSON.stringify({
+        approved: approvedStatus,
+        suggestedBelt: approvedStatus ? suggestedBelt : '',
+        notes: approvedStatus ? notes : ''
+      })
     })
       .then(async res => {
         const data = await res.json();
@@ -9405,7 +9733,10 @@ function App() {
         const resId = String(data.id || data._id || targetId);
         setGradingStudents(prev => prev.map(s => (String(s.id || s._id) === resId) ? { ...s, ...data } : s));
         setStudents(prev => prev.map(s => (String(s.id || s._id) === resId) ? { ...s, ...data } : s));
-        setGradingSuccess(`Updated trainer approval status for ${data.name}.`);
+        setGradingSuccess(approvedStatus
+          ? `Approved test for ${data.name}${suggestedBelt ? ` (Suggested: ${suggestedBelt})` : ''}.`
+          : `Revoked test approval for ${data.name}.`
+        );
         setTimeout(() => setGradingSuccess(''), 3500);
       })
       .catch(err => {
@@ -9928,583 +10259,655 @@ function App() {
       const isBranchAdm = userRole === 'branchadmin';
       const filtered = getFilteredGradingStudents();
 
-    // Stats calculations
-    const totalCount = filtered.length;
-    const eligibleCount = filtered.filter(s => s.eligibilityStatus === 'Eligible').length;
-    const passedCount = filtered.filter(s => s.lastGradingResult === 'Pass').length;
-    const failedCount = filtered.filter(s => s.lastGradingResult === 'Fail').length;
+      // Stats calculations
+      const totalCount = filtered.length;
+      const eligibleCount = filtered.filter(s => s.eligibilityStatus === 'Eligible').length;
+      const passedCount = filtered.filter(s => s.lastGradingResult === 'Pass').length;
+      const failedCount = filtered.filter(s => s.lastGradingResult === 'Fail').length;
 
-    const beltCounts = {
-      White: 0,
-      Yellow: 0,
-      Orange: 0,
-      Green: 0,
-      Blue: 0,
-      Purple: 0,
-      Red: 0,
-      Brown: 0,
-      'Brown 1': 0,
-      'Brown 2': 0,
-      'Brown 3': 0,
-      'Brown 4': 0,
-      Black: 0
-    };
-    filtered.forEach(s => {
-      const b = (s.belt || 'White').trim();
-      const clean = b.replace(/\s*belt$/i, '').trim();
-      const matchedKey = Object.keys(beltCounts).find(k => k.toLowerCase() === b.toLowerCase() || k.toLowerCase() === clean.toLowerCase());
-      if (matchedKey) {
-        beltCounts[matchedKey]++;
-      }
-    });
+      const beltCounts = {
+        White: 0,
+        Yellow: 0,
+        Orange: 0,
+        Green: 0,
+        Blue: 0,
+        Purple: 0,
+        Red: 0,
+        Brown: 0,
+        'Brown 1': 0,
+        'Brown 2': 0,
+        'Brown 3': 0,
+        'Brown 4': 0,
+        Black: 0
+      };
+      filtered.forEach(s => {
+        const b = (s.belt || 'White').trim();
+        const clean = b.replace(/\s*belt$/i, '').trim();
+        const matchedKey = Object.keys(beltCounts).find(k => k.toLowerCase() === b.toLowerCase() || k.toLowerCase() === clean.toLowerCase());
+        if (matchedKey) {
+          beltCounts[matchedKey]++;
+        }
+      });
 
-    const batchListOptions = getGradingBatchOptions();
+      const batchListOptions = getGradingBatchOptions();
 
-    return (
-      <div className="grading-view-container">
-        {gradingError && <div style={{ color: '#E50914', background: 'rgba(229, 9, 20, 0.1)', padding: '0.85rem 1.25rem', borderRadius: '10px', border: '1px solid rgba(229, 9, 20, 0.3)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '8px' }}><AlertTriangle size={18} /> {gradingError}</div>}
-        {gradingSuccess && <div style={{ color: '#4CAF50', background: 'rgba(76, 175, 80, 0.1)', padding: '0.85rem 1.25rem', borderRadius: '10px', border: '1px solid rgba(76, 175, 80, 0.3)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '8px' }}><CheckCircle size={18} /> {gradingSuccess}</div>}
+      return (
+        <div className="grading-view-container">
+          {gradingError && <div style={{ color: '#E50914', background: 'rgba(229, 9, 20, 0.1)', padding: '0.85rem 1.25rem', borderRadius: '10px', border: '1px solid rgba(229, 9, 20, 0.3)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '8px' }}><AlertTriangle size={18} /> {gradingError}</div>}
+          {gradingSuccess && <div style={{ color: '#4CAF50', background: 'rgba(76, 175, 80, 0.1)', padding: '0.85rem 1.25rem', borderRadius: '10px', border: '1px solid rgba(76, 175, 80, 0.3)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '8px' }}><CheckCircle size={18} /> {gradingSuccess}</div>}
 
-        {/* Clean Compact Top Action Bar */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.25rem' }}>
-          <div>
-            {isTrainer && (
-              <span className="grading-scope-pill trainer">
-                <Activity size={13} /> {userBranch} • {userBatch ? getBatchNameFromCode(userBatch, userBranch) : 'Assigned Batch'}
-              </span>
-            )}
-            {isBranchAdm && (
-              <span className="grading-scope-pill branchadmin">
-                <MapPin size={13} /> Branch: {userBranch}
-              </span>
-            )}
-            {isSuper && (
-              <span className="grading-scope-pill admin">
-                <Shield size={13} /> Super Admin View
-              </span>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <button
-              className="btn-secondary"
-              onClick={fetchGradingStudents}
-              disabled={loadingGrading}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '0.45rem 0.95rem', fontSize: '0.8rem', borderRadius: '8px' }}
-            >
-              <History size={14} className={loadingGrading ? 'spin-icon' : ''} />
-              {loadingGrading ? 'Refreshing...' : 'Refresh'}
-            </button>
-          </div>
-        </div>
-
-        {/* Dashboard Stats Cards */}
-        <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.85rem' }}>
-          <div className="stat-card glow-card-blue" style={{ background: 'linear-gradient(145deg, rgba(20, 24, 38, 0.7) 0%, rgba(15, 17, 26, 0.8) 100%)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(56, 189, 248, 0.12)', width: '38px', height: '38px', borderRadius: '8px' }}>
-              <Users className="stat-icon" style={{ color: '#38bdf8' }} size={18} />
+          {/* Clean Compact Top Action Bar */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.25rem' }}>
+            <div>
+              {isTrainer && (
+                <span className="grading-scope-pill trainer">
+                  <Activity size={13} /> {userBranch} • {userBatch ? getBatchNameFromCode(userBatch, userBranch) : 'Assigned Batch'}
+                </span>
+              )}
+              {isBranchAdm && (
+                <span className="grading-scope-pill branchadmin">
+                  <MapPin size={13} /> Branch: {userBranch}
+                </span>
+              )}
+              {isSuper && (
+                <span className="grading-scope-pill admin">
+                  <Shield size={13} /> Super Admin View
+                </span>
+              )}
             </div>
-            <div className="stat-details">
-              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.72rem', fontWeight: 600 }}>Total Students</h3>
-              <p className="stat-value" style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem', color: '#fff' }}>{totalCount}</p>
+
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button
+                className="btn-secondary"
+                onClick={fetchGradingStudents}
+                disabled={loadingGrading}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '0.45rem 0.95rem', fontSize: '0.8rem', borderRadius: '8px' }}
+              >
+                <History size={14} className={loadingGrading ? 'spin-icon' : ''} />
+                {loadingGrading ? 'Refreshing...' : 'Refresh'}
+              </button>
             </div>
           </div>
 
-          <div className="stat-card glow-card-green" style={{ background: 'linear-gradient(145deg, rgba(16, 32, 24, 0.7) 0%, rgba(12, 22, 18, 0.8) 100%)', border: '1px solid rgba(34, 197, 94, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(34, 197, 94, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
-              <CheckCircle className="stat-icon" style={{ color: '#4ade80' }} size={18} />
-            </div>
-            <div className="stat-details">
-              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#86efac', fontSize: '0.72rem', fontWeight: 600 }}>Ready for Test</h3>
-              <p className="stat-value" style={{ color: '#4ade80', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{eligibleCount}</p>
-            </div>
-          </div>
-
-          <div className="stat-card glow-card-blue" style={{ background: 'linear-gradient(145deg, rgba(18, 28, 45, 0.7) 0%, rgba(13, 19, 32, 0.8) 100%)', border: '1px solid rgba(59, 130, 246, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(59, 130, 246, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
-              <Award className="stat-icon" style={{ color: '#60a5fa' }} size={18} />
-            </div>
-            <div className="stat-details">
-              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#93c5fd', fontSize: '0.72rem', fontWeight: 600 }}>Passed</h3>
-              <p className="stat-value" style={{ color: '#60a5fa', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{passedCount}</p>
-            </div>
-          </div>
-
-          <div className="stat-card glow-card-red" style={{ background: 'linear-gradient(145deg, rgba(38, 16, 20, 0.7) 0%, rgba(24, 12, 14, 0.8) 100%)', border: '1px solid rgba(244, 63, 94, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
-            <div className="stat-icon-wrapper" style={{ background: 'rgba(244, 63, 94, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
-              <XCircle className="stat-icon" style={{ color: '#fb7185' }} size={18} />
-            </div>
-            <div className="stat-details">
-              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#fda4af', fontSize: '0.72rem', fontWeight: 600 }}>Failed / Retest</h3>
-              <p className="stat-value" style={{ color: '#fb7185', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{failedCount}</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Belt Distribution Bar */}
-        <div className="belt-distribution-strip" style={{ padding: '0.75rem 1rem' }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, marginRight: '6px', whiteSpace: 'nowrap', flexShrink: 0, display: 'inline-block' }}>
-            Belts:
-          </span>
-          {/* Desktop/Tablet Horizontal Button List */}
-          <div className="belt-pill-list-desktop">
-            {Object.entries(beltCounts).map(([beltName, count]) => {
-              const isSelected = gradingFilterBelt === beltName;
-              return (
-                <button
-                  key={beltName}
-                  type="button"
-                  className={`belt-pill-btn ${isSelected ? 'active' : ''}`}
-                  onClick={() => setGradingFilterBelt(isSelected ? 'All' : beltName)}
-                  title={`Filter by ${beltName} belt`}
-                  style={{ padding: '0.25rem 0.65rem' }}
-                >
-                  <span className={`badge ${getBeltColorClass(beltName)}`} style={{ padding: '2px 6px', fontSize: '0.7rem', borderRadius: '4px', textTransform: 'uppercase' }}>
-                    {beltName}
-                  </span>
-                  <span className="belt-count" style={{ fontSize: '0.7rem' }}>{count}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Mobile Select Dropdown (No Side-Scrolling) */}
-          <div className="belt-select-mobile-wrapper">
-            <select
-              className="form-control belt-select-mobile"
-              value={gradingFilterBelt}
-              onChange={(e) => setGradingFilterBelt(e.target.value)}
-            >
-              <option value="All">All Belts ({totalCount})</option>
-              {Object.entries(beltCounts).map(([beltName, count]) => (
-                <option key={beltName} value={beltName}>
-                  {beltName} Belt ({count})
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Streamlined Clean Filters Panel */}
-        <div className="filters-wrapper-card" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
-          {/* Quick Filter Chips */}
-          <div className="grading-quick-chips" style={{ marginBottom: '0.85rem', paddingBottom: '0.65rem' }}>
-            <button
-              type="button"
-              className={`quick-chip ${gradingFilterEligibility === 'All' && gradingFilterBelt === 'All' ? 'active' : ''}`}
-              onClick={() => {
-                setGradingFilterEligibility('All');
-                setGradingFilterBelt('All');
-              }}
-            >
-              All ({totalCount})
-            </button>
-            <button
-              type="button"
-              className={`quick-chip ${gradingFilterEligibility === 'Eligible' ? 'active-eligible' : ''}`}
-              onClick={() => setGradingFilterEligibility(gradingFilterEligibility === 'Eligible' ? 'All' : 'Eligible')}
-            >
-              ⚡ Ready for Test ({eligibleCount})
-            </button>
-            <button
-              type="button"
-              className={`quick-chip ${gradingFilterEligibility === 'Not Eligible' ? 'active-fail' : ''}`}
-              onClick={() => setGradingFilterEligibility(gradingFilterEligibility === 'Not Eligible' ? 'All' : 'Not Eligible')}
-            >
-              Not Ready ({totalCount - eligibleCount})
-            </button>
-          </div>
-
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-            {/* Search Input */}
-            <div style={{ position: 'relative', minWidth: '220px', flex: '1 1 240px' }}>
-              <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
-              <input
-                type="text"
-                placeholder="Search student..."
-                className="form-control"
-                style={{ paddingLeft: '36px', height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-
-            {/* Branch (Superadmin only) */}
-            {isSuper && (
-              <div style={{ minWidth: '140px', flex: '1 1 140px' }}>
-                <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }} value={gradingFilterBranch} onChange={(e) => setGradingFilterBranch(e.target.value)}>
-                  <option value="All">All Branches</option>
-                  {branches.map(b => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                </select>
+          {/* Dashboard Stats Cards */}
+          <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.85rem' }}>
+            <div className="stat-card glow-card-blue" style={{ background: 'linear-gradient(145deg, rgba(20, 24, 38, 0.7) 0%, rgba(15, 17, 26, 0.8) 100%)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+              <div className="stat-icon-wrapper" style={{ background: 'rgba(56, 189, 248, 0.12)', width: '38px', height: '38px', borderRadius: '8px' }}>
+                <Users className="stat-icon" style={{ color: '#38bdf8' }} size={18} />
               </div>
-            )}
+              <div className="stat-details">
+                <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.72rem', fontWeight: 600 }}>Total Students</h3>
+                <p className="stat-value" style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem', color: '#fff' }}>{totalCount}</p>
+              </div>
+            </div>
 
-            {/* Batch Filter */}
-            <div style={{ minWidth: '140px', flex: '1 1 140px' }}>
-              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }} value={gradingFilterBatch} onChange={(e) => setGradingFilterBatch(e.target.value)}>
-                <option value="All">{isTrainer ? 'All My Batches' : 'All Batches'}</option>
-                {batchListOptions.map(opt => (
-                  <option key={opt.id} value={opt.id}>{opt.name}</option>
+            <div className="stat-card glow-card-green" style={{ background: 'linear-gradient(145deg, rgba(16, 32, 24, 0.7) 0%, rgba(12, 22, 18, 0.8) 100%)', border: '1px solid rgba(34, 197, 94, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+              <div className="stat-icon-wrapper" style={{ background: 'rgba(34, 197, 94, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
+                <CheckCircle className="stat-icon" style={{ color: '#4ade80' }} size={18} />
+              </div>
+              <div className="stat-details">
+                <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#86efac', fontSize: '0.72rem', fontWeight: 600 }}>Ready for Test</h3>
+                <p className="stat-value" style={{ color: '#4ade80', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{eligibleCount}</p>
+              </div>
+            </div>
+
+            <div className="stat-card glow-card-blue" style={{ background: 'linear-gradient(145deg, rgba(18, 28, 45, 0.7) 0%, rgba(13, 19, 32, 0.8) 100%)', border: '1px solid rgba(59, 130, 246, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+              <div className="stat-icon-wrapper" style={{ background: 'rgba(59, 130, 246, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
+                <Award className="stat-icon" style={{ color: '#60a5fa' }} size={18} />
+              </div>
+              <div className="stat-details">
+                <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#93c5fd', fontSize: '0.72rem', fontWeight: 600 }}>Passed</h3>
+                <p className="stat-value" style={{ color: '#60a5fa', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{passedCount}</p>
+              </div>
+            </div>
+
+            <div className="stat-card glow-card-red" style={{ background: 'linear-gradient(145deg, rgba(38, 16, 20, 0.7) 0%, rgba(24, 12, 14, 0.8) 100%)', border: '1px solid rgba(244, 63, 94, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+              <div className="stat-icon-wrapper" style={{ background: 'rgba(244, 63, 94, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
+                <XCircle className="stat-icon" style={{ color: '#fb7185' }} size={18} />
+              </div>
+              <div className="stat-details">
+                <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#fda4af', fontSize: '0.72rem', fontWeight: 600 }}>Failed / Retest</h3>
+                <p className="stat-value" style={{ color: '#fb7185', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{failedCount}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Belt Distribution Bar */}
+          <div className="belt-distribution-strip" style={{ padding: '0.75rem 1rem' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, marginRight: '6px', whiteSpace: 'nowrap', flexShrink: 0, display: 'inline-block' }}>
+              Belts:
+            </span>
+            {/* Desktop/Tablet Horizontal Button List */}
+            <div className="belt-pill-list-desktop">
+              {Object.entries(beltCounts).map(([beltName, count]) => {
+                const isSelected = gradingFilterBelt === beltName;
+                return (
+                  <button
+                    key={beltName}
+                    type="button"
+                    className={`belt-pill-btn ${isSelected ? 'active' : ''}`}
+                    onClick={() => setGradingFilterBelt(isSelected ? 'All' : beltName)}
+                    title={`Filter by ${beltName} belt`}
+                    style={{ padding: '0.25rem 0.65rem' }}
+                  >
+                    <span className={`badge ${getBeltColorClass(beltName)}`} style={{ padding: '2px 6px', fontSize: '0.7rem', borderRadius: '4px', textTransform: 'uppercase' }}>
+                      {beltName}
+                    </span>
+                    <span className="belt-count" style={{ fontSize: '0.7rem' }}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Mobile Select Dropdown (No Side-Scrolling) */}
+            <div className="belt-select-mobile-wrapper">
+              <select
+                className="form-control belt-select-mobile"
+                value={gradingFilterBelt}
+                onChange={(e) => setGradingFilterBelt(e.target.value)}
+              >
+                <option value="All">All Belts ({totalCount})</option>
+                {Object.entries(beltCounts).map(([beltName, count]) => (
+                  <option key={beltName} value={beltName}>
+                    {beltName} Belt ({count})
+                  </option>
                 ))}
               </select>
             </div>
-
-            {/* Belt Rank / Level */}
-            <div style={{ minWidth: '150px', flex: '1 1 150px' }}>
-              <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }} value={gradingFilterBelt} onChange={(e) => setGradingFilterBelt(e.target.value)}>
-                <option value="All">All Belts & Levels</option>
-                <optgroup label="🥋 Traditional Belts">
-                  {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Red', 'Brown', 'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black'].map(b => (
-                    <option key={b} value={b}>{b} Belt</option>
-                  ))}
-                </optgroup>
-                <optgroup label="🥊 Kickboxing / Boxing Levels">
-                  {['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                </optgroup>
-              </select>
-            </div>
-
-            {/* Reset Button */}
-            <button
-              className="btn-secondary"
-              style={{ padding: '0 1rem', fontSize: '0.8rem', height: '38px', borderRadius: '8px', whiteSpace: 'nowrap' }}
-              onClick={() => {
-                setGradingFilterBranch('All');
-                setGradingFilterBatch('All');
-                setGradingFilterBelt('All');
-                setGradingFilterEligibility('All');
-                setGradingFilterResult('All');
-                setSearchQuery('');
-              }}
-            >
-              Reset
-            </button>
           </div>
-        </div>
 
-        {/* Clean Student Table */}
-        <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', overflow: 'hidden', padding: 0 }}>
-          {loadingGrading ? (
-            <div style={{ textAlign: 'center', padding: '4rem 2rem', color: 'var(--color-text-muted)' }}>
-              <History size={28} className="spin-icon" style={{ marginBottom: '0.75rem', opacity: 0.7 }} />
-              <div>Loading students...</div>
+          {/* Streamlined Clean Filters Panel */}
+          <div className="filters-wrapper-card" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+            {/* Quick Filter Chips */}
+            <div className="grading-quick-chips" style={{ marginBottom: '0.85rem', paddingBottom: '0.65rem' }}>
+              <button
+                type="button"
+                className={`quick-chip ${gradingFilterEligibility === 'All' && gradingFilterBelt === 'All' ? 'active' : ''}`}
+                onClick={() => {
+                  setGradingFilterEligibility('All');
+                  setGradingFilterBelt('All');
+                }}
+              >
+                All ({totalCount})
+              </button>
+              <button
+                type="button"
+                className={`quick-chip ${gradingFilterEligibility === 'Eligible' ? 'active-eligible' : ''}`}
+                onClick={() => setGradingFilterEligibility(gradingFilterEligibility === 'Eligible' ? 'All' : 'Eligible')}
+              >
+                ⚡ Ready for Test ({eligibleCount})
+              </button>
+              <button
+                type="button"
+                className={`quick-chip ${gradingFilterEligibility === 'Not Eligible' ? 'active-fail' : ''}`}
+                onClick={() => setGradingFilterEligibility(gradingFilterEligibility === 'Not Eligible' ? 'All' : 'Not Eligible')}
+              >
+                Not Ready ({totalCount - eligibleCount})
+              </button>
             </div>
-          ) : filtered.length > 0 ? (
-            <div className="premium-table-container" style={{ border: 'none', background: 'transparent' }}>
-              <table className="premium-table responsive-table-cards">
-                <thead>
-                  <tr>
-                    <th>Student</th>
-                    <th>Batch</th>
-                    <th>Present Belt / Level</th>
-                    {isTrainer && <th>Trainer Status</th>}
-                    <th style={{ textAlign: 'center' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map(student => {
-                    const initials = (student.name || 'S').split(' ').map(n => n[0]).slice(0, 2).join('');
 
-                    return (
-                      <tr key={student.id}>
-                        <td data-label="Student" style={{ fontWeight: 700, color: '#fff' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <div className="student-avatar-badge">{initials}</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                              {renderHighlightedName(student.name, searchQuery)}
-                              {student.isPriority && (
-                                <Star size={13} fill="#FFD700" color="#FFD700" title="Priority Student" />
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td data-label="Batch">
-                          <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: '0.75rem', padding: '3px 8px', borderRadius: '6px' }}>
-                            {getBatchNameFromCode(student.batch, student.branch)}
-                          </span>
-                        </td>
-                        <td data-label="Present Belt / Level">
-                          <span className={`badge ${getBeltColorClass(student.belt)}`} style={{ padding: '4px 10px', fontSize: '0.75rem', borderRadius: '6px', fontWeight: 600 }}>
-                            {student.belt}
-                          </span>
-                        </td>
-                        {isTrainer && (
-                          <td data-label="Trainer Status">
-                            {student.trainerApprovedForGrading ? (
-                              <span className="badge badge-green" style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '6px' }}>
-                                ✓ Approved for Test
-                              </span>
-                            ) : (
-                              <span className="badge badge-gray" style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '6px' }}>
-                                Pending Approval
-                              </span>
-                            )}
-                          </td>
-                        )}
-                        <td data-label="Actions" style={{ whiteSpace: 'nowrap' }}>
-                          <div style={{ display: 'inline-flex', justifyContent: 'center', gap: '6px', alignItems: 'center', flexWrap: 'nowrap' }}>
-                            {isTrainer && (
-                              <button
-                                className="action-btn-pill"
-                                style={{
-                                  padding: '5px 12px',
-                                  fontSize: '0.75rem',
-                                  borderRadius: '8px',
-                                  fontWeight: 600,
-                                  border: '1px solid transparent',
-                                  background: student.trainerApprovedForGrading ? 'rgba(239, 68, 68, 0.15)' : 'var(--status-success)',
-                                  color: student.trainerApprovedForGrading ? '#ef4444' : '#fff',
-                                  borderColor: student.trainerApprovedForGrading ? 'rgba(239, 68, 68, 0.3)' : 'transparent',
-                                  cursor: 'pointer',
-                                  whiteSpace: 'nowrap'
-                                }}
-                                onClick={() => handleToggleTrainerApproval(student, !student.trainerApprovedForGrading)}
-                                disabled={gradingActionLoading}
-                              >
-                                {student.trainerApprovedForGrading ? 'Revoke Test Approval' : '✓ Approve for Test'}
-                              </button>
-                            )}
-
-                            <button
-                              className="btn-secondary action-btn-pill"
-                              style={{ padding: '5px 10px', fontSize: '0.75rem', borderRadius: '8px', whiteSpace: 'nowrap' }}
-                              onClick={() => {
-                                setSelectedHistoryStudent(student);
-                                setIsHistoryModalOpen(true);
-                              }}
-                            >
-                              History
-                            </button>
-
-                            {!isTrainer && (
-                              <button
-                                className="btn-primary action-btn-pill"
-                                style={{ background: 'var(--color-primary)', padding: '5px 12px', fontSize: '0.75rem', borderRadius: '8px', fontWeight: 600, whiteSpace: 'nowrap' }}
-                                onClick={() => {
-                                  setSelectedGradeStudent(student);
-                                  setGradeResult('Pass');
-                                  setGradeLetter('A');
-                                  setGradeDate(new Date().toISOString().split('T')[0]);
-                                  setTargetBelt(student.nextBelt && student.nextBelt !== 'None' ? student.nextBelt : (student.belt || 'Yellow Belt'));
-                                  setIsGradeModalOpen(true);
-                                }}
-                              >
-                                Grade
-                              </button>
-                            )}
-
-                            <button
-                              className="btn-icon"
-                              title="Edit Student Record / Belt"
-                              style={{ color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.25)', width: '30px', height: '30px', borderRadius: '8px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
-                              onClick={() => {
-                                setSelectedEditGradingStudent(student);
-                                setEditGradingForm({
-                                  joinDate: student.joinDate,
-                                  lastGradingDate: student.lastGradingDate || 'N/A',
-                                  belt: student.belt,
-                                  eligibilityOverride: student.eligibilityOverride || ''
-                                });
-                                setIsEditGradingModalOpen(true);
-                              }}
-                            >
-                              <Settings size={14} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '3.5rem 2rem', color: 'var(--color-text-muted)' }}>
-              <Users size={32} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
-              <div style={{ fontSize: '0.95rem', color: '#fff', fontWeight: 600 }}>No Students Found</div>
-              <p style={{ fontSize: '0.8rem', margin: 0, marginTop: '4px' }}>
-                {isTrainer
-                  ? 'No students found in your assigned batch with the selected filters.'
-                  : 'No students match the current filter criteria.'}
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Modal: View Grading History */}
-        {isHistoryModalOpen && selectedHistoryStudent && (
-          <div className="modal-overlay" style={{ zIndex: 1000 }}>
-            <div className="modal-content" style={{ maxWidth: '840px', width: '92%', background: 'var(--color-bg-surface, #12141d)', padding: '1.75rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
-              <div className="panel-header" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
-                <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.1rem', margin: 0 }}>
-                  <Award size={20} style={{ color: '#38bdf8' }} />
-                  Grading History: {selectedHistoryStudent.name}
-                </h3>
-                <button
-                  className="btn-icon"
-                  onClick={() => {
-                    setIsHistoryModalOpen(false);
-                    setSelectedHistoryStudent(null);
-                  }}
-                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}
-                >
-                  <X size={20} />
-                </button>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* Search Input */}
+              <div style={{ minWidth: '220px', flex: '1 1 240px' }}>
+                <input
+                  type="text"
+                  placeholder="Search student..."
+                  className="form-control"
+                  style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
               </div>
 
-              <div style={{ background: 'rgba(255,255,255,0.03)', padding: '0.85rem 1rem', borderRadius: '10px', marginBottom: '1.25rem', display: 'flex', flexWrap: 'wrap', gap: '15px', fontSize: '0.85rem', color: 'var(--color-text-main)', alignItems: 'center' }}>
-                <div>Branch: <strong style={{ color: '#fff' }}>{selectedHistoryStudent.branch}</strong></div>
-                <div>Batch: <strong style={{ color: '#fff' }}>{getBatchNameFromCode(selectedHistoryStudent.batch, selectedHistoryStudent.branch)}</strong></div>
-                <div>Current Belt: <span className={`badge ${getBeltColorClass(selectedHistoryStudent.belt)}`} style={{ padding: '4px 10px', fontSize: '0.75rem', fontWeight: 700 }}>{selectedHistoryStudent.belt}</span></div>
-              </div>
-
-              {selectedHistoryStudent.gradingHistory && selectedHistoryStudent.gradingHistory.length > 0 ? (
-                <div className="table-responsive" style={{ maxHeight: '380px', overflowY: 'auto', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <table className="attendance-table" style={{ fontSize: '0.85rem', width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ background: 'rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                        <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Date</th>
-                        <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Belt Before</th>
-                        <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Result</th>
-                        <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Belt After</th>
-                        <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Examiner</th>
-                        <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Recorded At</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...selectedHistoryStudent.gradingHistory].reverse().map((attempt, index) => (
-                        <tr key={attempt._id || index} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                          <td data-label="Date" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', fontWeight: 600, color: '#fff' }}>
-                            {attempt.gradingDate}
-                          </td>
-                          <td data-label="Belt Before" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center' }}>
-                            <span className={`badge ${getBeltColorClass(attempt.beltBefore)}`} style={{ padding: '4px 10px', fontSize: '0.75rem', fontWeight: 600 }}>{attempt.beltBefore}</span>
-                          </td>
-                          <td data-label="Result" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center' }}>
-                            {attempt.result === 'Pass' ? (
-                              <span className="badge badge-green" style={{ background: 'rgba(76, 175, 80, 0.15)', color: '#4CAF50', border: '1px solid rgba(76, 175, 80, 0.3)', padding: '4px 10px', fontSize: '0.75rem', fontWeight: 600 }}>
-                                Pass ({attempt.gradeLetter ? `Grade ${attempt.gradeLetter}` : 'Grade A'})
-                              </span>
-                            ) : (
-                              <span className="badge badge-red" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#ff453a', border: '1px solid rgba(229, 9, 20, 0.3)', padding: '4px 10px', fontSize: '0.75rem', fontWeight: 600 }}>Fail</span>
-                            )}
-                          </td>
-                          <td data-label="Belt After" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center' }}>
-                            <span className={`badge ${getBeltColorClass(attempt.beltAfter)}`} style={{ padding: '4px 10px', fontSize: '0.75rem', fontWeight: 600 }}>{attempt.beltAfter}</span>
-                          </td>
-                          <td data-label="Examiner" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#fff', fontWeight: 500 }}>
-                            {attempt.updatedBy}
-                          </td>
-                          <td data-label="Recorded At" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                            {new Date(attempt.createdAt || attempt.date).toLocaleString()}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--color-text-muted)' }}>
-                  <Award size={30} style={{ opacity: 0.4, marginBottom: '0.5rem' }} />
-                  <div>No grading attempts recorded yet.</div>
+              {/* Branch (Superadmin only) */}
+              {isSuper && (
+                <div style={{ minWidth: '140px', flex: '1 1 140px' }}>
+                  <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }} value={gradingFilterBranch} onChange={(e) => setGradingFilterBranch(e.target.value)}>
+                    <option value="All">All Branches</option>
+                    {branches.map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
                 </div>
               )}
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
-                <button
-                  className="btn-secondary"
-                  style={{ borderRadius: '8px', padding: '0.5rem 1.25rem' }}
-                  onClick={() => {
-                    setIsHistoryModalOpen(false);
-                    setSelectedHistoryStudent(null);
-                  }}
-                >
-                  Close
-                </button>
+              {/* Batch Filter */}
+              <div style={{ minWidth: '140px', flex: '1 1 140px' }}>
+                <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }} value={gradingFilterBatch} onChange={(e) => setGradingFilterBatch(e.target.value)}>
+                  <option value="All">{isTrainer ? 'All My Batches' : 'All Batches'}</option>
+                  {batchListOptions.map(opt => (
+                    <option key={opt.id} value={opt.id}>{opt.name}</option>
+                  ))}
+                </select>
               </div>
+
+              {/* Belt Rank / Level */}
+              <div style={{ minWidth: '150px', flex: '1 1 150px' }}>
+                <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }} value={gradingFilterBelt} onChange={(e) => setGradingFilterBelt(e.target.value)}>
+                  <option value="All">All Belts & Levels</option>
+                  <optgroup label="🥋 Traditional Belts">
+                    {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Red', 'Brown', 'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black'].map(b => (
+                      <option key={b} value={b}>{b} Belt</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="🥊 Kickboxing / Boxing Levels">
+                    {['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </optgroup>
+                </select>
+              </div>
+
+              {/* Reset Button */}
+              <button
+                className="btn-secondary"
+                style={{ padding: '0 1rem', fontSize: '0.8rem', height: '38px', borderRadius: '8px', whiteSpace: 'nowrap' }}
+                onClick={() => {
+                  setGradingFilterBranch('All');
+                  setGradingFilterBatch('All');
+                  setGradingFilterBelt('All');
+                  setGradingFilterEligibility('All');
+                  setGradingFilterResult('All');
+                  setSearchQuery('');
+                }}
+              >
+                Reset
+              </button>
             </div>
           </div>
-        )}
 
-        {/* Modal: Conduct Grade Test */}
-        {isGradeModalOpen && selectedGradeStudent && (
-          <div className="modal-overlay" style={{ zIndex: 1000 }}>
-            <div className="modal-content" style={{ maxWidth: '520px', background: 'var(--color-bg-surface, #12141d)', padding: '1.75rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
-              <div className="panel-header" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
-                <h3 className="panel-title" style={{ fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
-                  <Award size={20} style={{ color: 'var(--color-accent-primary, #e50914)' }} />
-                  Belt Grade Test
-                </h3>
-                <button
-                  className="btn-icon"
-                  onClick={() => {
-                    setIsGradeModalOpen(false);
-                    setSelectedGradeStudent(null);
-                  }}
-                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}
-                >
-                  <X size={20} />
-                </button>
+          {/* Clean Student Table */}
+          <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', overflow: 'hidden', padding: 0 }}>
+            {loadingGrading ? (
+              <div style={{ textAlign: 'center', padding: '4rem 2rem', color: 'var(--color-text-muted)' }}>
+                <History size={28} className="spin-icon" style={{ marginBottom: '0.75rem', opacity: 0.7 }} />
+                <div>Loading students...</div>
               </div>
+            ) : filtered.length > 0 ? (
+              <div className="premium-table-container" style={{ border: 'none', background: 'transparent' }}>
+                <table className="premium-table responsive-table-cards">
+                  <thead>
+                    <tr>
+                      <th>Student</th>
+                      <th>Batch</th>
+                      <th>Present Belt / Level</th>
+                      {isTrainer && <th>Trainer Status & Suggestion</th>}
+                      {!isTrainer && <th>Trainer Suggested Belt</th>}
+                      <th style={{ textAlign: 'center' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(student => {
+                      const initials = (student.name || 'S').split(' ').map(n => n[0]).slice(0, 2).join('');
 
-              <form onSubmit={handleSubmitGrade}>
-                {/* Student Info Card */}
-                <div style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)', padding: '1.1rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)', marginBottom: '1.25rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Candidate:</span>
-                    <strong style={{ color: '#fff', fontSize: '1rem' }}>{selectedGradeStudent.name}</strong>
+                      return (
+                        <tr key={student.id}>
+                          <td data-label="Student" style={{ fontWeight: 700, color: '#fff' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <div className="student-avatar-badge">{initials}</div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                {renderHighlightedName(student.name, searchQuery)}
+                                {student.isPriority && (
+                                  <Star size={13} fill="#FFD700" color="#FFD700" title="Priority Student" />
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td data-label="Batch">
+                            <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: '0.75rem', padding: '3px 8px', borderRadius: '6px' }}>
+                              {getBatchNameFromCode(student.batch, student.branch)}
+                            </span>
+                          </td>
+                          <td data-label="Present Belt / Level">
+                            <span className={`badge ${getBeltColorClass(student.belt)}`} style={{ padding: '4px 10px', fontSize: '0.75rem', borderRadius: '6px', fontWeight: 600 }}>
+                              {student.belt}
+                            </span>
+                          </td>
+                          {isTrainer && (
+                            <td data-label="Trainer Status">
+                              {student.trainerApprovedForGrading ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                  <span className="badge badge-green" style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '6px', width: 'fit-content' }}>
+                                    ✓ Approved for Test
+                                  </span>
+                                  {student.trainerSuggestedBelt && (
+                                    <span style={{ fontSize: '0.73rem', color: '#38bdf8', fontWeight: 600 }}>
+                                      Suggested: {student.trainerSuggestedBelt}
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="badge badge-gray" style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '6px' }}>
+                                  Pending Approval
+                                </span>
+                              )}
+                            </td>
+                          )}
+                          {!isTrainer && (
+                            <td data-label="Trainer Suggested Belt">
+                              {student.trainerSuggestedBelt ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                  <span className={`badge ${getBeltColorClass(student.trainerSuggestedBelt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem', fontWeight: 700, width: 'fit-content' }}>
+                                    🥋 {student.trainerSuggestedBelt}
+                                  </span>
+                                  {student.trainerGradingNotes && (
+                                    <span style={{ fontSize: '0.7rem', color: '#94a3b8', fontStyle: 'italic', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={student.trainerGradingNotes}>
+                                      "{student.trainerGradingNotes}"
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
+                                  {student.nextBelt && student.nextBelt !== 'None' ? student.nextBelt : 'Standard Next'}
+                                </span>
+                              )}
+                            </td>
+                          )}
+                          <td data-label="Actions" style={{ whiteSpace: 'nowrap' }}>
+                            <div style={{ display: 'inline-flex', justifyContent: 'center', gap: '6px', alignItems: 'center', flexWrap: 'nowrap' }}>
+                              {isTrainer && (
+                                student.trainerApprovedForGrading ? (
+                                  <div style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+                                    <button
+                                      className="action-btn-pill"
+                                      style={{
+                                        padding: '5px 10px',
+                                        fontSize: '0.75rem',
+                                        borderRadius: '8px',
+                                        fontWeight: 600,
+                                        border: '1px solid rgba(56, 189, 248, 0.4)',
+                                        background: 'rgba(56, 189, 248, 0.15)',
+                                        color: '#38bdf8',
+                                        cursor: 'pointer',
+                                        whiteSpace: 'nowrap'
+                                      }}
+                                      onClick={() => openTrainerApprovalModal(student)}
+                                      disabled={gradingActionLoading}
+                                      title="Change suggested belt or remarks"
+                                    >
+                                      ✏️ Edit Belt
+                                    </button>
+                                    <button
+                                      className="action-btn-pill"
+                                      style={{
+                                        padding: '5px 8px',
+                                        fontSize: '0.75rem',
+                                        borderRadius: '8px',
+                                        fontWeight: 600,
+                                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                                        background: 'rgba(239, 68, 68, 0.12)',
+                                        color: '#ef4444',
+                                        cursor: 'pointer',
+                                        whiteSpace: 'nowrap'
+                                      }}
+                                      onClick={() => handleToggleTrainerApproval(student, false)}
+                                      disabled={gradingActionLoading}
+                                      title="Revoke test approval"
+                                    >
+                                      Revoke
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    className="action-btn-pill"
+                                    style={{
+                                      padding: '5px 12px',
+                                      fontSize: '0.75rem',
+                                      borderRadius: '8px',
+                                      fontWeight: 600,
+                                      border: '1px solid transparent',
+                                      background: 'var(--status-success)',
+                                      color: '#fff',
+                                      cursor: 'pointer',
+                                      whiteSpace: 'nowrap'
+                                    }}
+                                    onClick={() => openTrainerApprovalModal(student)}
+                                    disabled={gradingActionLoading}
+                                  >
+                                    ✓ Approve for Test
+                                  </button>
+                                )
+                              )}
+
+                              <button
+                                className="btn-secondary action-btn-pill"
+                                style={{ padding: '5px 10px', fontSize: '0.75rem', borderRadius: '8px', whiteSpace: 'nowrap' }}
+                                onClick={() => {
+                                  setSelectedHistoryStudent(student);
+                                  setIsHistoryModalOpen(true);
+                                }}
+                              >
+                                History
+                              </button>
+
+                              {!isTrainer && (
+                                <button
+                                  className="btn-primary action-btn-pill"
+                                  style={{ background: 'var(--color-primary)', padding: '5px 12px', fontSize: '0.75rem', borderRadius: '8px', fontWeight: 600, whiteSpace: 'nowrap' }}
+                                  onClick={() => {
+                                    setSelectedGradeStudent(student);
+                                    setGradeResult('Pass');
+                                    setGradeLetter('A');
+                                    setGradeDate(new Date().toISOString().split('T')[0]);
+                                    const initialBelt = student.trainerSuggestedBelt || (student.nextBelt && student.nextBelt !== 'None' ? student.nextBelt : (student.belt || 'Yellow Belt'));
+                                    setTargetBelt(initialBelt);
+                                    setIsGradeModalOpen(true);
+                                  }}
+                                >
+                                  Grade
+                                </button>
+                              )}
+
+                              <button
+                                className="btn-icon"
+                                title="Edit Student Record / Belt"
+                                style={{ color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.25)', width: '30px', height: '30px', borderRadius: '8px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+                                onClick={() => {
+                                  setSelectedEditGradingStudent(student);
+                                  setEditGradingForm({
+                                    joinDate: student.joinDate,
+                                    lastGradingDate: student.lastGradingDate || 'N/A',
+                                    belt: student.belt,
+                                    eligibilityOverride: student.eligibilityOverride || ''
+                                  });
+                                  setIsEditGradingModalOpen(true);
+                                }}
+                              >
+                                <Settings size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '3.5rem 2rem', color: 'var(--color-text-muted)' }}>
+                <Users size={32} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
+                <div style={{ fontSize: '0.95rem', color: '#fff', fontWeight: 600 }}>No Students Found</div>
+                <p style={{ fontSize: '0.8rem', margin: 0, marginTop: '4px' }}>
+                  {isTrainer
+                    ? 'No students found in your assigned batch with the selected filters.'
+                    : 'No students match the current filter criteria.'}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Modal: View Grading History */}
+          {isHistoryModalOpen && selectedHistoryStudent && (
+            <div className="modal-overlay" style={{ zIndex: 1000 }}>
+              <div className="modal-content" style={{ maxWidth: '840px', width: '92%', background: 'var(--color-bg-surface, #12141d)', padding: '1.75rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <div className="panel-header" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
+                  <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.1rem', margin: 0 }}>
+                    <Award size={20} style={{ color: '#38bdf8' }} />
+                    Grading History: {selectedHistoryStudent.name}
+                  </h3>
+                  <button
+                    className="btn-icon"
+                    onClick={() => {
+                      setIsHistoryModalOpen(false);
+                      setSelectedHistoryStudent(null);
+                    }}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div style={{ background: 'rgba(255,255,255,0.03)', padding: '0.85rem 1rem', borderRadius: '10px', marginBottom: '1.25rem', display: 'flex', flexWrap: 'wrap', gap: '15px', fontSize: '0.85rem', color: 'var(--color-text-main)', alignItems: 'center' }}>
+                  <div>Branch: <strong style={{ color: '#fff' }}>{selectedHistoryStudent.branch}</strong></div>
+                  <div>Batch: <strong style={{ color: '#fff' }}>{getBatchNameFromCode(selectedHistoryStudent.batch, selectedHistoryStudent.branch)}</strong></div>
+                  <div>Current Belt: <span className={`badge ${getBeltColorClass(selectedHistoryStudent.belt)}`} style={{ padding: '4px 10px', fontSize: '0.75rem', fontWeight: 700 }}>{selectedHistoryStudent.belt}</span></div>
+                </div>
+
+                {selectedHistoryStudent.gradingHistory && selectedHistoryStudent.gradingHistory.length > 0 ? (
+                  <div className="table-responsive" style={{ maxHeight: '380px', overflowY: 'auto', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <table className="attendance-table" style={{ fontSize: '0.85rem', width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: 'rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                          <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Date</th>
+                          <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Belt Before</th>
+                          <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Result</th>
+                          <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Belt After</th>
+                          <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Examiner</th>
+                          <th style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#cbd5e1' }}>Recorded At</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...selectedHistoryStudent.gradingHistory].reverse().map((attempt, index) => (
+                          <tr key={attempt._id || index} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                            <td data-label="Date" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', fontWeight: 600, color: '#fff' }}>
+                              {attempt.gradingDate}
+                            </td>
+                            <td data-label="Belt Before" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                              <span className={`badge ${getBeltColorClass(attempt.beltBefore)}`} style={{ padding: '4px 10px', fontSize: '0.75rem', fontWeight: 600 }}>{attempt.beltBefore}</span>
+                            </td>
+                            <td data-label="Result" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                              {attempt.result === 'Pass' ? (
+                                <span className="badge badge-green" style={{ background: 'rgba(76, 175, 80, 0.15)', color: '#4CAF50', border: '1px solid rgba(76, 175, 80, 0.3)', padding: '4px 10px', fontSize: '0.75rem', fontWeight: 600 }}>
+                                  Pass ({attempt.gradeLetter ? `Grade ${attempt.gradeLetter}` : 'Grade A'})
+                                </span>
+                              ) : (
+                                <span className="badge badge-red" style={{ background: 'rgba(229, 9, 20, 0.15)', color: '#ff453a', border: '1px solid rgba(229, 9, 20, 0.3)', padding: '4px 10px', fontSize: '0.75rem', fontWeight: 600 }}>Fail</span>
+                              )}
+                            </td>
+                            <td data-label="Belt After" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                              <span className={`badge ${getBeltColorClass(attempt.beltAfter)}`} style={{ padding: '4px 10px', fontSize: '0.75rem', fontWeight: 600 }}>{attempt.beltAfter}</span>
+                            </td>
+                            <td data-label="Examiner" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', color: '#fff', fontWeight: 500 }}>
+                              {attempt.updatedBy}
+                            </td>
+                            <td data-label="Recorded At" style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                              {new Date(attempt.createdAt || attempt.date).toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Branch & Batch:</span>
-                    <span style={{ color: '#e0e0e0', fontSize: '0.85rem' }}>{selectedGradeStudent.branch} • {getBatchNameFromCode(selectedGradeStudent.batch, selectedGradeStudent.branch)}</span>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--color-text-muted)' }}>
+                    <Award size={30} style={{ opacity: 0.4, marginBottom: '0.5rem' }} />
+                    <div>No grading attempts recorded yet.</div>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Current Belt:</span>
-                    <span className={`badge ${getBeltColorClass(selectedGradeStudent.belt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem' }}>{selectedGradeStudent.belt}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Promotion Target:</span>
-                    {selectedGradeStudent.nextBelt !== 'None' ? (
-                      <span className={`badge ${getBeltColorClass(selectedGradeStudent.nextBelt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem', fontWeight: 700 }}>
-                        ➔ {selectedGradeStudent.nextBelt}
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
+                  <button
+                    className="btn-secondary"
+                    style={{ borderRadius: '8px', padding: '0.5rem 1.25rem' }}
+                    onClick={() => {
+                      setIsHistoryModalOpen(false);
+                      setSelectedHistoryStudent(null);
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal: Trainer Approval & Belt Suggestion */}
+          {isTrainerApprovalModalOpen && selectedTrainerApprovalStudent && (
+            <div className="modal-overlay" style={{ zIndex: 1000 }}>
+              <div className="modal-content" style={{ maxWidth: '480px', background: 'var(--color-bg-surface, #12141d)', padding: '1.75rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <div className="panel-header" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
+                  <h3 className="panel-title" style={{ fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                    <Award size={20} style={{ color: '#10b981' }} />
+                    {selectedTrainerApprovalStudent.trainerApprovedForGrading ? 'Update Belt Suggestion' : 'Approve for Belt Grading'}
+                  </h3>
+                  <button
+                    className="btn-icon"
+                    onClick={() => {
+                      setIsTrainerApprovalModalOpen(false);
+                      setSelectedTrainerApprovalStudent(null);
+                    }}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  handleToggleTrainerApproval(
+                    selectedTrainerApprovalStudent,
+                    true,
+                    trainerSuggestedBeltInput,
+                    trainerGradingNotesInput
+                  );
+                  setIsTrainerApprovalModalOpen(false);
+                  setSelectedTrainerApprovalStudent(null);
+                }}>
+                  {/* Candidate Summary Card */}
+                  <div style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)', padding: '1.1rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)', marginBottom: '1.25rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Student:</span>
+                      <strong style={{ color: '#fff', fontSize: '1rem' }}>{selectedTrainerApprovalStudent.name}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Branch & Batch:</span>
+                      <span style={{ color: '#e0e0e0', fontSize: '0.85rem' }}>
+                        {selectedTrainerApprovalStudent.branch} • {getBatchNameFromCode(selectedTrainerApprovalStudent.batch, selectedTrainerApprovalStudent.branch)}
                       </span>
-                    ) : (
-                      <strong style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>Max Belt Rank Reached</strong>
-                    )}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Current Belt:</span>
+                      <span className={`badge ${getBeltColorClass(selectedTrainerApprovalStudent.belt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem' }}>
+                        {selectedTrainerApprovalStudent.belt}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Standard Next Belt:</span>
+                      <span className={`badge ${getBeltColorClass(selectedTrainerApprovalStudent.nextBelt || 'Yellow Belt')}`} style={{ padding: '3px 8px', fontSize: '0.75rem', fontWeight: 600 }}>
+                        ➔ {selectedTrainerApprovalStudent.nextBelt && selectedTrainerApprovalStudent.nextBelt !== 'None' ? selectedTrainerApprovalStudent.nextBelt : 'Standard Next'}
+                      </span>
+                    </div>
                   </div>
-                </div>
 
-                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>Test Date</label>
-                  <input
-                    type="date"
-                    className="form-control"
-                    style={{ height: '40px', borderRadius: '10px', fontSize: '0.85rem' }}
-                    value={gradeDate}
-                    onChange={(e) => setGradeDate(e.target.value)}
-                    required
-                  />
-                </div>
-
-                {gradeResult === 'Pass' && (
+                  {/* Suggest Belt Select */}
                   <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                    <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>
-                      Target Belt / Level to Assign *
+                    <label style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>
+                      Suggested Belt / Level for Test *
                     </label>
                     <select
                       className="form-control"
                       style={{ height: '42px', borderRadius: '10px', fontSize: '0.88rem', width: '100%', background: 'rgba(255, 255, 255, 0.05)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.15)' }}
-                      value={targetBelt}
-                      onChange={(e) => setTargetBelt(e.target.value)}
+                      value={trainerSuggestedBeltInput}
+                      onChange={(e) => setTrainerSuggestedBeltInput(e.target.value)}
                       required
                     >
-                      <option value="">-- Choose Target Belt / Level --</option>
+                      <option value="">-- Select Belt to Suggest --</option>
                       <optgroup label="🥋 Traditional Belts">
-                        {['White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Red Belt', 'Brown Belt', 'Black Belt', 'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Red', 'Brown', 'Black'].map(b => (
+                        {[
+                          'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Red Belt',
+                          'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Brown Belt', 'Black Belt',
+                          'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Red', 'Brown', 'Black'
+                        ].map(b => (
                           <option key={b} value={b} style={{ background: '#12141d', color: '#fff' }}>{b}</option>
                         ))}
                       </optgroup>
@@ -10514,218 +10917,361 @@ function App() {
                         ))}
                       </optgroup>
                     </select>
-                  </div>
-                )}
-
-                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>Test Result</label>
-                  <div className="grade-result-options-grid">
-                    <div
-                      className={`grade-result-card ${gradeResult === 'Pass' ? 'selected-pass' : ''}`}
-                      onClick={() => setGradeResult('Pass')}
-                    >
-                      <CheckCircle size={24} style={{ color: '#4ade80' }} />
-                      <h4 className="grade-result-title">Pass</h4>
-                      <p className="grade-result-desc">
-                        Promotes student to <strong>{selectedGradeStudent.nextBelt !== 'None' ? selectedGradeStudent.nextBelt : 'Next Level'}</strong>
-                      </p>
-                    </div>
-
-                    <div
-                      className={`grade-result-card ${gradeResult === 'Fail' ? 'selected-fail' : ''}`}
-                      onClick={() => setGradeResult('Fail')}
-                    >
-                      <XCircle size={24} style={{ color: '#f87171' }} />
-                      <h4 className="grade-result-title">Fail</h4>
-                      <p className="grade-result-desc">
-                        Retains current <strong>{selectedGradeStudent.belt}</strong> belt level
-                      </p>
+                    <div style={{ fontSize: '0.73rem', color: '#94a3b8', marginTop: '5px' }}>
+                      💡 Recommend the candidate's target belt for the grading panel to review.
                     </div>
                   </div>
-                </div>
 
-                {gradeResult === 'Pass' && (
+                  {/* Optional Trainer Remarks */}
                   <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                    <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '8px' }}>
-                      Awarded Grade Level *
+                    <label style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>
+                      Trainer Notes / Remarks (Optional)
                     </label>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
-                      {[
-                        { letter: 'A', label: 'Grade A', desc: 'Outstanding', color: '#FFD700', bg: 'rgba(255, 215, 0, 0.15)' },
-                        { letter: 'B', label: 'Grade B', desc: 'Merit / Good', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)' },
-                        { letter: 'C', label: 'Grade C', desc: 'Satisfactory', color: '#4ade80', bg: 'rgba(74, 222, 128, 0.15)' }
-                      ].map(g => {
-                        const isSelected = gradeLetter === g.letter;
-                        return (
-                          <div
-                            key={g.letter}
-                            style={{
-                              padding: '0.75rem 0.5rem',
-                              borderRadius: '10px',
-                              border: isSelected ? `2px solid ${g.color}` : '1px solid rgba(255, 255, 255, 0.1)',
-                              background: isSelected ? g.bg : 'rgba(255, 255, 255, 0.03)',
-                              textAlign: 'center',
-                              cursor: 'pointer',
-                              transition: 'all 0.2s ease',
-                              boxShadow: isSelected ? `0 0 12px ${g.bg}` : 'none'
-                            }}
-                            onClick={() => setGradeLetter(g.letter)}
-                          >
-                            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: g.color, fontFamily: 'Outfit, sans-serif' }}>
-                              {g.label}
-                            </div>
-                            <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                              {g.desc}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                    <textarea
+                      className="form-control"
+                      style={{ borderRadius: '10px', fontSize: '0.85rem', width: '100%', background: 'rgba(255, 255, 255, 0.05)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.15)', minHeight: '70px', padding: '8px 12px', resize: 'vertical' }}
+                      placeholder="e.g. Excellent kata performance, highly disciplined"
+                      value={trainerGradingNotesInput}
+                      onChange={(e) => setTrainerGradingNotesInput(e.target.value)}
+                    />
                   </div>
-                )}
 
-                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ borderRadius: '10px', padding: '8px 16px', fontSize: '0.85rem' }}
+                      onClick={() => {
+                        setIsTrainerApprovalModalOpen(false);
+                        setSelectedTrainerApprovalStudent(null);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="btn-primary"
+                      disabled={gradingActionLoading}
+                      style={{ background: '#10b981', borderColor: '#10b981', borderRadius: '10px', padding: '8px 18px', fontSize: '0.85rem', fontWeight: 600 }}
+                    >
+                      {selectedTrainerApprovalStudent.trainerApprovedForGrading ? 'Update Suggestion' : '✓ Confirm & Approve'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Modal: Conduct Grade Test */}
+          {isGradeModalOpen && selectedGradeStudent && (
+            <div className="modal-overlay" style={{ zIndex: 1000 }}>
+              <div className="modal-content" style={{ maxWidth: '520px', background: 'var(--color-bg-surface, #12141d)', padding: '1.75rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <div className="panel-header" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
+                  <h3 className="panel-title" style={{ fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                    <Award size={20} style={{ color: 'var(--color-accent-primary, #e50914)' }} />
+                    Belt Grade Test
+                  </h3>
                   <button
-                    type="button"
-                    className="btn-secondary"
-                    style={{ padding: '0.6rem 1.25rem', borderRadius: '10px' }}
+                    className="btn-icon"
                     onClick={() => {
                       setIsGradeModalOpen(false);
                       setSelectedGradeStudent(null);
                     }}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="btn-primary"
-                    disabled={gradingActionLoading}
-                    style={{ background: 'var(--color-accent-primary, #e50914)', padding: '0.6rem 1.5rem', borderRadius: '10px', fontWeight: 600 }}
-                  >
-                    {gradingActionLoading ? 'Saving...' : 'Submit Grade Result'}
+                    <X size={20} />
                   </button>
                 </div>
-              </form>
-            </div>
-          </div>
-        )}
 
-        {/* Modal: Edit Grading Info Override */}
-        {isEditGradingModalOpen && selectedEditGradingStudent && (
-          <div className="modal-overlay" style={{ zIndex: 1000 }}>
-            <div className="modal-content" style={{ maxWidth: '500px', background: 'var(--color-bg-surface, #12141d)', padding: '1.75rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
-              <div className="panel-header" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
-                <h3 className="panel-title" style={{ fontSize: '1.1rem', margin: 0 }}>Edit Student Grading Info</h3>
-                <button
-                  className="btn-icon"
-                  onClick={() => {
-                    setIsEditGradingModalOpen(false);
-                    setSelectedEditGradingStudent(null);
-                  }}
-                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              <form onSubmit={handleSubmitEditGrading}>
-                <div style={{
-                  background: 'rgba(255, 255, 255, 0.04)',
-                  padding: '12px 14px',
-                  borderRadius: '10px',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  marginBottom: '1.25rem',
-                  fontSize: '0.85rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '6px'
-                }}>
-                  <div>Student: <strong style={{ color: '#fff' }}>{selectedEditGradingStudent.name}</strong> (ID: #{selectedEditGradingStudent.id})</div>
-                  <div style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
-                    🥋 Last Grading Date: <strong style={{ color: '#e2e8f0' }}>{selectedEditGradingStudent.lastGradingDate || 'N/A'}</strong>
+                <form onSubmit={handleSubmitGrade}>
+                  {/* Student Info Card */}
+                  <div style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)', padding: '1.1rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)', marginBottom: '1.25rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Candidate:</span>
+                      <strong style={{ color: '#fff', fontSize: '1rem' }}>{selectedGradeStudent.name}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Branch & Batch:</span>
+                      <span style={{ color: '#e0e0e0', fontSize: '0.85rem' }}>{selectedGradeStudent.branch} • {getBatchNameFromCode(selectedGradeStudent.batch, selectedGradeStudent.branch)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Current Belt:</span>
+                      <span className={`badge ${getBeltColorClass(selectedGradeStudent.belt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem' }}>{selectedGradeStudent.belt}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: selectedGradeStudent.trainerSuggestedBelt ? '8px' : 0 }}>
+                      <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Promotion Target:</span>
+                      {selectedGradeStudent.nextBelt !== 'None' ? (
+                        <span className={`badge ${getBeltColorClass(selectedGradeStudent.nextBelt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem', fontWeight: 700 }}>
+                          ➔ {selectedGradeStudent.nextBelt}
+                        </span>
+                      ) : (
+                        <strong style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>Max Belt Rank Reached</strong>
+                      )}
+                    </div>
+                    {selectedGradeStudent.trainerSuggestedBelt && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', padding: '6px 10px', background: 'rgba(56, 189, 248, 0.1)', borderRadius: '8px', border: '1px solid rgba(56, 189, 248, 0.25)' }}>
+                        <span style={{ color: '#38bdf8', fontSize: '0.82rem', fontWeight: 600 }}>🥋 Trainer Suggested:</span>
+                        <span className={`badge ${getBeltColorClass(selectedGradeStudent.trainerSuggestedBelt)}`} style={{ padding: '3px 8px', fontSize: '0.78rem', fontWeight: 700 }}>
+                          {selectedGradeStudent.trainerSuggestedBelt}
+                        </span>
+                      </div>
+                    )}
+                    {selectedGradeStudent.trainerGradingNotes && (
+                      <div style={{ marginTop: '6px', fontSize: '0.78rem', color: '#94a3b8', fontStyle: 'italic', background: 'rgba(255,255,255,0.02)', padding: '5px 8px', borderRadius: '6px' }}>
+                        <span style={{ color: 'var(--color-text-muted)', fontStyle: 'normal' }}>Trainer Remarks: </span>
+                        "{selectedGradeStudent.trainerGradingNotes}"
+                      </div>
+                    )}
                   </div>
-                </div>
 
-                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', display: 'block', marginBottom: '6px' }}>
-                    Present Grade / Level
-                  </label>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>Test Date</label>
                     <input
-                      type="text"
+                      type="date"
                       className="form-control"
-                      style={{ height: '40px', borderRadius: '10px', flex: 1, fontSize: '0.9rem' }}
-                      value={editGradingForm.belt || ''}
-                      onChange={(e) => setEditGradingForm({ ...editGradingForm, belt: e.target.value })}
-                      placeholder="Type or select belt/level (e.g. Orange Belt)"
-                      list="grading-belt-options-list"
+                      style={{ height: '40px', borderRadius: '10px', fontSize: '0.85rem' }}
+                      value={gradeDate}
+                      onChange={(e) => setGradeDate(e.target.value)}
                       required
                     />
-                    <select
-                      className="form-control"
-                      style={{ height: '40px', borderRadius: '10px', width: 'auto', maxWidth: '160px', fontSize: '0.85rem' }}
-                      value={editGradingForm.belt || ''}
-                      onChange={(e) => setEditGradingForm({ ...editGradingForm, belt: e.target.value })}
-                    >
-                      <option value="">-- Quick Select --</option>
-                      <optgroup label="🥋 Traditional Belts">
-                        {[
-                          'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Red Belt',
-                          'Brown Belt', 'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt',
-                          'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Red',
-                          'Brown', 'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black'
-                        ].map(b => (
-                          <option key={b} value={b}>{b}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="🥊 Kickboxing / Boxing Levels">
-                        {['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
-                          <option key={b} value={b}>{b}</option>
-                        ))}
-                      </optgroup>
-                    </select>
                   </div>
-                  <datalist id="grading-belt-options-list">
-                    {[
-                      'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Red Belt',
-                      'Brown Belt', 'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt',
-                      'Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'
-                    ].map(b => (
-                      <option key={b} value={b} />
-                    ))}
-                  </datalist>
-                  <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
-                    Type any custom grade/level or choose from the quick selection dropdown.
-                  </span>
-                </div>
 
-                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                  {gradeResult === 'Pass' && (
+                    <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>
+                        Target Belt / Level to Assign *
+                      </label>
+                      <select
+                        className="form-control"
+                        style={{ height: '42px', borderRadius: '10px', fontSize: '0.88rem', width: '100%', background: 'rgba(255, 255, 255, 0.05)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.15)' }}
+                        value={targetBelt}
+                        onChange={(e) => setTargetBelt(e.target.value)}
+                        required
+                      >
+                        <option value="">-- Choose Target Belt / Level --</option>
+                        <optgroup label="🥋 Traditional Belts">
+                          {['White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Red Belt', 'Brown Belt', 'Black Belt', 'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Red', 'Brown', 'Black'].map(b => (
+                            <option key={b} value={b} style={{ background: '#12141d', color: '#fff' }}>{b}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="🥊 Kickboxing / Boxing Levels">
+                          {['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
+                            <option key={b} value={b} style={{ background: '#12141d', color: '#fff' }}>{b}</option>
+                          ))}
+                        </optgroup>
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>Test Result</label>
+                    <div className="grade-result-options-grid">
+                      <div
+                        className={`grade-result-card ${gradeResult === 'Pass' ? 'selected-pass' : ''}`}
+                        onClick={() => setGradeResult('Pass')}
+                      >
+                        <CheckCircle size={24} style={{ color: '#4ade80' }} />
+                        <h4 className="grade-result-title">Pass</h4>
+                        <p className="grade-result-desc">
+                          Promotes student to <strong>{selectedGradeStudent.nextBelt !== 'None' ? selectedGradeStudent.nextBelt : 'Next Level'}</strong>
+                        </p>
+                      </div>
+
+                      <div
+                        className={`grade-result-card ${gradeResult === 'Fail' ? 'selected-fail' : ''}`}
+                        onClick={() => setGradeResult('Fail')}
+                      >
+                        <XCircle size={24} style={{ color: '#f87171' }} />
+                        <h4 className="grade-result-title">Fail</h4>
+                        <p className="grade-result-desc">
+                          Retains current <strong>{selectedGradeStudent.belt}</strong> belt level
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {gradeResult === 'Pass' && (
+                    <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '8px' }}>
+                        Awarded Grade Level *
+                      </label>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                        {[
+                          { letter: 'A', label: 'Grade A', desc: 'Outstanding', color: '#FFD700', bg: 'rgba(255, 215, 0, 0.15)' },
+                          { letter: 'B', label: 'Grade B', desc: 'Merit / Good', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)' },
+                          { letter: 'C', label: 'Grade C', desc: 'Satisfactory', color: '#4ade80', bg: 'rgba(74, 222, 128, 0.15)' }
+                        ].map(g => {
+                          const isSelected = gradeLetter === g.letter;
+                          return (
+                            <div
+                              key={g.letter}
+                              style={{
+                                padding: '0.75rem 0.5rem',
+                                borderRadius: '10px',
+                                border: isSelected ? `2px solid ${g.color}` : '1px solid rgba(255, 255, 255, 0.1)',
+                                background: isSelected ? g.bg : 'rgba(255, 255, 255, 0.03)',
+                                textAlign: 'center',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease',
+                                boxShadow: isSelected ? `0 0 12px ${g.bg}` : 'none'
+                              }}
+                              onClick={() => setGradeLetter(g.letter)}
+                            >
+                              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: g.color, fontFamily: 'Outfit, sans-serif' }}>
+                                {g.label}
+                              </div>
+                              <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                                {g.desc}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ padding: '0.6rem 1.25rem', borderRadius: '10px' }}
+                      onClick={() => {
+                        setIsGradeModalOpen(false);
+                        setSelectedGradeStudent(null);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="btn-primary"
+                      disabled={gradingActionLoading}
+                      style={{ background: 'var(--color-accent-primary, #e50914)', padding: '0.6rem 1.5rem', borderRadius: '10px', fontWeight: 600 }}
+                    >
+                      {gradingActionLoading ? 'Saving...' : 'Submit Grade Result'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Modal: Edit Grading Info Override */}
+          {isEditGradingModalOpen && selectedEditGradingStudent && (
+            <div className="modal-overlay" style={{ zIndex: 1000 }}>
+              <div className="modal-content" style={{ maxWidth: '500px', background: 'var(--color-bg-surface, #12141d)', padding: '1.75rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <div className="panel-header" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
+                  <h3 className="panel-title" style={{ fontSize: '1.1rem', margin: 0 }}>Edit Student Grading Info</h3>
                   <button
-                    type="button"
-                    className="btn-secondary"
-                    style={{ borderRadius: '10px', padding: '0.6rem 1.25rem' }}
+                    className="btn-icon"
                     onClick={() => {
                       setIsEditGradingModalOpen(false);
                       setSelectedEditGradingStudent(null);
                     }}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#fff' }}
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="btn-primary"
-                    disabled={gradingActionLoading}
-                    style={{ borderRadius: '10px', padding: '0.6rem 1.5rem', fontWeight: 600 }}
-                  >
-                    {gradingActionLoading ? 'Saving...' : 'Save Override'}
+                    <X size={20} />
                   </button>
                 </div>
-              </form>
+
+                <form onSubmit={handleSubmitEditGrading}>
+                  <div style={{
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    marginBottom: '1.25rem',
+                    fontSize: '0.85rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px'
+                  }}>
+                    <div>Student: <strong style={{ color: '#fff' }}>{selectedEditGradingStudent.name}</strong> (ID: #{selectedEditGradingStudent.id})</div>
+                    <div style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
+                      🥋 Last Grading Date: <strong style={{ color: '#e2e8f0' }}>{selectedEditGradingStudent.lastGradingDate || 'N/A'}</strong>
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', display: 'block', marginBottom: '6px' }}>
+                      Present Grade / Level
+                    </label>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <input
+                        type="text"
+                        className="form-control"
+                        style={{ height: '40px', borderRadius: '10px', flex: 1, fontSize: '0.9rem' }}
+                        value={editGradingForm.belt || ''}
+                        onChange={(e) => setEditGradingForm({ ...editGradingForm, belt: e.target.value })}
+                        placeholder="Type or select belt/level (e.g. Orange Belt)"
+                        list="grading-belt-options-list"
+                        required
+                      />
+                      <select
+                        className="form-control"
+                        style={{ height: '40px', borderRadius: '10px', width: 'auto', maxWidth: '160px', fontSize: '0.85rem' }}
+                        value={editGradingForm.belt || ''}
+                        onChange={(e) => setEditGradingForm({ ...editGradingForm, belt: e.target.value })}
+                      >
+                        <option value="">-- Quick Select --</option>
+                        <optgroup label="🥋 Traditional Belts">
+                          {[
+                            'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Red Belt',
+                            'Brown Belt', 'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt',
+                            'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Red',
+                            'Brown', 'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black'
+                          ].map(b => (
+                            <option key={b} value={b}>{b}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="🥊 Kickboxing / Boxing Levels">
+                          {['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
+                            <option key={b} value={b}>{b}</option>
+                          ))}
+                        </optgroup>
+                      </select>
+                    </div>
+                    <datalist id="grading-belt-options-list">
+                      {[
+                        'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Red Belt',
+                        'Brown Belt', 'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt',
+                        'Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'
+                      ].map(b => (
+                        <option key={b} value={b} />
+                      ))}
+                    </datalist>
+                    <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
+                      Type any custom grade/level or choose from the quick selection dropdown.
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ borderRadius: '10px', padding: '0.6rem 1.25rem' }}
+                      onClick={() => {
+                        setIsEditGradingModalOpen(false);
+                        setSelectedEditGradingStudent(null);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="btn-primary"
+                      disabled={gradingActionLoading}
+                      style={{ borderRadius: '10px', padding: '0.6rem 1.5rem', fontWeight: 600 }}
+                    >
+                      {gradingActionLoading ? 'Saving...' : 'Save Override'}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
-          </div>
-        )}
-      </div>
-    );
+          )}
+        </div>
+      );
     } catch (err) {
       console.error("Error rendering Grading view:", err);
       return (
@@ -11081,13 +11627,12 @@ function App() {
 
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             {/* Search Input */}
-            <div style={{ position: 'relative', minWidth: '220px', flex: '1 1 240px' }}>
-              <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+            <div style={{ minWidth: '220px', flex: '1 1 240px' }}>
               <input
                 type="text"
                 placeholder="Search student..."
                 className="form-control"
-                style={{ paddingLeft: '36px', height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
+                style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -13381,7 +13926,7 @@ function App() {
       const parts = String(rawBatch).split(',').map(p => p.trim()).filter(Boolean);
       const names = parts.map(pt => {
         const ptLower = pt.toLowerCase();
-        const opt = (batchOptions || []).find(b => 
+        const opt = (batchOptions || []).find(b =>
           (b.id && String(b.id).toLowerCase() === ptLower) ||
           (b.code && String(b.code).toLowerCase() === ptLower) ||
           (b.name && String(b.name).toLowerCase() === ptLower)
@@ -14893,7 +15438,7 @@ function App() {
                 }}
                 onClick={() => { setLoginTab('register'); setTrainerRegError(''); setTrainerRegSuccess(''); setLoginError(''); }}
               >
-                <UserPlus size={14} /> Trainer Account Create
+                <UserPlus size={14} /> Trainer Sign Up
               </button>
             </div>
           )}
@@ -14925,7 +15470,7 @@ function App() {
             </>
           ) : loginTab === 'register' ? (
             <div style={{ textAlign: 'left' }}>
-              <h3 style={{ fontSize: '1.05rem', color: '#fff', marginBottom: '0.2rem', textAlign: 'center' }}>Create Trainer Account</h3>
+              <h3 style={{ fontSize: '1.05rem', color: '#fff', marginBottom: '0.2rem', textAlign: 'center' }}>Trainer Sign Up</h3>
               <p style={{ color: 'var(--color-text-muted)', fontSize: '0.78rem', marginBottom: '1rem', textAlign: 'center' }}>
                 Register your account. Super Admin approval required before login.
               </p>
@@ -16143,13 +16688,12 @@ function App() {
                   </select>
                 </div>
               )}
-              <div style={{ position: 'relative' }}>
-                <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+              <div>
                 <input
                   type="text"
                   placeholder="Search students..."
                   className="form-control"
-                  style={{ paddingLeft: '32px', width: '180px', height: '38px', paddingTop: 0, paddingBottom: 0, fontSize: '0.85rem' }}
+                  style={{ width: '180px', height: '38px', paddingTop: 0, paddingBottom: 0, fontSize: '0.85rem' }}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
@@ -16246,7 +16790,7 @@ function App() {
                           const isRead = n.readBy && n.readBy.includes(currentUserClean);
                           const cleanTitle = (n.title || '').trim();
                           const hasEmojiPrefix = cleanTitle.startsWith('📢') || cleanTitle.startsWith('📣') || cleanTitle.startsWith('🔔') || cleanTitle.startsWith('⚠️') || cleanTitle.startsWith('🥋') || cleanTitle.startsWith('💼');
-                          
+
                           return (
                             <div
                               key={n._id}
@@ -17157,9 +17701,9 @@ function App() {
                       >
                         <option value="">Select Trainer</option>
                         {(() => {
-                          const filtered = (trainersList || []).filter(t => 
-                            !editingStudentData.branch || 
-                            !t.branch || 
+                          const filtered = (trainersList || []).filter(t =>
+                            !editingStudentData.branch ||
+                            !t.branch ||
                             (typeof t.branch === 'string' && typeof editingStudentData.branch === 'string' && t.branch.toLowerCase().split(',').map(b => b.trim()).includes(editingStudentData.branch.toLowerCase().trim()))
                           );
                           const listToShow = filtered.length > 0 ? filtered : (trainersList || []);
@@ -17805,7 +18349,7 @@ function App() {
 
                       const display = coupon.type === 'amount' ? `₹${coupon.value}` : `${coupon.value}%`;
                       setCouponMessage(`✓ Coupon Applied for ${formatMonthName(feeMonth)}! ${display} Discount`);
-                      
+
                       const newCoupon = {
                         couponId: code,
                         couponCode: code,
@@ -18209,9 +18753,9 @@ function App() {
                   >
                     <option value="">Select Trainer</option>
                     {(() => {
-                      const filtered = (trainersList || []).filter(t => 
-                        !newStudent.branch || 
-                        !t.branch || 
+                      const filtered = (trainersList || []).filter(t =>
+                        !newStudent.branch ||
+                        !t.branch ||
                         (typeof t.branch === 'string' && typeof newStudent.branch === 'string' && t.branch.toLowerCase().split(',').map(b => b.trim()).includes(newStudent.branch.toLowerCase().trim()))
                       );
                       const listToShow = filtered.length > 0 ? filtered : (trainersList || []);
@@ -18780,6 +19324,218 @@ function App() {
         </div>
       )}
 
+      {/* Modal: Record Fee Payment */}
+      {isRecordPaymentModalOpen && (
+        <div className="modal-overlay" style={{ zIndex: 11000 }}>
+          <div className="modal-content glass-panel" style={{ maxWidth: '520px', padding: '2rem', borderRadius: '16px', background: 'rgba(15, 17, 26, 0.98)', border: '1px solid var(--glass-border)', boxShadow: '0 25px 60px rgba(0,0,0,0.8)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '1rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1.25rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Wallet size={20} color="#4CAF50" /> Record Fee Payment
+              </h3>
+              <button className="btn-icon" onClick={() => setIsRecordPaymentModalOpen(false)}><X size={20} /></button>
+            </div>
+
+            <form onSubmit={handleRecordPaymentSubmit}>
+              <div style={{ background: 'rgba(255,255,255,0.03)', padding: '1rem', borderRadius: '10px', marginBottom: '1.25rem', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#E50914' }}>{paymentFormData.studentName}</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                  Branch: <strong>{paymentFormData.branch}</strong> • Batch: <strong>{paymentFormData.batch || 'Regular'}</strong>
+                </div>
+              </div>
+
+              <div className="payment-modal-grid">
+                <div>
+                  <label style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>Fee Due Month:</label>
+                  <input
+                    type="month"
+                    className="form-control"
+                    value={paymentFormData.feeMonth}
+                    onChange={e => setPaymentFormData({ ...paymentFormData, feeMonth: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>Fee Type:</label>
+                  <select
+                    className="form-control"
+                    value={paymentFormData.feeType}
+                    onChange={e => setPaymentFormData({ ...paymentFormData, feeType: e.target.value })}
+                  >
+                    <option value="monthly">Monthly Fee</option>
+                    <option value="admission">Admission Fee</option>
+                    <option value="custom">Custom Fee</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="payment-modal-grid">
+                <div>
+                  <label style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>Amount Due (₹):</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={paymentFormData.amountDue}
+                    onChange={e => setPaymentFormData({ ...paymentFormData, amountDue: Number(e.target.value) })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.82rem', color: '#51CF66', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Amount Paid (₹):</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    style={{ borderColor: '#4CAF50', fontWeight: 700 }}
+                    value={paymentFormData.amountPaid}
+                    onChange={e => setPaymentFormData({ ...paymentFormData, amountPaid: Number(e.target.value) })}
+                    required
+                  />
+                  {paymentFormData.amountDue > paymentFormData.amountPaid && (
+                    <span style={{ fontSize: '0.75rem', color: '#FFD700', marginTop: '2px', display: 'block' }}>
+                      Remaining Balance: ₹{paymentFormData.amountDue - paymentFormData.amountPaid} (Partial)
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="payment-modal-grid">
+                <div>
+                  <label style={{ fontSize: '0.82rem', color: '#38bdf8', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                    Actual Payment Date:
+                  </label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    style={{ borderColor: '#38bdf8' }}
+                    value={paymentFormData.paymentDate}
+                    onChange={e => setPaymentFormData({ ...paymentFormData, paymentDate: e.target.value })}
+                    required
+                  />
+                  <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: '2px', display: 'block' }}>
+                    Revenue counted in: <strong>{paymentFormData.paymentDate.slice(0, 7)}</strong>
+                  </span>
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>Payment Method:</label>
+                  <select
+                    className="form-control"
+                    value={paymentFormData.paymentMethod}
+                    onChange={e => setPaymentFormData({ ...paymentFormData, paymentMethod: e.target.value })}
+                  >
+                    <option value="Cash">Cash</option>
+                    <option value="UPI">UPI (GPay / PhonePe)</option>
+                    <option value="Bank Transfer">Bank Transfer / NEFT</option>
+                    <option value="Card">Credit / Debit Card</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>Reference / Notes (Optional):</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. UPI Ref #, Cheque #, or parent notes"
+                  value={paymentFormData.notes}
+                  onChange={e => setPaymentFormData({ ...paymentFormData, notes: e.target.value })}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button type="button" className="btn-secondary" onClick={() => setIsRecordPaymentModalOpen(false)}>Cancel</button>
+                <button type="submit" className="btn-primary" style={{ background: '#4CAF50', borderColor: '#4CAF50' }}>
+                  <CheckCircle size={16} /> Save & Generate Receipt
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: View & Print Receipt */}
+      {isReceiptModalOpen && activeReceipt && (
+        <div className="modal-overlay" style={{ zIndex: 11500 }}>
+          <div className="modal-content glass-panel receipt-modal-content" style={{ maxWidth: '560px', borderRadius: '16px', background: '#0d0e15', border: '1px solid var(--glass-border)', boxShadow: '0 30px 80px rgba(0,0,0,0.9)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '2px solid rgba(229,9,20,0.3)', paddingBottom: '1rem' }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '1.4rem', fontFamily: 'Outfit, sans-serif', color: '#fff', letterSpacing: '1px' }}>
+                  <span style={{ color: '#E50914' }}>MASTER</span> FIT ACADEMY
+                </h2>
+                <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>Official Fee Payment Receipt</span>
+              </div>
+              <button className="btn-icon" onClick={() => setIsReceiptModalOpen(false)}><X size={20} /></button>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem', background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <div>
+                <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', display: 'block' }}>Receipt Number:</span>
+                <strong style={{ fontSize: '1rem', color: '#FFD700', fontFamily: 'monospace' }}>{activeReceipt.receiptNumber}</strong>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', display: 'block' }}>Payment Date:</span>
+                <strong style={{ fontSize: '0.95rem', color: '#fff' }}>{activeReceipt.paymentDate}</strong>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                <tbody>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Student Name:</td>
+                    <td style={{ padding: '8px 0', textAlign: 'right', fontWeight: 700, color: '#fff' }}>{activeReceipt.studentName}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Branch:</td>
+                    <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff' }}>{activeReceipt.branch}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Batch:</td>
+                    <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff' }}>{activeReceipt.batch || 'Regular'}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Fee Description (Fee Month):</td>
+                    <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff', fontWeight: 600 }}>
+                      {activeReceipt.feeType === 'admission' ? 'Admission Fee' : `Monthly Fee (${formatMonthName(activeReceipt.feeMonth)})`}
+                    </td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Payment Mode:</td>
+                    <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff' }}>{activeReceipt.paymentMethod}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Amount Due:</td>
+                    <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff' }}>₹{activeReceipt.amountDue}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                    <td style={{ padding: '10px 0', color: '#51CF66', fontWeight: 700, fontSize: '1.05rem' }}>Amount Paid:</td>
+                    <td style={{ padding: '10px 0', textAlign: 'right', color: '#51CF66', fontWeight: 800, fontSize: '1.25rem' }}>
+                      ₹{activeReceipt.amountPaid}
+                    </td>
+                  </tr>
+                  {activeReceipt.balance > 0 && (
+                    <tr>
+                      <td style={{ padding: '8px 0', color: '#FFD700', fontWeight: 600 }}>Remaining Balance:</td>
+                      <td style={{ padding: '8px 0', textAlign: 'right', color: '#FFD700', fontWeight: 700 }}>₹{activeReceipt.balance}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2rem', paddingTop: '1rem', borderTop: '1px dashed rgba(255,255,255,0.15)' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                Recorded by: <strong>{activeReceipt.collectedBy || 'Admin'}</strong>
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button className="btn-secondary" onClick={() => setIsReceiptModalOpen(false)}>Close</button>
+                <button className="btn-primary" onClick={() => window.print()} style={{ background: '#38bdf8', borderColor: '#38bdf8', color: '#000', fontWeight: 700 }}>
+                  🖨️ Print Receipt
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

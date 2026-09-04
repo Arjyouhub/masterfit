@@ -23,7 +23,8 @@ import Notification from './models/Notification.js';
 import Branch from './models/Branch.js';
 import Batch from './models/Batch.js';
 import Class from './models/Class.js';
-
+import FeePayment from './models/FeePayment.js';
+import { calculateRevenueByPaymentDate, getRevenueTrends, generateReceiptNumber, getRevenueMonthFromDate } from './services/revenueService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,7 +39,7 @@ if (fs.existsSync(envPath)) {
 const parseScheduleToDays = (schedule) => {
   const defaults = { Mon: false, Tue: false, Wed: false, Thu: false, Fri: false, Sat: false, Sun: false };
   if (!schedule) return defaults;
-  
+
   const cleanSched = schedule.toLowerCase().replace(/\s+/g, '');
   if (cleanSched === 'daily') {
     return { Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true };
@@ -49,10 +50,10 @@ const parseScheduleToDays = (schedule) => {
   if (cleanSched === 'weekend' || cleanSched === 'weekends') {
     return { Mon: false, Tue: false, Wed: false, Thu: false, Fri: false, Sat: true, Sun: true };
   }
-  
+
   const dayNamesShort = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
   const dayKeys = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  
+
   if (cleanSched.includes('-')) {
     const parts = cleanSched.split('-');
     if (parts.length === 2) {
@@ -70,7 +71,7 @@ const parseScheduleToDays = (schedule) => {
       }
     }
   }
-  
+
   const items = cleanSched.split(',');
   const res = { ...defaults };
   let foundAny = false;
@@ -82,7 +83,7 @@ const parseScheduleToDays = (schedule) => {
       foundAny = true;
     }
   }
-  
+
   if (foundAny) return res;
   return defaults;
 };
@@ -120,34 +121,34 @@ function addLog(type, message) {
 const getClientIp = (req) => {
   // Cloudflare Connecting IP
   let ip = req.headers['cf-connecting-ip'];
-  
+
   // X-Forwarded-For (can be comma-separated list of IPs)
   if (!ip && req.headers['x-forwarded-for']) {
     const ips = req.headers['x-forwarded-for'].split(',');
     ip = ips[0].trim();
   }
-  
+
   // X-Real-IP
   if (!ip && req.headers['x-real-ip']) {
     ip = req.headers['x-real-ip'];
   }
-  
+
   // Express req.ip fallback
   if (!ip) {
     ip = req.ip || req.connection?.remoteAddress || '';
   }
-  
+
   // Clean loopbacks
   if (ip === '::1' || ip === '::ffff:127.0.0.1') {
     ip = '127.0.0.1';
   }
-  
+
   return ip;
 };
 
 const parseUserAgent = (ua) => {
   if (!ua) return { deviceType: 'Unknown', osName: 'Unknown OS', osVersion: '', browserName: 'Unknown Browser', browserVersion: '' };
-  
+
   let deviceType = 'Desktop';
   let osName = 'Unknown OS';
   let osVersion = '';
@@ -160,7 +161,7 @@ const parseUserAgent = (ua) => {
   } else if (/tablet|ipad/i.test(ua)) {
     deviceType = 'Tablet';
   }
-  
+
   // OS Detection
   if (/windows/i.test(ua)) {
     osName = 'Windows';
@@ -227,14 +228,14 @@ function hashPassword(password) {
 
 function verifyPassword(password, storedHash) {
   if (!storedHash) return false;
-  
+
   // Backwards compatibility for plain-text passwords
   if (!storedHash.includes(':')) {
     return password === storedHash;
   }
-  
+
   const parts = storedHash.split(':');
-  
+
   // Upgraded pbkdf2 format: pbkdf2:iterations:salt:hash
   if (parts[0] === 'pbkdf2') {
     const iterations = parseInt(parts[1], 10);
@@ -244,7 +245,7 @@ function verifyPassword(password, storedHash) {
     const checkHash = crypto.pbkdf2Sync(password, salt, iterations, 64, 'sha512').toString('hex');
     return hash === checkHash;
   }
-  
+
   // Old format: salt:hash (with 1000 iterations)
   const [salt, hash] = parts;
   const checkHash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
@@ -445,7 +446,7 @@ function decryptAttendanceRecords(records) {
 async function getBatchSchedule(batchId, branchName) {
   if (!batchId) return null;
   const key = String(batchId).toLowerCase().trim();
-  
+
   // Try querying from Batch model first
   try {
     let query = { code: key };
@@ -544,7 +545,7 @@ const authenticateSession = async (req, res, next) => {
         const end = new Date(cachedSettings.maintenanceEnd);
         active = now >= start && now <= end;
       }
-      
+
       if (active) {
         const mode = cachedSettings.maintenanceMode;
         const userRole = req.user.role;
@@ -604,9 +605,9 @@ app.use((req, res, next) => {
     let logUrl = req.originalUrl || req.url;
     // Redact token in query parameters to prevent exposing session tokens in terminal logs
     logUrl = logUrl.replace(/([\?&]token=)[^&]+/g, '$1[REDACTED]');
-    
+
     const logMsg = `${req.method} ${logUrl} - ${res.statusCode} (${duration}ms) - IP: ${req.ip}`;
-    
+
     if (res.statusCode >= 400) {
       addLog('error', logMsg);
     } else if (logUrl.includes('/api/login') || logUrl.includes('/api/session/verify') || logUrl.includes('/api/developer/sessions')) {
@@ -703,7 +704,7 @@ async function syncUsersAndSeed() {
     // Write/Update all users from usersMap to DB
     for (const [username, userData] of usersMap.entries()) {
       activeUsernames.add(username);
-      
+
       const branchString = Array.from(userData.branches).join(',');
       const batchString = Array.from(userData.batches).join(',');
 
@@ -768,7 +769,7 @@ async function syncUsersAndSeed() {
     if (!devUser) {
       const devPassPlain = process.env.DEV_PASSWORD || 'devpass123';
       const devPassHash = hashPassword(devPassPlain);
-      
+
       await new User({
         username: devClean,
         password: devPassHash,
@@ -909,9 +910,9 @@ async function seedBranchesAndBatches() {
       for (const brName of targetBranchesForBatch) {
         const brClean = brName.trim();
         const branchObj = await Branch.findOne({ code: brClean.toLowerCase().replace(/\s+/g, '-') });
-        const existing = await Batch.findOne({ 
-          branch: new RegExp(`^${brClean}$`, 'i'), 
-          code: cbId.toLowerCase() 
+        const existing = await Batch.findOne({
+          branch: new RegExp(`^${brClean}$`, 'i'),
+          code: cbId.toLowerCase()
         });
         const cbStartTime = cb.startTime || '09:00';
         const cbEndTime = cb.endTime || '10:30';
@@ -961,14 +962,14 @@ async function seedBranchesAndBatches() {
         const parts = key.split('_');
         const brClean = parts[0].trim();
         const btCode = parts.slice(1).join('_').trim().toLowerCase();
-        
+
         // Find existing or create
-        const existing = await Batch.findOne({ 
-          branch: new RegExp(`^${brClean}$`, 'i'), 
-          code: btCode 
+        const existing = await Batch.findOne({
+          branch: new RegExp(`^${brClean}$`, 'i'),
+          code: btCode
         });
         const trainerUser = info.username || `${btCode}@${brClean}`;
-        
+
         if (existing) {
           let changed = false;
           if (existing.trainer !== trainerUser) {
@@ -1004,7 +1005,7 @@ async function seedBranchesAndBatches() {
           const slotType = cb ? (cb.slotType || 'Morning') : 'Morning';
           const status = cb && cb.status ? cb.status : 'Active';
           const branchObj = await Branch.findOne({ code: brClean.toLowerCase().replace(/\s+/g, '-') });
-          
+
           if (branchObj) {
             await new Batch({
               name,
@@ -1056,22 +1057,22 @@ async function validateBatchesBranchMapping() {
   try {
     const branches = await Branch.find({});
     const batches = await Batch.find({});
-    
+
     console.log(`[Validation] Validating branch mappings for ${batches.length} batches...`);
-    
+
     let flaggedCount = 0;
     let mappedCount = 0;
     let deletedCount = 0;
     const seen = new Set();
-    
+
     for (const batch of batches) {
       const normBranch = batch.branch.toLowerCase().trim();
       const normCode = batch.code.toLowerCase().trim();
-      const match = branches.find(br => 
-        br.code === normBranch || 
+      const match = branches.find(br =>
+        br.code === normBranch ||
         br.name.toLowerCase().trim() === normBranch
       );
-      
+
       if (match) {
         const uniqKey = `${match._id.toString()}_${normCode}`;
         if (seen.has(uniqKey)) {
@@ -1099,7 +1100,7 @@ async function validateBatchesBranchMapping() {
         await batch.save();
       }
     }
-    
+
     console.log(`[Validation] Done. Mapped: ${mappedCount}, Flagged: ${flaggedCount}, Deleted Duplicates: ${deletedCount}.`);
   } catch (err) {
     console.error('[Validation] Error validating batch branch mapping:', err);
@@ -1115,7 +1116,7 @@ async function validateBranchBatchMapping(branchVal, batchVal) {
     ]
   });
   if (!branchDoc) return null;
-  
+
   const batchDoc = await Batch.findOne({
     branchId: branchDoc._id,
     code: batchVal.toLowerCase().trim()
@@ -1131,7 +1132,7 @@ async function migratePlaintextPasswords() {
       console.log('No credentials config document found to migrate.');
       return;
     }
-    
+
     let updated = false;
 
     const getEntries = (obj) => {
@@ -1226,7 +1227,7 @@ async function loadSettingsCache() {
     if (!settings) {
       settings = await new SystemSetting({ configKey: 'main' }).save();
     }
-    
+
     let needsUpdate = false;
     let mode = settings.maintenanceMode;
     if (mode === true || mode === 'true') {
@@ -1236,7 +1237,7 @@ async function loadSettingsCache() {
       settings.maintenanceMode = 'none';
       needsUpdate = true;
     }
-    
+
     if (!settings.systemUpdateNotification) {
       settings.systemUpdateNotification = "Dear Users, we have launched a new Help & Support ticketing system! You can now report issues directly using the floating 'Help' button at the bottom-right. You will also receive notification popups containing developer replies as soon as your tickets are resolved.";
       settings.systemUpdateNotificationId = "default-help-release";
@@ -1247,14 +1248,14 @@ async function loadSettingsCache() {
       settings.failedLoginThreshold = 10;
       needsUpdate = true;
     }
-    
+
     if (needsUpdate) {
       await settings.save();
       console.log('[Settings Cache] Legacy maintenanceMode corrected or default announcement populated, and saved to database.');
     }
-    
+
     cachedSettings = settings.toObject();
-    
+
     if (!cachedSettings.systemAlertMessage) {
       cachedSettings.systemAlertMessage = '';
     }
@@ -1292,7 +1293,7 @@ let isInitialConnect = true;
 const connectDb = async () => {
   console.log('Connecting to MongoDB URI:', sanitizedMongoUri);
   try {
-    await mongoose.connect(process.env.MONGO_URI, { 
+    await mongoose.connect(process.env.MONGO_URI, {
       dbName: 'attendance',
       maxPoolSize: 5
     });
@@ -1301,7 +1302,7 @@ const connectDb = async () => {
       await loadSettingsCache();
       await migratePlaintextPasswords();
       await migrateDefaultRates();
-      
+
       // Automatic role migration (coordinator/inspector -> trainer)
       try {
         const updateRes1 = await User.updateMany({ role: 'coordinator' }, { role: 'trainer' });
@@ -1385,7 +1386,7 @@ app.get('/api/public/branches', async (req, res) => {
 app.get('/api/public/batches', async (req, res) => {
   try {
     const list = await Batch.find({ status: 'Active' }).sort({ name: 1 }).lean();
-    
+
     // Deduplicate batches strictly by unique code / name
     const seenCodes = new Set();
     const batches = [];
@@ -1437,7 +1438,7 @@ app.post('/api/public/register/trainer', async (req, res) => {
       return res.status(400).json({ error: `Password must be at least ${cachedSettings.minPasswordLength || 6} characters long.` });
     }
 
-    const existingUser = await User.findOne({ 
+    const existingUser = await User.findOne({
       $or: [
         { username: cleanUsername },
         { email: cleanEmail }
@@ -1600,9 +1601,9 @@ app.delete('/api/branches/:id', authenticateSession, authorizeRoles('superadmin'
 
 app.get('/api/public/trainers', async (req, res) => {
   try {
-    const trainers = await User.find({ 
-      role: { $in: ['trainer', 'coordinator'] }, 
-      status: 'Active' 
+    const trainers = await User.find({
+      role: { $in: ['trainer', 'coordinator'] },
+      status: 'Active'
     }).select('username fullName branch').lean();
     res.json(trainers);
   } catch (err) {
@@ -1615,16 +1616,16 @@ app.get('/api/public/batches', async (req, res) => {
   try {
     let query = { status: 'Active' };
     const { branchId, branch } = req.query;
-    
+
     // Always enforce valid branch mapping
     query.branchId = { $ne: null, $exists: true };
-    
+
     if (branchId) {
       query.branchId = branchId;
     } else if (branch) {
       query.branch = new RegExp(`^${branch}$`, 'i');
     }
-    
+
     const list = await Batch.find(query).sort({ name: 1 }).lean();
     res.json(list);
   } catch (err) {
@@ -1636,15 +1637,15 @@ app.get('/api/batches', authenticateSession, async (req, res) => {
   try {
     const { role, branch, batch } = req.user;
     let query = {};
-    
+
     // Always enforce valid branch mapping
     query.branchId = { $ne: null, $exists: true };
-    
+
     const { branchId } = req.query;
     if (branchId) {
       query.branchId = branchId;
     }
-    
+
     if (role !== 'superadmin' && role !== 'developer') {
       const branchObj = await Branch.findOne({ code: branch.toLowerCase().trim().replace(/\s+/g, '-') });
       if (branchObj) {
@@ -1652,12 +1653,12 @@ app.get('/api/batches', authenticateSession, async (req, res) => {
       } else {
         query.branch = new RegExp(`^${branch}$`, 'i');
       }
-      
+
       if (role === 'trainer') {
         query.code = new RegExp(`^${batch}$`, 'i');
       }
     }
-    
+
     const list = await Batch.find(query).sort({ name: 1 }).lean();
     res.json(list);
   } catch (err) {
@@ -1671,7 +1672,7 @@ app.post('/api/batches', authenticateSession, authorizeRoles('superadmin', 'deve
     if (!name || !code || !branch) {
       return res.status(400).json({ error: 'Name, Code, and Branch are required' });
     }
-    
+
     // Scoping for branchadmin
     if (req.user.role === 'branchadmin') {
       if (branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
@@ -1691,7 +1692,7 @@ app.post('/api/batches', authenticateSession, authorizeRoles('superadmin', 'deve
     if (!branchObj) {
       return res.status(400).json({ error: 'Branch not found. Cannot create batch.' });
     }
-    
+
     const existing = await Batch.findOne({ branchId: branchObj._id, code: cleanCode });
     if (existing) {
       return res.status(400).json({ error: 'Batch code already exists for this branch' });
@@ -1817,14 +1818,14 @@ app.get('/api/classes', authenticateSession, async (req, res) => {
   try {
     const { role, branch, batch } = req.user;
     const dateStr = req.query.date || new Date().toLocaleDateString('en-CA');
-    
+
     // Parse the dateStr (YYYY-MM-DD) in local time
     const dateParts = dateStr.split('-');
     const year = parseInt(dateParts[0], 10);
     const month = parseInt(dateParts[1], 10) - 1;
     const day = parseInt(dateParts[2], 10);
     const dateObj = new Date(year, month, day);
-    
+
     // Query active batches
     let batchQuery = { status: 'Active' };
     if (role !== 'superadmin' && role !== 'developer') {
@@ -1834,14 +1835,14 @@ app.get('/api/classes', authenticateSession, async (req, res) => {
         batchQuery.code = { $in: allowedBatches.map(b => new RegExp(`^${b}$`, 'i')) };
       }
     }
-    
+
     const allActiveBatches = await Batch.find(batchQuery).lean();
-    
+
     // Helper to check if batch runs on the day of dateObj
     const dayIndex = dateObj.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
     const dayNamesLong = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
     const dayNamesShort = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-    
+
     const isDayInSchedule = (schedule) => {
       if (!schedule) return false;
       const cleanSched = schedule.toLowerCase().replace(/\s+/g, '');
@@ -1888,9 +1889,9 @@ app.get('/api/classes', authenticateSession, async (req, res) => {
       }
       return false;
     };
-    
+
     const todayBatches = allActiveBatches.filter(b => isDayInSchedule(b.schedule));
-    
+
     // Fetch persisted class states for this date
     let classQuery = { date: dateStr };
     if (role !== 'superadmin' && role !== 'developer') {
@@ -1900,21 +1901,21 @@ app.get('/api/classes', authenticateSession, async (req, res) => {
         classQuery.batch = { $in: allowedBatches.map(b => new RegExp(`^${b}$`, 'i')) };
       }
     }
-    
+
     const persistedClasses = await Class.find(classQuery).lean();
     const activePersistedClasses = persistedClasses.filter(pc => {
       if (!pc.schedule) return true;
       return isDayInSchedule(pc.schedule);
     });
-    
+
     const resultList = [];
-    
+
     for (const b of todayBatches) {
-      const persisted = activePersistedClasses.find(c => 
-        c.batch.toLowerCase().trim() === b.code.toLowerCase().trim() && 
+      const persisted = activePersistedClasses.find(c =>
+        c.batch.toLowerCase().trim() === b.code.toLowerCase().trim() &&
         c.branch.toLowerCase().trim() === b.branch.toLowerCase().trim()
       );
-      
+
       if (persisted) {
         resultList.push(persisted);
       } else {
@@ -1936,18 +1937,18 @@ app.get('/api/classes', authenticateSession, async (req, res) => {
         });
       }
     }
-    
+
     // Add ad-hoc manual classes
     for (const pc of activePersistedClasses) {
-      const isBatchDerived = todayBatches.some(b => 
-        pc.batch.toLowerCase().trim() === b.code.toLowerCase().trim() && 
+      const isBatchDerived = todayBatches.some(b =>
+        pc.batch.toLowerCase().trim() === b.code.toLowerCase().trim() &&
         pc.branch.toLowerCase().trim() === b.branch.toLowerCase().trim()
       );
       if (!isBatchDerived) {
         resultList.push(pc);
       }
     }
-    
+
     resultList.sort((a, b) => a.startTime.localeCompare(b.startTime));
     res.json(resultList);
   } catch (err) {
@@ -2019,7 +2020,7 @@ app.put('/api/classes/:id', authenticateSession, authorizeRoles('superadmin', 'd
   try {
     const { className, branch, batch, trainer, startTime, endTime, subject, status, cancellationReason, date, schedule, slotType } = req.body;
     let cls;
-    
+
     if (req.params.id.startsWith('virtual_')) {
       cls = new Class({
         className: className ? className.trim() : 'Class',
@@ -2126,7 +2127,7 @@ app.delete('/api/classes/:id', authenticateSession, authorizeRoles('superadmin',
 app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
   try {
     const { role, branch: userBranch, batch: userBatch } = req.user;
-    
+
     const targetBranch = req.query.branch || '';
     const targetBatch = req.query.batch || '';
 
@@ -2222,10 +2223,10 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
     // To get Today's present and absent:
     const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD local
     const todayAttendance = await Attendance.findOne({ date: todayStr }).lean();
-    
+
     let presentToday = 0;
     let absentToday = 0;
-    
+
     // Total attendance records count
     const allAttendance = await Attendance.find({}).lean();
     let totalAttendanceRecords = 0;
@@ -2262,8 +2263,8 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
       }
     }
 
-    const attendancePercentage = (totalPresentCount + totalAbsentCount) > 0 
-      ? Math.round((totalPresentCount / (totalPresentCount + totalAbsentCount)) * 100) 
+    const attendancePercentage = (totalPresentCount + totalAbsentCount) > 0
+      ? Math.round((totalPresentCount / (totalPresentCount + totalAbsentCount)) * 100)
       : 0;
 
     // Fees Calculations
@@ -2305,8 +2306,8 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
       }
 
       // Calculate base rate for this student (default rate)
-      const baseMonthlyRate = student.customMonthlyRate !== null && student.customMonthlyRate !== undefined 
-        ? student.customMonthlyRate 
+      const baseMonthlyRate = student.customMonthlyRate !== null && student.customMonthlyRate !== undefined
+        ? student.customMonthlyRate
         : defaultMonthlyRate;
 
       // Calculate how many months have elapsed from startFeeMonth to currentYearMonth
@@ -2345,8 +2346,8 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
       }
 
       // Handle admission fee
-      let admissionRate = student.customAdmissionRate !== null && student.customAdmissionRate !== undefined 
-        ? student.customAdmissionRate 
+      let admissionRate = student.customAdmissionRate !== null && student.customAdmissionRate !== undefined
+        ? student.customAdmissionRate
         : defaultAdmissionRate;
 
       // Check if admission paid
@@ -2359,6 +2360,23 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
       totalFeeRecords++;
     }
 
+    // Payment-date revenue calculation (Strictly by actual paymentDate)
+    let paymentDateRevenue = 0;
+    try {
+      const userBranch = (role !== 'superadmin' && role !== 'developer') ? branch : (req.query.branch || 'All');
+      const revSummary = await calculateRevenueByPaymentDate({
+        branch: userBranch,
+        batch: req.query.batch || 'All',
+        targetMonth: currentYearMonth,
+        user: req.user
+      });
+      paymentDateRevenue = revSummary.totalCollected;
+    } catch (e) {
+      console.error("Error calculating payment-date revenue in stats:", e);
+    }
+
+    const finalFeeCollection = paymentDateRevenue > 0 ? paymentDateRevenue : Math.round(feeCollection);
+
     res.json({
       totalStudents,
       totalTrainers,
@@ -2370,9 +2388,422 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
       presentToday,
       absentToday,
       attendancePercentage,
-      feeCollection: Math.round(feeCollection),
+      feeCollection: finalFeeCollection,
       pendingFees: Math.round(pendingFees)
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// CENTRAL REVENUE & PAYMENT ACCOUNTING APIS
+// Rule: Revenue Month = Month(Payment Date)
+// ==========================================
+
+// GET /api/revenue/summary - Centralized revenue analytics by payment date
+app.get('/api/revenue/summary', authenticateSession, async (req, res) => {
+  try {
+    const { month, feeMonth, branch, batch } = req.query;
+    const targetMonth = month || new Date().toISOString().slice(0, 7);
+    const targetFeeMonth = feeMonth || targetMonth;
+
+    const summary = await calculateRevenueByPaymentDate({
+      branch: branch || 'All',
+      batch: batch || 'All',
+      targetMonth,
+      targetFeeMonth,
+      user: req.user
+    });
+
+    const trends = await getRevenueTrends({
+      branch: branch || 'All',
+      batch: batch || 'All',
+      user: req.user
+    });
+
+    res.json({ ...summary, trends });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/payments - List payments with filters & pagination
+app.get('/api/payments', authenticateSession, async (req, res) => {
+  try {
+    const { paymentMonth, feeMonth, branch, batch, studentId, status, paymentMethod, page = 1, limit = 100 } = req.query;
+    const filter = {};
+
+    if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
+      const userBranches = String(req.user.branch || '').split(',').map(b => b.trim()).filter(Boolean);
+      if (userBranches.length === 1) {
+        filter.branch = new RegExp(`^${userBranches[0]}$`, 'i');
+      } else if (userBranches.length > 1) {
+        filter.branch = { $in: userBranches.map(b => new RegExp(`^${b}$`, 'i')) };
+      }
+    } else if (branch && branch !== 'All' && branch.trim() !== '') {
+      filter.branch = new RegExp(`^${branch.trim()}$`, 'i');
+    }
+
+    if (batch && batch !== 'All') filter.batch = batch;
+    if (paymentMonth && paymentMonth !== 'All') filter.revenueMonth = paymentMonth;
+    if (feeMonth && feeMonth !== 'All') filter.feeMonth = feeMonth;
+    if (studentId) filter.studentId = Number(studentId);
+    if (status && status !== 'All') filter.status = status;
+    if (paymentMethod && paymentMethod !== 'All') filter.paymentMethod = paymentMethod;
+
+    const skip = (Number(page) - 1) * Number(limit);
+    const [payments, total] = await Promise.all([
+      FeePayment.find(filter).sort({ paymentDate: -1, createdAt: -1 }).skip(skip).limit(Number(limit)).lean(),
+      FeePayment.countDocuments(filter)
+    ]);
+
+    res.json({
+      payments,
+      total,
+      page: Number(page),
+      totalPages: Math.ceil(total / Number(limit))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/payments/record - Record new full or partial payment
+app.post('/api/payments/record', authenticateSession, async (req, res) => {
+  try {
+    const {
+      studentId,
+      feeType = 'monthly',
+      feeMonth,
+      amountDue,
+      amountPaid,
+      paymentDate,
+      paymentMethod = 'Cash',
+      transactionRef = '',
+      notes = ''
+    } = req.body;
+
+    if (!studentId || !feeMonth || amountDue === undefined || amountPaid === undefined) {
+      return res.status(400).json({ error: 'studentId, feeMonth, amountDue, and amountPaid are required' });
+    }
+
+    const student = await Student.findOne({ id: Number(studentId) });
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+
+    // Branch Authorization
+    if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
+      if (student.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Unauthorized: Cannot record payments for another branch' });
+      }
+    }
+
+    // Revenue month strictly derived from paymentDate
+    const { paymentDate: cleanDate, revenueMonth, revenueYear } = getRevenueMonthFromDate(paymentDate);
+    const receiptNumber = generateReceiptNumber(cleanDate);
+
+    // Sum existing payments for this student & feeMonth
+    const existingPayments = await FeePayment.find({
+      studentId: Number(studentId),
+      feeType,
+      feeMonth
+    }).lean();
+
+    const prevPaid = existingPayments.reduce((acc, curr) => acc + (Number(curr.amountPaid) || 0), 0);
+    const totalPaidNow = prevPaid + Number(amountPaid);
+    const balance = Math.max(0, Number(amountDue) - totalPaidNow);
+    const status = balance === 0 ? 'Paid' : (totalPaidNow > 0 ? 'Partial' : 'Pending');
+
+    const decrypted = decryptStudent(student);
+    const studentName = decrypted.name || `Student #${student.id}`;
+
+    const newPayment = new FeePayment({
+      studentId: Number(studentId),
+      studentName,
+      branch: student.branch,
+      batch: student.batch,
+      feeType,
+      feeMonth,
+      feeYear: parseInt(feeMonth.split('-')[0], 10),
+      amountDue: Number(amountDue),
+      amountPaid: Number(amountPaid),
+      balance,
+      status,
+      paymentDate: cleanDate,
+      paymentMonth: revenueMonth,
+      paymentYear: revenueYear,
+      revenueMonth,
+      revenueYear,
+      receiptNumber,
+      paymentMethod,
+      transactionRef,
+      notes,
+      collectedBy: req.user.username || req.user.role || 'Admin'
+    });
+
+    await newPayment.save();
+
+    // Sync student model
+    if (status === 'Paid') {
+      if (feeType === 'monthly') {
+        const paidMonths = student.paidMonths || new Map();
+        if (paidMonths instanceof Map) {
+          paidMonths.set(feeMonth, true);
+        } else {
+          student.paidMonths[feeMonth] = true;
+        }
+        student.markModified('paidMonths');
+      } else if (feeType === 'admission') {
+        student.admissionPaid = cleanDate.slice(0, 7);
+        student.markModified('admissionPaid');
+      }
+      await student.save();
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Payment recorded successfully',
+      payment: newPayment,
+      receiptNumber
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/payments/receipt/:receiptNumber - Fetch receipt by receipt number
+app.get('/api/payments/receipt/:receiptNumber', authenticateSession, async (req, res) => {
+  try {
+    const { receiptNumber } = req.params;
+    const payment = await FeePayment.findOne({ receiptNumber }).lean();
+    if (!payment) return res.status(404).json({ error: 'Receipt not found' });
+
+    if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
+      if (payment.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Unauthorized: Cannot view receipt from another branch' });
+      }
+    }
+
+    res.json(payment);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/payments/:id - Void or cancel payment
+app.delete('/api/payments/:id', authenticateSession, async (req, res) => {
+  try {
+    const payment = await FeePayment.findById(req.params.id);
+    if (!payment) return res.status(404).json({ error: 'Payment not found' });
+
+    if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
+      const allowedBranches = String(req.user.branch || '').toLowerCase().split(',').map(s => s.trim());
+      if (!allowedBranches.includes(payment.branch.toLowerCase().trim())) {
+        return res.status(403).json({ error: 'Unauthorized: cannot delete payment from another branch' });
+      }
+    }
+
+    const sId = Number(payment.studentId);
+    if (payment.feeType === 'monthly' && payment.feeMonth) {
+      await Student.updateOne(
+        { id: sId },
+        { $unset: { [`paidMonths.${payment.feeMonth}`]: 1 } }
+      );
+    } else if (payment.feeType === 'admission') {
+      await Student.updateOne(
+        { id: sId },
+        { $set: { admissionPaid: false } }
+      );
+    }
+
+    const student = await Student.findOne({ id: sId });
+    if (student) {
+      if (payment.feeType === 'monthly') {
+        if (student.paidMonths instanceof Map) {
+          student.paidMonths.delete(payment.feeMonth);
+        } else if (student.paidMonths) {
+          delete student.paidMonths[payment.feeMonth];
+        }
+        student.markModified('paidMonths');
+      } else if (payment.feeType === 'admission') {
+        student.admissionPaid = false;
+        student.markModified('admissionPaid');
+      }
+      await student.save();
+    }
+
+    await FeePayment.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Payment record cancelled successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/payments/cancel - Cancel payment by studentId and feeMonth
+app.post('/api/payments/cancel', authenticateSession, async (req, res) => {
+  try {
+    const { studentId, feeType = 'monthly', feeMonth } = req.body;
+    if (!studentId) return res.status(400).json({ error: 'studentId is required' });
+
+    const sId = Number(studentId);
+    const student = await Student.findOne({ id: sId });
+    if (student) {
+      if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
+        const allowedBranches = String(req.user.branch || '').toLowerCase().split(',').map(s => s.trim());
+        if (!allowedBranches.includes(student.branch.toLowerCase().trim())) {
+          return res.status(403).json({ error: 'Unauthorized: cannot cancel payment for another branch' });
+        }
+      }
+
+      if (feeType === 'monthly') {
+        if (feeMonth) {
+          await Student.updateOne(
+            { id: sId },
+            { $unset: { [`paidMonths.${feeMonth}`]: 1 } }
+          );
+          if (student.paidMonths instanceof Map) {
+            student.paidMonths.delete(feeMonth);
+          } else if (student.paidMonths) {
+            delete student.paidMonths[feeMonth];
+          }
+          student.markModified('paidMonths');
+        } else {
+          await Student.updateOne(
+            { id: sId },
+            { $set: { paidMonths: {} } }
+          );
+          student.paidMonths = new Map();
+          student.markModified('paidMonths');
+        }
+      } else if (feeType === 'admission') {
+        await Student.updateOne(
+          { id: sId },
+          { $set: { admissionPaid: false } }
+        );
+        student.admissionPaid = false;
+        student.markModified('admissionPaid');
+      }
+      await student.save();
+    }
+
+    const filter = {
+      studentId: { $in: [sId, String(studentId)] },
+      feeType
+    };
+    if (feeMonth) filter.feeMonth = feeMonth;
+
+    const delResult = await FeePayment.deleteMany(filter);
+    res.json({ success: true, message: 'Payments cancelled successfully', deletedCount: delResult.deletedCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/payments/migrate-legacy - Baseline legacy records with needsReview flag
+app.post('/api/payments/migrate-legacy', authenticateSession, authorizeRoles('superadmin', 'developer'), async (req, res) => {
+  try {
+    const students = await Student.find({}).lean();
+    let migratedCount = 0;
+
+    const config = await Credential.findOne({ configType: 'main' }).lean();
+    const defaultMonthlyRate = config?.monthlyFeeRate || 600;
+    const defaultAdmissionRate = config?.admissionFeeRate || 1500;
+
+    for (const student of students) {
+      const decrypted = decryptStudent(student);
+      const studentName = decrypted.name || `Student #${student.id}`;
+      const monthlyRate = student.customMonthlyRate !== null && student.customMonthlyRate !== undefined
+        ? student.customMonthlyRate
+        : defaultMonthlyRate;
+      const admissionRate = student.customAdmissionRate !== null && student.customAdmissionRate !== undefined
+        ? student.customAdmissionRate
+        : defaultAdmissionRate;
+
+      // Admission
+      if (student.admissionPaid) {
+        const admissionMonth = typeof student.admissionPaid === 'string' && student.admissionPaid.includes('-')
+          ? student.admissionPaid
+          : (student.joinDate ? student.joinDate.slice(0, 7) : '2026-01');
+
+        const existing = await FeePayment.findOne({
+          studentId: student.id,
+          feeType: 'admission'
+        });
+
+        if (!existing) {
+          const pDate = `${admissionMonth}-01`;
+          await FeePayment.create({
+            studentId: student.id,
+            studentName,
+            branch: student.branch,
+            batch: student.batch,
+            feeType: 'admission',
+            feeMonth: admissionMonth,
+            feeYear: parseInt(admissionMonth.split('-')[0], 10),
+            amountDue: admissionRate,
+            amountPaid: admissionRate,
+            balance: 0,
+            status: 'Paid',
+            paymentDate: pDate,
+            paymentMonth: admissionMonth,
+            paymentYear: parseInt(admissionMonth.split('-')[0], 10),
+            revenueMonth: admissionMonth,
+            revenueYear: parseInt(admissionMonth.split('-')[0], 10),
+            receiptNumber: generateReceiptNumber(pDate),
+            paymentMethod: 'Cash',
+            notes: 'Auto-migrated from legacy database records',
+            collectedBy: 'Migration',
+            needsReview: true
+          });
+          migratedCount++;
+        }
+      }
+
+      // Monthly
+      const paidMonths = student.paidMonths || {};
+      const months = paidMonths instanceof Map ? Array.from(paidMonths.keys()) : Object.keys(paidMonths);
+
+      for (const mStr of months) {
+        const isPaid = paidMonths instanceof Map ? paidMonths.get(mStr) : paidMonths[mStr];
+        if (isPaid) {
+          const existing = await FeePayment.findOne({
+            studentId: student.id,
+            feeType: 'monthly',
+            feeMonth: mStr
+          });
+
+          if (!existing) {
+            const pDate = `${mStr}-01`;
+            await FeePayment.create({
+              studentId: student.id,
+              studentName,
+              branch: student.branch,
+              batch: student.batch,
+              feeType: 'monthly',
+              feeMonth: mStr,
+              feeYear: parseInt(mStr.split('-')[0], 10),
+              amountDue: monthlyRate,
+              amountPaid: monthlyRate,
+              balance: 0,
+              status: 'Paid',
+              paymentDate: pDate,
+              paymentMonth: mStr,
+              paymentYear: parseInt(mStr.split('-')[0], 10),
+              revenueMonth: mStr,
+              revenueYear: parseInt(mStr.split('-')[0], 10),
+              receiptNumber: generateReceiptNumber(pDate),
+              paymentMethod: 'Cash',
+              notes: 'Auto-migrated from legacy database records',
+              collectedBy: 'Migration',
+              needsReview: true
+            });
+            migratedCount++;
+          }
+        }
+      }
+    }
+
+    res.json({ success: true, message: `Successfully migrated ${migratedCount} fee payment records.`, migratedCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2382,13 +2813,13 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
 app.get('/api/students', authenticateSession, async (req, res) => {
   try {
     const { role, branch, batch } = req.user;
-    
+
     // Support query parameters
     const queryBranch = req.query.branchId || req.query.branch || '';
     const queryBatch = req.query.batchId || req.query.batch || '';
 
     let filter = {};
-    
+
     // Resolve branch scoping
     let targetBranch = '';
     if (role === 'superadmin' || role === 'developer') {
@@ -2487,7 +2918,7 @@ app.get('/api/students', authenticateSession, async (req, res) => {
       // Find branchId and branchName
       let branchId = '';
       let branchName = s.branch || '';
-      
+
       const branchDoc = await Branch.findOne({ name: new RegExp(`^${branchName.trim()}$`, 'i') });
       if (branchDoc) {
         branchId = String(branchDoc._id);
@@ -2602,7 +3033,7 @@ app.post('/api/public/students', async (req, res) => {
       const decryptedName = decrypt(s.name);
       const decryptedPhone = decrypt(s.phone);
       return decryptedName.toLowerCase().trim() === req.body.name.toLowerCase().trim() &&
-             decryptedPhone.trim() === req.body.phone.trim();
+        decryptedPhone.trim() === req.body.phone.trim();
     });
 
     if (isDuplicate) {
@@ -2622,11 +3053,11 @@ app.post('/api/public/students', async (req, res) => {
       attempts++;
       const lastStudent = await Student.findOne().sort({ id: -1 });
       nextId = lastStudent && lastStudent.id ? lastStudent.id + 1 : 1;
-      
+
       req.body.id = nextId;
       const encryptedBody = encryptStudentData(req.body);
       const newStudent = new Student(encryptedBody);
-      
+
       try {
         saved = await newStudent.save();
       } catch (saveErr) {
@@ -2654,7 +3085,7 @@ app.post('/api/public/students', async (req, res) => {
 app.post('/api/students', authenticateSession, async (req, res) => {
   try {
     const { role, branch } = req.user;
-    
+
     // Validate MongoDB connection before saving
     if (mongoose.connection.readyState !== 1) {
       const dbErr = 'Database connection is not active';
@@ -2711,7 +3142,7 @@ app.post('/api/students', authenticateSession, async (req, res) => {
       const decryptedName = decrypt(s.name);
       const decryptedPhone = decrypt(s.phone);
       return decryptedName.toLowerCase().trim() === req.body.name.toLowerCase().trim() &&
-             decryptedPhone.trim() === req.body.phone.trim();
+        decryptedPhone.trim() === req.body.phone.trim();
     });
 
     if (isDuplicate) {
@@ -2732,12 +3163,12 @@ app.post('/api/students', authenticateSession, async (req, res) => {
       attempts++;
       const lastStudent = await Student.findOne().sort({ id: -1 });
       nextId = lastStudent && lastStudent.id ? lastStudent.id + 1 : 1;
-      
+
       req.body.id = nextId;
       req.body.nextEligibleGradingDate = calculateNextEligibleDate(req.body.joinDate);
       const encryptedBody = encryptStudentData(req.body);
       const newStudent = new Student(encryptedBody);
-      
+
       try {
         saved = await newStudent.save();
       } catch (saveErr) {
@@ -2767,10 +3198,10 @@ app.put('/api/students/:id', authenticateSession, async (req, res) => {
   try {
     const { id } = req.params;
     const { role, branch } = req.user;
-    
+
     const student = await Student.findOne({ id: Number(id) });
     if (!student) return res.status(404).json({ error: 'Student not found' });
-    
+
     if (role !== 'superadmin' && role !== 'developer') {
       if (student.branch.toLowerCase().trim() !== branch.toLowerCase().trim()) {
         return res.status(403).json({ error: 'Unauthorized: cannot modify student in another branch' });
@@ -2828,10 +3259,10 @@ app.delete('/api/students/:id', authenticateSession, async (req, res) => {
   try {
     const { id } = req.params;
     const { role, branch } = req.user;
-    
+
     const student = await Student.findOne({ id: Number(id) });
     if (!student) return res.status(404).json({ error: 'Student not found' });
-    
+
     if (role !== 'superadmin' && role !== 'developer') {
       if (student.branch.toLowerCase().trim() !== branch.toLowerCase().trim()) {
         return res.status(403).json({ error: 'Unauthorized to delete student in another branch' });
@@ -2932,20 +3363,20 @@ app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin
     });
 
     const todayStr = new Date().toISOString().split('T')[0];
-    
+
     // Process and decrypt students, resolve dynamic nextEligibleGradingDate if empty
     const processedStudents = filteredStudents.map(dec => {
       // Compute next eligible date dynamically if not set
       if (!dec.nextEligibleGradingDate) {
         dec.nextEligibleGradingDate = calculateNextEligibleDate(dec.joinDate);
       }
-      
+
       // Calculate eligibility status (defaults to Eligible unless overridden)
       dec.eligibilityStatus = dec.eligibilityOverride || 'Eligible';
-      
+
       // Next belt auto computation
       dec.nextBelt = getNextBelt(dec.belt);
-      
+
       return dec;
     });
 
@@ -2988,8 +3419,8 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
         const allowedBatchDocs = await BatchModel.find({
           code: { $in: allowedBatches.map(c => new RegExp(`^${c}$`, 'i')) }
         }).lean();
-        const matchesDoc = allowedBatchDocs.some(doc => 
-          doc.name.toLowerCase().trim() === studentBatch || 
+        const matchesDoc = allowedBatchDocs.some(doc =>
+          doc.name.toLowerCase().trim() === studentBatch ||
           schedulesMatch(doc.schedule, student.schedule)
         );
         if (!matchesDoc) {
@@ -3013,6 +3444,8 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
     student.trainerApprovedForGrading = false;
     student.trainerApprovedBy = '';
     student.trainerApprovedAt = '';
+    student.trainerSuggestedBelt = '';
+    student.trainerGradingNotes = '';
 
     const nextEligibleDate = calculateNextEligibleDate(gradingDate);
     const assignedGradeLetter = result === 'Pass' ? (gradeLetter || 'A') : '';
@@ -3034,7 +3467,7 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
     });
 
     await student.save();
-    
+
     // Log action
     addLog('api', `Graded student ${decrypt(student.name)} (ID: ${student.id}) - Result: ${result}, Belt After: ${beltAfter}`);
 
@@ -3110,7 +3543,7 @@ app.delete('/api/students/:id/grading-history/:historyId', authenticateSession, 
 app.put('/api/students/:id/trainer-approval', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { approved } = req.body;
+    const { approved, suggestedBelt, notes } = req.body;
     const { username } = req.user;
 
     const student = await findStudentById(id);
@@ -3121,6 +3554,8 @@ app.put('/api/students/:id/trainer-approval', authenticateSession, authorizeRole
     student.trainerApprovedForGrading = Boolean(approved);
     student.trainerApprovedBy = approved ? username : '';
     student.trainerApprovedAt = approved ? new Date().toISOString() : '';
+    student.trainerSuggestedBelt = approved ? (suggestedBelt || '') : '';
+    student.trainerGradingNotes = approved ? (notes || '') : '';
 
     await student.save();
 
@@ -3128,7 +3563,7 @@ app.put('/api/students/:id/trainer-approval', authenticateSession, authorizeRole
     returnedStudent.nextBelt = getNextBelt(returnedStudent.belt);
     returnedStudent.eligibilityStatus = returnedStudent.eligibilityOverride || 'Eligible';
 
-    addLog('api', `Trainer approval updated for student ${decrypt(student.name)} (ID: ${student.id}) - Approved: ${approved}`);
+    addLog('api', `Trainer approval updated for student ${decrypt(student.name)} (ID: ${student.id}) - Approved: ${approved}${approved && suggestedBelt ? `, Suggested Belt: ${suggestedBelt}` : ''}`);
 
     res.json(returnedStudent);
   } catch (err) {
@@ -3162,8 +3597,8 @@ app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('s
         const allowedBatchDocs = await BatchModel.find({
           code: { $in: allowedBatches.map(c => new RegExp(`^${c}$`, 'i')) }
         }).lean();
-        const matchesDoc = allowedBatchDocs.some(doc => 
-          doc.name.toLowerCase().trim() === studentBatch || 
+        const matchesDoc = allowedBatchDocs.some(doc =>
+          doc.name.toLowerCase().trim() === studentBatch ||
           schedulesMatch(doc.schedule, student.schedule)
         );
         if (!matchesDoc) {
@@ -3180,7 +3615,7 @@ app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('s
       }
       student.joinDate = joinDate;
       modified = true;
-      
+
       // Update nextEligibleGradingDate if student has no grading history
       if (!student.gradingHistory || student.gradingHistory.length === 0) {
         student.nextEligibleGradingDate = calculateNextEligibleDate(joinDate);
@@ -3268,18 +3703,18 @@ app.get('/api/attendance', authenticateSession, async (req, res) => {
   try {
     const { role, branch, batch } = req.user;
     let allowedStudentIds = null;
-    
+
     const currentYear = new Date().getFullYear();
     let queryYear = currentYear;
     if (req.query.year) {
       const parsedYear = parseInt(req.query.year, 10);
       if (!isNaN(parsedYear)) queryYear = parsedYear;
     }
-    
+
     const records = await Attendance.find({
       date: { $gte: `${queryYear}-01-01`, $lte: `${queryYear}-12-31` }
     }).lean();
-    
+
     if (role !== 'superadmin' && role !== 'developer') {
       let studentFilter = { branch: new RegExp(`^${branch}$`, 'i') };
       if (role === 'trainer') {
@@ -3289,12 +3724,12 @@ app.get('/api/attendance', authenticateSession, async (req, res) => {
       const students = await Student.find(studentFilter).select('id').lean();
       allowedStudentIds = new Set(students.map(s => String(s.id)));
     }
-    
+
     const attendanceMap = {};
     records.forEach(record => {
       const plainRecords = record.records instanceof Map ? Object.fromEntries(record.records) : record.records;
       const decryptedRecords = decryptAttendanceRecords(plainRecords);
-      
+
       let filteredRecords = decryptedRecords;
       if (allowedStudentIds) {
         filteredRecords = {};
@@ -3304,7 +3739,7 @@ app.get('/api/attendance', authenticateSession, async (req, res) => {
           }
         });
       }
-      
+
       attendanceMap[record.date] = filteredRecords;
     });
     res.json(attendanceMap);
@@ -3321,9 +3756,9 @@ app.post('/api/attendance', authenticateSession, async (req, res) => {
     if (!records || typeof records !== 'object') {
       return res.status(400).json({ error: 'Records map is required' });
     }
-    
+
     const { role, branch, batch } = req.user;
-    
+
     let studentFilter = {};
     if (role !== 'superadmin' && role !== 'developer') {
       studentFilter.branch = new RegExp(`^${branch}$`, 'i');
@@ -3332,17 +3767,17 @@ app.post('/api/attendance', authenticateSession, async (req, res) => {
         studentFilter.batch = { $in: allowedBatches };
       }
     }
-    
+
     let attendanceDoc = await Attendance.findOne({ date });
     if (!attendanceDoc) {
       attendanceDoc = new Attendance({ date, records: {} });
     }
 
-    const existingPlainRecords = attendanceDoc.records instanceof Map 
-      ? Object.fromEntries(attendanceDoc.records) 
+    const existingPlainRecords = attendanceDoc.records instanceof Map
+      ? Object.fromEntries(attendanceDoc.records)
       : attendanceDoc.records;
     const decryptedExisting = decryptAttendanceRecords(existingPlainRecords);
-    
+
     const finalDecryptedRecords = { ...decryptedExisting };
 
     let allowedStudents;
@@ -3362,10 +3797,10 @@ app.post('/api/attendance', authenticateSession, async (req, res) => {
     });
 
     const encryptedRecords = encryptAttendanceRecords(finalDecryptedRecords);
-    
+
     attendanceDoc.records = new Map(Object.entries(encryptedRecords));
     attendanceDoc.markModified('records');
-    
+
     const saved = await attendanceDoc.save();
     res.json(saved);
   } catch (err) {
@@ -3526,7 +3961,7 @@ app.post('/api/notifications', authenticateSession, authorizeRoles('developer', 
     if (!message || !message.trim()) {
       return res.status(400).json({ error: 'Notification message is required' });
     }
-    
+
     const notification = new Notification({
       title: title.trim(),
       message: message.trim(),
@@ -3540,7 +3975,7 @@ app.post('/api/notifications', authenticateSession, authorizeRoles('developer', 
       scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
       isScheduled: !!isScheduled
     });
-    
+
     const saved = await notification.save();
     console.log(`[Notification] Created new notification: "${saved.title}" by ${saved.sender} (target: ${saved.targetUser}, branch: ${saved.branch})`);
     res.status(201).json(saved);
@@ -3636,7 +4071,7 @@ app.get('/api/system/maintenance', async (req, res) => {
     const now = new Date();
     let isUpcoming = false;
     let isActive = false;
-    
+
     if (cachedSettings.maintenanceMode && cachedSettings.maintenanceMode !== 'none') {
       if (cachedSettings.maintenanceStart && cachedSettings.maintenanceEnd) {
         const start = new Date(cachedSettings.maintenanceStart);
@@ -3705,9 +4140,9 @@ const isTrainerBatchMatch = async (userBatch, bodyBatch) => {
 
   try {
     const allDbBatches = await Batch.find({}).lean();
-    
+
     // Find all identifiers that match bodyBatch
-    const bodyBatchObjs = allDbBatches.filter(b => 
+    const bodyBatchObjs = allDbBatches.filter(b =>
       String(b._id).toLowerCase() === bodyBtLower ||
       String(b.code || '').toLowerCase() === bodyBtLower ||
       String(b.name || '').toLowerCase() === bodyBtLower ||
@@ -3724,7 +4159,7 @@ const isTrainerBatchMatch = async (userBatch, bodyBatch) => {
 
     for (const allowedPart of allowedList) {
       if (bodyIdentifiers.has(allowedPart)) return true;
-      const allowedBatchObjs = allDbBatches.filter(b => 
+      const allowedBatchObjs = allDbBatches.filter(b =>
         String(b._id).toLowerCase() === allowedPart ||
         String(b.code || '').toLowerCase() === allowedPart ||
         String(b.name || '').toLowerCase() === allowedPart
@@ -3750,7 +4185,7 @@ const isTrainerBatchMatch = async (userBatch, bodyBatch) => {
 app.post('/api/login', async (req, res) => {
   try {
     const { loginType, username, password, branch, batch, deviceName, screenResolution } = req.body;
-    
+
     if (typeof username !== 'string' || typeof password !== 'string') {
       return res.status(400).json({ error: 'Username and password must be strings' });
     }
@@ -3827,7 +4262,7 @@ app.post('/api/login', async (req, res) => {
       if (creds) {
         const bodyBranch = String(branch || '').toLowerCase().trim();
         const bodyBatch = String(batch || '').toLowerCase().trim();
-        
+
         if (user.role === 'trainer' && creds.batchCredentials) {
           const key = `${bodyBranch}_${bodyBatch}`;
           const entry = creds.batchCredentials instanceof Map ? creds.batchCredentials.get(key) : creds.batchCredentials[key];
@@ -4008,9 +4443,9 @@ app.get('/api/session/verify', async (req, res) => {
     if (!token || typeof token !== 'string') {
       return res.status(400).json({ success: false, error: 'Token is required and must be a string' });
     }
-    
+
     token = String(token).trim();
-    
+
     const session = await Session.findOne({ token }).lean();
     if (session) {
       // Validate user status
@@ -4035,7 +4470,7 @@ app.post('/api/logout', async (req, res) => {
       if (session) {
         const logoutAt = new Date();
         const duration = Math.round((logoutAt.getTime() - new Date(session.loginTime).getTime()) / 1000);
-        
+
         // Update User lastLogoutAt
         await User.updateOne(
           { username: session.username },
@@ -4081,7 +4516,7 @@ app.delete('/api/sessions', authenticateSession, authorizeRoles('superadmin'), a
   try {
     let { except } = req.query;
     const filter = except && typeof except === 'string' ? { token: { $ne: String(except).trim() } } : {};
-    
+
     if (req.user.role !== 'developer') {
       const developers = await User.find({ role: 'developer' }).select('username').lean();
       const devUsernames = developers.map(d => d.username.toLowerCase().trim());
@@ -4090,7 +4525,7 @@ app.delete('/api/sessions', authenticateSession, authorizeRoles('superadmin'), a
       }
       filter.username = { $nin: devUsernames };
     }
-    
+
     const result = await Session.deleteMany(filter);
     res.json({ success: true, deletedCount: result.deletedCount });
   } catch (err) {
@@ -4174,21 +4609,21 @@ async function sendTwilio(phone, otp) {
   const token = process.env.TWILIO_AUTH_TOKEN;
   const from = process.env.TWILIO_FROM_PHONE;
   if (!sid || !token || !from) return false;
-  
+
   let cleanPhone = phone.replace(/\D/g, '');
   if (!cleanPhone.startsWith('+')) {
     if (cleanPhone.length === 10) cleanPhone = '+91' + cleanPhone;
     else cleanPhone = '+' + cleanPhone;
   }
-  
+
   const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
   const auth = Buffer.from(`${sid}:${token}`).toString('base64');
-  
+
   const bodyParams = new URLSearchParams();
   bodyParams.append('To', cleanPhone);
   bodyParams.append('From', from);
   bodyParams.append('Body', `Your MASTER FIT admin password reset OTP code is: ${otp}. Valid for 5 minutes.`);
-  
+
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -4242,8 +4677,8 @@ app.post('/api/superadmin/forgot-password/send-otp', async (req, res) => {
       return res.status(500).json({ error: 'Credentials document not found' });
     }
 
-    const storedPasswordHash = creds.adminCredentials instanceof Map 
-      ? creds.adminCredentials.get(enteredUser) 
+    const storedPasswordHash = creds.adminCredentials instanceof Map
+      ? creds.adminCredentials.get(enteredUser)
       : creds.adminCredentials[enteredUser];
 
     if (!storedPasswordHash) {
@@ -4394,7 +4829,7 @@ app.get('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
     if (!creds) {
       return res.json({ configType: 'main', adminCredentials: {}, branchCredentials: {}, batchCredentials: {} });
     }
-    
+
     const safeCreds = JSON.parse(JSON.stringify(creds));
     if (req.user.role !== 'developer' && safeCreds.adminCredentials) {
       const developers = await User.find({ role: 'developer' }).select('username').lean();
@@ -4406,7 +4841,7 @@ app.get('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
         delete safeCreds.adminCredentials[devUser];
       }
     }
-    
+
     if (safeCreds.adminCredentials) {
       for (const user of Object.keys(safeCreds.adminCredentials)) {
         safeCreds.adminCredentials[user] = '••••••';
@@ -4472,7 +4907,7 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
         const getBatchBranch = (cb) => {
           const cbId = String(cb.id || cb.code || cb._id || '').trim().toLowerCase();
           const existing = existingBatches.find(eb => String(eb.id || eb.code || eb._id || '').trim().toLowerCase() === cbId);
-          
+
           if (existing && existing.branch) {
             return existing.branch.toLowerCase().trim();
           }
@@ -4480,14 +4915,14 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
             return cb.branch.toLowerCase().trim();
           }
 
-          const batchEntries = credsDoc.batchCredentials instanceof Map 
-            ? Array.from(credsDoc.batchCredentials.entries()) 
+          const batchEntries = credsDoc.batchCredentials instanceof Map
+            ? Array.from(credsDoc.batchCredentials.entries())
             : Object.entries(credsDoc.batchCredentials || {});
           const matchingCredKey = batchEntries.find(([key]) => key.toLowerCase().endsWith(`_${cbId}`));
           if (matchingCredKey) {
             return matchingCredKey[0].split('_')[0].toLowerCase().trim();
           }
-          
+
           const nameToTest = existing ? existing.name : cb.name;
           const nameLower = String(nameToTest || '').toLowerCase();
           if (nameLower.includes('ork')) return 'orkatteri';
@@ -4495,7 +4930,7 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
           if (nameLower.includes('pba') || nameLower.includes('perambra')) return 'perambra';
           if (nameLower.includes('klkndy') || nameLower.includes('kallikandy')) return 'kallikandy';
           if (nameLower.includes('ktdy') || nameLower.includes('kuttiady')) return 'kuttiady';
-          
+
           return 'all';
         };
 
@@ -4557,8 +4992,8 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
     if (body.adminCredentials) {
       for (const [user, pass] of Object.entries(body.adminCredentials)) {
         if (pass === '••••••' && credsDoc) {
-          const oldHash = credsDoc.adminCredentials instanceof Map 
-            ? credsDoc.adminCredentials.get(user) 
+          const oldHash = credsDoc.adminCredentials instanceof Map
+            ? credsDoc.adminCredentials.get(user)
             : credsDoc.adminCredentials[user];
           body.adminCredentials[user] = oldHash;
         } else if (pass) {
@@ -4571,7 +5006,7 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
           }
         }
       }
-      
+
       const developers = await User.find({ role: 'developer' }).select('username').lean();
       const devUsernames = developers.map(d => d.username.toLowerCase().trim());
       if (!devUsernames.includes('developer')) {
@@ -4700,7 +5135,7 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
         const getBatchBranch = (cb) => {
           const cbId = String(cb.id || cb.code || cb._id || '').trim().toLowerCase();
           const existing = credsDoc.customBatches.find(eb => String(eb.id || eb.code || eb._id || '').trim().toLowerCase() === cbId);
-          
+
           if (existing && existing.branch) {
             return existing.branch.toLowerCase().trim();
           }
@@ -4708,14 +5143,14 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
             return cb.branch.toLowerCase().trim();
           }
 
-          const batchEntries = credsDoc.batchCredentials instanceof Map 
-            ? Array.from(credsDoc.batchCredentials.entries()) 
+          const batchEntries = credsDoc.batchCredentials instanceof Map
+            ? Array.from(credsDoc.batchCredentials.entries())
             : Object.entries(credsDoc.batchCredentials || {});
           const matchingCredKey = batchEntries.find(([key]) => key.toLowerCase().endsWith(`_${cbId}`));
           if (matchingCredKey) {
             return matchingCredKey[0].split('_')[0].toLowerCase().trim();
           }
-          
+
           const nameToTest = existing ? existing.name : cb.name;
           const nameLower = String(nameToTest || '').toLowerCase();
           if (nameLower.includes('ork')) return 'orkatteri';
@@ -4723,7 +5158,7 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
           if (nameLower.includes('pba') || nameLower.includes('perambra')) return 'perambra';
           if (nameLower.includes('klkndy') || nameLower.includes('kallikandy')) return 'kallikandy';
           if (nameLower.includes('ktdy') || nameLower.includes('kuttiady')) return 'kuttiady';
-          
+
           return 'all';
         };
 
@@ -4762,12 +5197,12 @@ app.put('/api/credentials', authenticateSession, authorizeRoles('superadmin', 'd
     }
 
     await credsDoc.save();
-    
+
     // Automatically synchronize user collection
     await syncUsersAndSeed();
     // Seed/sync branches and batches collection immediately
     await seedBranchesAndBatches();
-    
+
     res.json(credsDoc);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -4821,19 +5256,19 @@ developerRouter.get('/users', async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
     const search = String(req.query.search || '').trim();
-    
+
     const query = {};
     if (search) {
       query.username = new RegExp(search, 'i');
     }
-    
+
     const count = await User.countDocuments(query);
     const users = await User.find(query)
       .select('-password')
       .skip((page - 1) * limit)
       .limit(limit)
       .lean();
-      
+
     res.json({
       users,
       pagination: {
@@ -4864,7 +5299,8 @@ developerRouter.get('/users/:id/details', async (req, res) => {
     // Fetch Device History (distinct device metrics)
     const devices = await LoginHistory.aggregate([
       { $match: { username: user.username } },
-      { $group: {
+      {
+        $group: {
           _id: {
             deviceName: '$deviceName',
             deviceType: '$deviceType',
@@ -4875,18 +5311,21 @@ developerRouter.get('/users/:id/details', async (req, res) => {
             screenResolution: '$screenResolution'
           },
           lastUsed: { $max: '$createdAt' }
-      }},
+        }
+      },
       { $sort: { lastUsed: -1 } }
     ]);
 
     // Fetch IP History
     const ips = await LoginHistory.aggregate([
       { $match: { username: user.username } },
-      { $group: {
+      {
+        $group: {
           _id: '$ipAddress',
           count: { $sum: 1 },
           lastUsed: { $max: '$createdAt' }
-      }},
+        }
+      },
       { $sort: { lastUsed: -1 } }
     ]);
 
@@ -4950,7 +5389,7 @@ developerRouter.put('/users/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { username, email, role, status } = req.body;
-    
+
     const userToEdit = await User.findById(id);
     if (!userToEdit) {
       return res.status(404).json({ error: 'User not found' });
@@ -4958,7 +5397,7 @@ developerRouter.put('/users/:id', async (req, res) => {
 
     const modifierUsername = req.user.username;
     let auditDesc = `Updated user ${userToEdit.username}: `;
-    
+
     const oldUsername = userToEdit.username;
     const oldRole = userToEdit.role;
     const oldBranch = userToEdit.branch;
@@ -4975,18 +5414,18 @@ developerRouter.put('/users/:id', async (req, res) => {
       userToEdit.username = uClean;
       changed = true;
     }
-    
+
     if (email !== undefined && email !== userToEdit.email) {
       auditDesc += `email changed to ${email}; `;
       userToEdit.email = email;
       changed = true;
     }
-    
+
     if (role && role !== userToEdit.role) {
       auditDesc += `role changed to ${role}; `;
       userToEdit.role = role;
       changed = true;
-      
+
       await new SecurityLog({
         eventType: 'RoleChange',
         username: modifierUsername,
@@ -4995,12 +5434,12 @@ developerRouter.put('/users/:id', async (req, res) => {
         userAgent: req.headers['user-agent']
       }).save();
     }
-    
+
     if (status && status !== userToEdit.status) {
       auditDesc += `status changed to ${status}; `;
       userToEdit.status = status;
       changed = true;
-      
+
       await new SecurityLog({
         eventType: 'UserStatusUpdate',
         username: modifierUsername,
@@ -5017,7 +5456,7 @@ developerRouter.put('/users/:id', async (req, res) => {
       const creds = await Credential.findOne({ configType: 'main' });
       if (creds) {
         let password = userToEdit.password;
-        
+
         // Remove from old place in creds
         if (oldRole === 'superadmin' || oldRole === 'developer') {
           if (creds.adminCredentials instanceof Map) {
@@ -5115,7 +5554,7 @@ developerRouter.get('/locked-users', async (req, res) => {
         { lockUntil: { $ne: null, $gt: new Date() } }
       ]
     }).select('username role phone failedAttempts isLocked lockUntil lockedAt updatedAt').lean();
-    
+
     res.json(lockedUsers);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -5266,7 +5705,7 @@ developerRouter.delete('/users/:id', async (req, res) => {
     if (!userToEdit) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     const uName = userToEdit.username;
     const uRole = userToEdit.role;
     const uBranch = userToEdit.branch;
@@ -5278,7 +5717,7 @@ developerRouter.delete('/users/:id', async (req, res) => {
       userToEdit.status = 'SoftDeleted';
       await userToEdit.save();
     }
-    
+
     // Sync to Credential model by removing the user entry
     const creds = await Credential.findOne({ configType: 'main' });
     if (creds) {
@@ -5305,7 +5744,7 @@ developerRouter.delete('/users/:id', async (req, res) => {
           delete creds.batchCredentials[key];
         }
       }
-      
+
       creds.markModified('adminCredentials');
       creds.markModified('branchCredentials');
       creds.markModified('batchCredentials');
@@ -5319,7 +5758,7 @@ developerRouter.delete('/users/:id', async (req, res) => {
       ipAddress: req.ip,
       userAgent: req.headers['user-agent']
     }).save();
-    
+
     res.json({ success: true, message: isPermanent ? 'User permanently deleted successfully' : 'User soft-deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -5331,14 +5770,14 @@ developerRouter.get('/sessions', async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
-    
+
     const count = await Session.countDocuments();
     const sessions = await Session.find()
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
       .lean();
-      
+
     res.json({
       sessions,
       pagination: {
@@ -5358,7 +5797,7 @@ developerRouter.delete('/sessions/:token', async (req, res) => {
   try {
     const { token } = req.params;
     await Session.deleteOne({ token });
-    
+
     await new SecurityLog({
       eventType: 'SessionTermination',
       username: req.user.username,
@@ -5378,7 +5817,7 @@ developerRouter.delete('/sessions', async (req, res) => {
   try {
     const currentToken = req.user.token;
     const result = await Session.deleteMany({ token: { $ne: currentToken } });
-    
+
     await new SecurityLog({
       eventType: 'SessionTermination',
       username: req.user.username,
@@ -5440,14 +5879,14 @@ developerRouter.get('/login-history', async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
-    
+
     const count = await LoginHistory.countDocuments();
     const history = await LoginHistory.find()
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
       .lean();
-      
+
     res.json({
       history,
       pagination: {
@@ -5468,7 +5907,7 @@ developerRouter.get('/system-status', async (req, res) => {
     const dbStatus = mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected';
     const activeUsersCount = await Session.distinct('username');
     const totalSessionsCount = await Session.countDocuments();
-    
+
     let dbDataSizeVal = 0;
     let dbDataSize = '0.00 MB';
     let dbStorageSize = '0.00 MB';
@@ -5486,10 +5925,10 @@ developerRouter.get('/system-status', async (req, res) => {
     const freeMemBytes = os.freemem();
     const totalMemBytes = os.totalmem();
     const processMem = process.memoryUsage();
-    
+
     const rssMb = Math.round(processMem.rss / (1024 * 1024));
     const dbMb = parseFloat((dbDataSizeVal / (1024 * 1024)).toFixed(2));
-    
+
     res.json({
       databaseStatus: dbStatus,
       dbDataSize,
@@ -5585,14 +6024,14 @@ developerRouter.get('/security-logs', async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
-    
+
     const count = await SecurityLog.countDocuments();
     const logs = await SecurityLog.find()
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
       .lean();
-      
+
     res.json({
       logs,
       pagination: {
@@ -5613,7 +6052,7 @@ developerRouter.get('/app-logs', async (req, res) => {
   try {
     const { type, search, page = 1, limit = 50 } = req.query;
     let filtered = appLogs;
-    
+
     if (type && type !== 'all') {
       filtered = filtered.filter(l => l.type === type);
     }
@@ -5621,15 +6060,15 @@ developerRouter.get('/app-logs', async (req, res) => {
       const q = search.toLowerCase();
       filtered = filtered.filter(l => l.message.toLowerCase().includes(q));
     }
-    
+
     const count = filtered.length;
     const p = Math.max(1, parseInt(page, 10));
     const lim = Math.min(100, Math.max(1, parseInt(limit, 10)));
-    
+
     // Reverse chronological order
     const sorted = [...filtered].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     const paginated = sorted.slice((p - 1) * lim, p * lim);
-    
+
     res.json({
       logs: paginated,
       pagination: {
@@ -5653,7 +6092,7 @@ developerRouter.get('/db-stats', async (req, res) => {
     const sessionCount = await Session.countDocuments();
     const loginHistoryCount = await LoginHistory.countDocuments();
     const securityLogCount = await SecurityLog.countDocuments();
-    
+
     res.json({
       students: studentCount,
       attendance: attendanceCount,
@@ -5674,23 +6113,23 @@ developerRouter.get('/dashboard-stats', async (req, res) => {
     const activeUsers = (await Session.distinct('username')).length;
     const totalSessions = await Session.countDocuments();
     const dbStatus = mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected';
-    
+
     // Recent activity (audit logs)
     const recentActivity = await SecurityLog.find({ eventType: { $ne: 'FailedLogin' } })
       .sort({ createdAt: -1 })
       .limit(5)
       .lean();
-      
+
     // Security alerts (failed logins)
     const securityAlerts = await SecurityLog.find({ eventType: 'FailedLogin' })
       .sort({ createdAt: -1 })
       .limit(5)
       .lean();
-      
+
     const studentCount = await Student.countDocuments();
     const attendanceCount = await Attendance.countDocuments();
     const processMem = process.memoryUsage();
-    
+
     res.json({
       users: {
         total: totalUsers,
@@ -5720,19 +6159,19 @@ developerRouter.get('/database', async (req, res) => {
   try {
     const db = mongoose.connection.db;
     const stats = await db.command({ dbStats: 1 });
-    
+
     const collections = ['students', 'attendances', 'credentials', 'sessions', 'users', 'loginhistories', 'securitylogs'];
     const collectionsData = [];
-    
+
     const startPing = Date.now();
     await db.command({ ping: 1 });
     const pingLatencyMs = Date.now() - startPing;
-    
+
     for (const collName of collections) {
       try {
         const collStats = await db.command({ collStats: collName });
         const indexes = await db.collection(collName).listIndexes().toArray();
-        
+
         collectionsData.push({
           name: collName,
           count: collStats.count,
@@ -5761,7 +6200,7 @@ developerRouter.get('/database', async (req, res) => {
         });
       }
     }
-    
+
     res.json({
       databaseName: stats.db,
       collectionsCount: stats.collections,
@@ -5784,19 +6223,19 @@ developerRouter.get('/audit', async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
     const eventType = req.query.eventType;
-    
+
     const query = { eventType: { $ne: 'FailedLogin' } };
     if (eventType) {
       query.eventType = eventType;
     }
-    
+
     const count = await SecurityLog.countDocuments(query);
     const logs = await SecurityLog.find(query)
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
       .lean();
-      
+
     res.json({
       logs,
       pagination: {
@@ -5819,17 +6258,17 @@ developerRouter.get('/settings', (req, res) => {
 // Developer settings POST
 developerRouter.post('/settings', async (req, res) => {
   try {
-    const { 
-      maintenanceMode, 
-      maintenanceStart, 
-      maintenanceEnd, 
-      systemAlertMessage, 
-      systemUpdateNotification, 
-      sessionTimeoutMinutes, 
-      minPasswordLength, 
-      failedLoginThreshold, 
-      failedLoginBlockTimeMinutes, 
-      logRetentionLimit, 
+    const {
+      maintenanceMode,
+      maintenanceStart,
+      maintenanceEnd,
+      systemAlertMessage,
+      systemUpdateNotification,
+      sessionTimeoutMinutes,
+      minPasswordLength,
+      failedLoginThreshold,
+      failedLoginBlockTimeMinutes,
+      logRetentionLimit,
       startingBillingMonth,
       lockPerformancePage,
       lockBranchBatchMappingPage,
@@ -5840,7 +6279,7 @@ developerRouter.post('/settings', async (req, res) => {
       lockGradingPage,
       allowBranchAdminChangeBelt
     } = req.body;
-    
+
     // Validate inputs
     if (sessionTimeoutMinutes !== undefined && (isNaN(sessionTimeoutMinutes) || sessionTimeoutMinutes <= 0)) {
       return res.status(400).json({ error: 'Session Timeout must be a positive number.' });
@@ -5862,13 +6301,13 @@ developerRouter.post('/settings', async (req, res) => {
     if (!settings) {
       settings = new SystemSetting({ configKey: 'main' });
     }
-    
+
     if (maintenanceMode !== undefined) settings.maintenanceMode = String(maintenanceMode);
     if (startingBillingMonth !== undefined) settings.startingBillingMonth = String(startingBillingMonth).trim();
     if (maintenanceStart !== undefined) settings.maintenanceStart = maintenanceStart ? new Date(maintenanceStart) : null;
     if (maintenanceEnd !== undefined) settings.maintenanceEnd = maintenanceEnd ? new Date(maintenanceEnd) : null;
     if (systemAlertMessage !== undefined) settings.systemAlertMessage = String(systemAlertMessage).trim();
-    
+
     if (lockPerformancePage !== undefined) settings.lockPerformancePage = !!lockPerformancePage;
     if (lockBranchBatchMappingPage !== undefined) settings.lockBranchBatchMappingPage = !!lockBranchBatchMappingPage;
     if (lockFeesPage !== undefined) settings.lockFeesPage = !!lockFeesPage;
@@ -5882,13 +6321,13 @@ developerRouter.post('/settings', async (req, res) => {
       settings.systemUpdateNotification = String(systemUpdateNotification).trim();
       settings.systemUpdateNotificationId = Date.now().toString(); // Generate unique notification ID
     }
-    
+
     if (sessionTimeoutMinutes !== undefined) settings.sessionTimeoutMinutes = parseInt(sessionTimeoutMinutes, 10);
     if (minPasswordLength !== undefined) settings.minPasswordLength = parseInt(minPasswordLength, 10);
     if (failedLoginThreshold !== undefined) settings.failedLoginThreshold = parseInt(failedLoginThreshold, 10);
     if (failedLoginBlockTimeMinutes !== undefined) settings.failedLoginBlockTimeMinutes = parseInt(failedLoginBlockTimeMinutes, 10);
     if (logRetentionLimit !== undefined) settings.logRetentionLimit = parseInt(logRetentionLimit, 10);
-    
+
     // If maintenance schedule has already ended, clear the dates so it applies immediately
     if (settings.maintenanceStart && settings.maintenanceEnd) {
       const end = new Date(settings.maintenanceEnd);
@@ -5897,7 +6336,7 @@ developerRouter.post('/settings', async (req, res) => {
         settings.maintenanceEnd = null;
       }
     }
-    
+
     await settings.save();
     cachedSettings = settings.toObject();
 
@@ -5905,7 +6344,7 @@ developerRouter.post('/settings', async (req, res) => {
     if (settings.maintenanceStart && settings.maintenanceEnd && settings.maintenanceMode !== 'none') {
       const startStr = new Date(settings.maintenanceStart).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
       const endStr = new Date(settings.maintenanceEnd).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
-      
+
       let portalNames = 'All Portals';
       if (settings.maintenanceMode === 'batch') portalNames = 'Trainer / Batch Portal';
       else if (settings.maintenanceMode === 'branch') portalNames = 'Branch Admin Portal';
@@ -5968,18 +6407,18 @@ developerRouter.post('/settings', async (req, res) => {
         // Find users matching these roles
         const usersToBlock = await User.find({ role: { $in: blockedRoles } }).select('username').lean();
         const usernamesToBlock = usersToBlock.map(u => u.username.toLowerCase().trim());
-        
+
         if (usernamesToBlock.length > 0) {
           const deleteResult = await Session.deleteMany({ username: { $in: usernamesToBlock } });
           console.log(`[Maintenance Lockout] Immediately logged out ${deleteResult.deletedCount} sessions for roles: ${blockedRoles.join(', ')}`);
         }
       }
     }
-    
+
     if (appLogs.length > cachedSettings.logRetentionLimit) {
       appLogs.splice(0, appLogs.length - cachedSettings.logRetentionLimit);
     }
-    
+
     await new SecurityLog({
       eventType: 'SystemConfigUpdate',
       username: req.user.username,
@@ -5987,7 +6426,7 @@ developerRouter.post('/settings', async (req, res) => {
       ipAddress: req.ip,
       userAgent: req.headers['user-agent']
     }).save();
-    
+
     res.json({ success: true, settings: cachedSettings });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -6038,7 +6477,7 @@ app.post('/api/admins', authenticateSession, authorizeRoles('superadmin', 'devel
     if (role === 'developer' && req.user.role !== 'developer') {
       return res.status(403).json({ error: 'Access denied: cannot create developer user' });
     }
-    
+
     // Strict scoping for branch admins
     const { role: userRole, branch: userBranch } = req.user;
     if (userRole === 'branchadmin') {
@@ -6381,7 +6820,8 @@ app.get('/api/admins/:id/details', authenticateSession, authorizeRoles('superadm
     // Fetch Device History (distinct device metrics)
     const devices = await LoginHistory.aggregate([
       { $match: { username: user.username } },
-      { $group: {
+      {
+        $group: {
           _id: {
             deviceName: '$deviceName',
             deviceType: '$deviceType',
@@ -6392,18 +6832,21 @@ app.get('/api/admins/:id/details', authenticateSession, authorizeRoles('superadm
             screenResolution: '$screenResolution'
           },
           lastUsed: { $max: '$createdAt' }
-      }},
+        }
+      },
       { $sort: { lastUsed: -1 } }
     ]);
 
     // Fetch IP History
     const ips = await LoginHistory.aggregate([
       { $match: { username: user.username } },
-      { $group: {
+      {
+        $group: {
           _id: '$ipAddress',
           count: { $sum: 1 },
           lastUsed: { $max: '$createdAt' }
-      }},
+        }
+      },
       { $sort: { lastUsed: -1 } }
     ]);
 
@@ -6467,14 +6910,14 @@ developerRouter.get('/help-reports', async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
-    
+
     const count = await HelpReport.countDocuments({});
     const reports = await HelpReport.find({})
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
       .lean();
-      
+
     res.json({
       reports,
       pagination: {
@@ -6568,7 +7011,7 @@ app.post('/api/admin/approve-trainer/:id', authenticateSession, authorizeRoles('
         resolvedBranch = dbBatch.branchName;
         resolvedBatch = dbBatch.code;
         resolvedSchedule = dbBatch.schedule;
-        
+
         dbBatch.trainer = user.username;
         await dbBatch.save();
       }
