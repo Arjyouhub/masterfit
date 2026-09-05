@@ -1537,15 +1537,20 @@ app.post('/api/branches', authenticateSession, authorizeRoles('superadmin', 'dev
       return res.status(400).json({ error: 'Name and Code are required' });
     }
     const cleanCode = code.toLowerCase().trim();
-    if (/^[0-9a-fA-F]{24}$/.test(name.trim()) || /^[0-9a-fA-F]{24}$/.test(cleanCode)) {
+    const cleanName = name.trim();
+    if (/^[0-9a-fA-F]{24}$/.test(cleanName) || /^[0-9a-fA-F]{24}$/.test(cleanCode)) {
       return res.status(400).json({ error: 'Branch name and code cannot be a valid hexadecimal ObjectId' });
     }
-    const existing = await Branch.findOne({ code: cleanCode });
-    if (existing) {
+    const existingCode = await Branch.findOne({ code: cleanCode });
+    if (existingCode) {
       return res.status(400).json({ error: 'Branch code already exists' });
     }
+    const existingName = await Branch.findOne({ name: new RegExp(`^${cleanName}$`, 'i') });
+    if (existingName) {
+      return res.status(400).json({ error: 'Branch name already exists' });
+    }
     const newBranch = new Branch({
-      name: name.trim(),
+      name: cleanName,
       code: cleanCode,
       status: status || 'Active'
     });
@@ -1577,6 +1582,10 @@ app.put('/api/branches/:id', authenticateSession, authorizeRoles('superadmin', '
       const trimmedName = name.trim();
       if (/^[0-9a-fA-F]{24}$/.test(trimmedName)) {
         return res.status(400).json({ error: 'Branch name cannot be a valid hexadecimal ObjectId' });
+      }
+      if (trimmedName.toLowerCase() !== branch.name.toLowerCase()) {
+        const existingName = await Branch.findOne({ _id: { $ne: branch._id }, name: new RegExp(`^${trimmedName}$`, 'i') });
+        if (existingName) return res.status(400).json({ error: 'Branch name already exists' });
       }
       branch.name = trimmedName;
     }
@@ -3433,8 +3442,26 @@ app.post('/api/students/:id/grade', authenticateSession, authorizeRoles('superad
     let beltAfter = beltBefore;
 
     if (result === 'Pass') {
-      const chosenBelt = req.body.targetBelt || getNextBelt(beltBefore);
+      let target = req.body.targetBelt ? String(req.body.targetBelt).trim() : '';
+      if (!target && student.trainerSuggestedBelt) {
+        target = String(student.trainerSuggestedBelt).trim();
+      }
+      if (target.toLowerCase().endsWith(' belt')) {
+        target = target.slice(0, -5).trim();
+      }
+      const naturalNext = getNextBelt(beltBefore);
+      let chosenBelt = target;
+      const cleanBeltBefore = String(beltBefore || '').toLowerCase().replace(/\s*belt$/i, '').trim();
+      if (!chosenBelt || chosenBelt.toLowerCase() === cleanBeltBefore) {
+        chosenBelt = (student.trainerSuggestedBelt && student.trainerSuggestedBelt.toLowerCase().replace(/\s*belt$/i, '').trim() !== cleanBeltBefore)
+          ? student.trainerSuggestedBelt.replace(/\s*belt$/i, '').trim()
+          : naturalNext;
+      }
       if (chosenBelt && chosenBelt !== 'None') {
+        const matched = BELT_ORDER.find(b => b.toLowerCase() === chosenBelt.toLowerCase());
+        if (matched) {
+          chosenBelt = matched.replace(/\s*Belt$/i, '').trim();
+        }
         beltAfter = chosenBelt;
         student.belt = chosenBelt;
       }

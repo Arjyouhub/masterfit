@@ -13,11 +13,8 @@ import gallery2Img from './assets/gallery2.jpg';
 import gallery3Img from './assets/gallery3.jpg';
 import gallery4Img from './assets/gallery4.jpg';
 
-// Academy Branches static list fallback
-const DEFAULT_BRANCHES = [
-  'Kuttiady', 'Perambra', 'Kallachi', 'Orkatteri', 'Paarakadav',
-  'Chembra', 'Kallikandi', 'Devargovil', 'Thuvakunne', 'Elankode', 'Peringathur'
-];
+// Academy Branches list (dynamically loaded from MongoDB database)
+const DEFAULT_BRANCHES = [];
 
 const BRANCHES_DATA = [
   {
@@ -1337,12 +1334,8 @@ function App() {
         .then(res => res.ok ? res.json() : [])
         .then(data => {
           setCustomBranches(data || []);
-          const branchNames = (data || []).map(b => b.name);
-          const uniqueBranches = Array.from(new Set([
-            ...DEFAULT_BRANCHES,
-            ...branchNames
-          ]));
-          setBranches(sortBranchesAlphabetically(uniqueBranches));
+          const branchNames = (data || []).map(b => typeof b === 'string' ? b : b.name).filter(Boolean);
+          setBranches(sortBranchesAlphabetically(branchNames));
         })
         .catch(err => console.error('Error fetching public branches:', err));
 
@@ -1422,12 +1415,8 @@ function App() {
       .then(res => res.ok ? res.json() : [])
       .then(data => {
         setCustomBranches(data || []);
-        const branchNames = (data || []).map(b => b.name);
-        const uniqueBranches = Array.from(new Set([
-          ...DEFAULT_BRANCHES,
-          ...branchNames
-        ]));
-        const sorted = sortBranchesAlphabetically(uniqueBranches);
+        const branchNames = (data || []).map(b => typeof b === 'string' ? b : b.name).filter(Boolean);
+        const sorted = sortBranchesAlphabetically(branchNames);
         setBranches(sorted);
         setBranchFilter(prev => {
           const match = sorted.find(b => b.toLowerCase() === prev.toLowerCase());
@@ -3429,13 +3418,7 @@ function App() {
     setBranchCredentials(updatedBranchCreds);
     setBatchCredentials(updatedBatchCreds);
 
-    const dbBranches = Object.keys(updatedBranchCreds).map(b => b.charAt(0).toUpperCase() + b.slice(1));
-    const uniqueBranches = Array.from(new Set([
-      ...DEFAULT_BRANCHES,
-      ...dbBranches,
-      ...updatedCustomBranches.map(b => b.charAt(0).toUpperCase() + b.slice(1))
-    ]));
-    setBranches(uniqueBranches);
+    setBranches(sortBranchesAlphabetically(updatedCustomBranches));
 
     // Delete from DB Branch collection
     const matchedBranchObj = Array.isArray(customBranches) && customBranches.find(b => {
@@ -3562,13 +3545,7 @@ function App() {
     setBranchCredentials(updatedBranchCreds);
     setBatchCredentials(updatedBatchCreds);
 
-    const dbBranches = Object.keys(updatedBranchCreds).map(b => b.charAt(0).toUpperCase() + b.slice(1));
-    const uniqueBranches = Array.from(new Set([
-      ...DEFAULT_BRANCHES,
-      ...dbBranches,
-      ...updatedCustomBranches.map(b => b.charAt(0).toUpperCase() + b.slice(1))
-    ]));
-    setBranches(uniqueBranches);
+    setBranches(sortBranchesAlphabetically(updatedCustomBranches));
 
     fetch(`${API_BASE_URL}/credentials`, {
       method: 'PUT',
@@ -9685,12 +9662,23 @@ function App() {
         }
       }
 
-      // For Admin roles (Super Admin, Branch Admin, Developer): ONLY show trainer-approved students!
-      if (!isTrainer && !student.trainerApprovedForGrading) {
-        return false;
+      // In Admin page (Super Admin, Branch Admin, Developer): ONLY show trainer-approved students!
+      if (!isTrainer) {
+        if (!student.trainerApprovedForGrading) {
+          return false;
+        }
       }
 
-      return matchesSearch && matchesBatch && matchesBelt && matchesEligibility && matchesResult;
+      let matchesTrainerApproval = true;
+      if (isTrainer) {
+        if (gradingFilterTrainerApproval === 'Approved') {
+          matchesTrainerApproval = !!student.trainerApprovedForGrading;
+        } else if (gradingFilterTrainerApproval === 'Pending') {
+          matchesTrainerApproval = !student.trainerApprovedForGrading;
+        }
+      }
+
+      return matchesSearch && matchesBatch && matchesBelt && matchesEligibility && matchesResult && matchesTrainerApproval;
     });
   };
 
@@ -9847,22 +9835,35 @@ function App() {
     setGradingError('');
     setGradingSuccess('');
 
-    fetch(`${API_BASE_URL}/students/${selectedGradeStudent.id}/grade`, {
+    const naturalNext = getNextBelt(selectedGradeStudent.belt);
+    let resolvedTargetBelt = targetBelt;
+    if (gradeResult === 'Pass') {
+      if (!resolvedTargetBelt || resolvedTargetBelt === selectedGradeStudent.belt) {
+        resolvedTargetBelt = naturalNext !== 'None' ? naturalNext : selectedGradeStudent.belt;
+      }
+    }
+
+    const studentIdentifier = selectedGradeStudent.id || selectedGradeStudent._id;
+
+    fetch(`${API_BASE_URL}/students/${studentIdentifier}/grade`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         result: gradeResult,
         gradeLetter: gradeResult === 'Pass' ? gradeLetter : '',
         gradingDate: gradeDate,
-        targetBelt: gradeResult === 'Pass' ? targetBelt : ''
+        targetBelt: gradeResult === 'Pass' ? resolvedTargetBelt : ''
       })
     })
       .then(async res => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to submit grade');
-        setGradingStudents(gradingStudents.map(s => s.id === data.id ? data : s));
+        const targetId = String(data.id || data._id);
+        setGradingStudents(prev => prev.map(s => String(s.id || s._id) === targetId ? data : s));
+        setStudents(prev => prev.map(s => String(s.id || s._id) === targetId ? { ...s, ...data } : s));
         setIsGradeModalOpen(false);
         setGlobalSuccess(`Grading result submitted successfully for ${data.name}!`);
+        if (typeof fetchGradingStudents === 'function') fetchGradingStudents();
         reloadAllAppData();
       })
       .catch(err => {
@@ -9879,7 +9880,9 @@ function App() {
     setGradingError('');
     setGradingSuccess('');
 
-    fetch(`${API_BASE_URL}/students/${selectedEditGradingStudent.id}/grading-info`, {
+    const studentIdentifier = selectedEditGradingStudent.id || selectedEditGradingStudent._id;
+
+    fetch(`${API_BASE_URL}/students/${studentIdentifier}/grading-info`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(editGradingForm)
@@ -9887,9 +9890,12 @@ function App() {
       .then(async res => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to update grading info');
-        setGradingStudents(gradingStudents.map(s => s.id === data.id ? data : s));
+        const targetId = String(data.id || data._id);
+        setGradingStudents(prev => prev.map(s => String(s.id || s._id) === targetId ? data : s));
+        setStudents(prev => prev.map(s => String(s.id || s._id) === targetId ? { ...s, ...data } : s));
         setIsEditGradingModalOpen(false);
         setGlobalSuccess(`Grading details updated successfully for ${data.name}!`);
+        if (typeof fetchGradingStudents === 'function') fetchGradingStudents();
         reloadAllAppData();
       })
       .catch(err => {
@@ -10422,27 +10428,35 @@ function App() {
             <div className="grading-quick-chips" style={{ marginBottom: '0.85rem', paddingBottom: '0.65rem' }}>
               <button
                 type="button"
-                className={`quick-chip ${gradingFilterEligibility === 'All' && gradingFilterBelt === 'All' ? 'active' : ''}`}
+                className={`quick-chip ${gradingFilterEligibility === 'All' && gradingFilterTrainerApproval === 'All' && gradingFilterBelt === 'All' ? 'active' : ''}`}
                 onClick={() => {
                   setGradingFilterEligibility('All');
+                  setGradingFilterTrainerApproval('All');
                   setGradingFilterBelt('All');
                 }}
               >
-                All ({totalCount})
+                All Candidates ({Array.isArray(gradingStudents) ? gradingStudents.length : totalCount})
               </button>
               <button
                 type="button"
                 className={`quick-chip ${gradingFilterEligibility === 'Eligible' ? 'active-eligible' : ''}`}
                 onClick={() => setGradingFilterEligibility(gradingFilterEligibility === 'Eligible' ? 'All' : 'Eligible')}
               >
-                ⚡ Ready for Test ({eligibleCount})
+                ⚡ Ready for Test ({Array.isArray(gradingStudents) ? gradingStudents.filter(s => s.eligibilityStatus === 'Eligible').length : eligibleCount})
               </button>
               <button
                 type="button"
-                className={`quick-chip ${gradingFilterEligibility === 'Not Eligible' ? 'active-fail' : ''}`}
-                onClick={() => setGradingFilterEligibility(gradingFilterEligibility === 'Not Eligible' ? 'All' : 'Not Eligible')}
+                className={`quick-chip ${gradingFilterTrainerApproval === 'Approved' ? 'active-eligible' : ''}`}
+                onClick={() => setGradingFilterTrainerApproval(gradingFilterTrainerApproval === 'Approved' ? 'All' : 'Approved')}
               >
-                Not Ready ({totalCount - eligibleCount})
+                ✓ Trainer Approved ({Array.isArray(gradingStudents) ? gradingStudents.filter(s => !!s.trainerApprovedForGrading).length : 0})
+              </button>
+              <button
+                type="button"
+                className={`quick-chip ${gradingFilterTrainerApproval === 'Pending' ? 'active-fail' : ''}`}
+                onClick={() => setGradingFilterTrainerApproval(gradingFilterTrainerApproval === 'Pending' ? 'All' : 'Pending')}
+              >
+                ⏳ Pending Approval ({Array.isArray(gradingStudents) ? gradingStudents.filter(s => !s.trainerApprovedForGrading).length : 0})
               </button>
             </div>
 
@@ -10507,6 +10521,7 @@ function App() {
                   setGradingFilterBatch('All');
                   setGradingFilterBelt('All');
                   setGradingFilterEligibility('All');
+                  setGradingFilterTrainerApproval('All');
                   setGradingFilterResult('All');
                   setSearchQuery('');
                 }}
@@ -10689,7 +10704,10 @@ function App() {
                                     setGradeResult('Pass');
                                     setGradeLetter('A');
                                     setGradeDate(new Date().toISOString().split('T')[0]);
-                                    const initialBelt = student.trainerSuggestedBelt || (student.nextBelt && student.nextBelt !== 'None' ? student.nextBelt : (student.belt || 'Yellow Belt'));
+                                    const naturalNext = getNextBelt(student.belt);
+                                    const initialBelt = (student.trainerSuggestedBelt && student.trainerSuggestedBelt !== student.belt)
+                                      ? student.trainerSuggestedBelt
+                                      : (naturalNext !== 'None' ? naturalNext : (student.belt || 'Yellow'));
                                     setTargetBelt(initialBelt);
                                     setIsGradeModalOpen(true);
                                   }}
@@ -11050,8 +11068,8 @@ function App() {
                       >
                         <option value="">-- Choose Target Belt / Level --</option>
                         <optgroup label="🥋 Traditional Belts">
-                          {['White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Red Belt', 'Brown Belt', 'Black Belt', 'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Red', 'Brown', 'Black'].map(b => (
-                            <option key={b} value={b} style={{ background: '#12141d', color: '#fff' }}>{b}</option>
+                          {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Red', 'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black'].map(b => (
+                            <option key={b} value={b} style={{ background: '#12141d', color: '#fff' }}>{b} Belt</option>
                           ))}
                         </optgroup>
                         <optgroup label="🥊 Kickboxing / Boxing Levels">
@@ -11068,18 +11086,28 @@ function App() {
                     <div className="grade-result-options-grid">
                       <div
                         className={`grade-result-card ${gradeResult === 'Pass' ? 'selected-pass' : ''}`}
-                        onClick={() => setGradeResult('Pass')}
+                        onClick={() => {
+                          setGradeResult('Pass');
+                          const naturalNext = getNextBelt(selectedGradeStudent.belt);
+                          const initialBelt = (selectedGradeStudent.trainerSuggestedBelt && selectedGradeStudent.trainerSuggestedBelt !== selectedGradeStudent.belt)
+                            ? selectedGradeStudent.trainerSuggestedBelt
+                            : (naturalNext !== 'None' ? naturalNext : (selectedGradeStudent.belt || 'Yellow'));
+                          setTargetBelt(initialBelt);
+                        }}
                       >
                         <CheckCircle size={24} style={{ color: '#4ade80' }} />
                         <h4 className="grade-result-title">Pass</h4>
                         <p className="grade-result-desc">
-                          Promotes student to <strong>{selectedGradeStudent.nextBelt !== 'None' ? selectedGradeStudent.nextBelt : 'Next Level'}</strong>
+                          Promotes student to <strong>{targetBelt || (getNextBelt(selectedGradeStudent.belt) !== 'None' ? getNextBelt(selectedGradeStudent.belt) : 'Next Level')}</strong>
                         </p>
                       </div>
 
                       <div
                         className={`grade-result-card ${gradeResult === 'Fail' ? 'selected-fail' : ''}`}
-                        onClick={() => setGradeResult('Fail')}
+                        onClick={() => {
+                          setGradeResult('Fail');
+                          setTargetBelt(selectedGradeStudent.belt);
+                        }}
                       >
                         <XCircle size={24} style={{ color: '#f87171' }} />
                         <h4 className="grade-result-title">Fail</h4>
@@ -12793,11 +12821,7 @@ function App() {
                       <td data-label="Total Students"><span className="badge badge-green">{studentCount} Students</span></td>
                       <td data-label="Staff / Trainers"><span className="badge" style={{ background: 'rgba(52, 152, 219, 0.15)', color: '#3498db' }}>{adminCount} Admin / Trainer(s)</span></td>
                       <td data-label="Type">
-                        {isDefault ? (
-                          <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}>System Default</span>
-                        ) : (
-                          <span className="badge" style={{ background: 'rgba(48, 209, 88, 0.15)', color: '#30d158' }}>Custom Config</span>
-                        )}
+                        <span className="badge" style={{ background: 'rgba(48, 209, 88, 0.15)', color: '#30d158' }}>Active Branch</span>
                       </td>
                       <td data-label="Actions">
                         {!isDefault ? (
