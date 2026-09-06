@@ -7485,14 +7485,14 @@ function App() {
               At Master Fit Academy, we don't just teach martial arts—we build confidence, character, discipline, and champions for life. Join Master Fit Academy and take the first step toward a stronger, healthier, more confident, and successful future.
             </p>
           </div>
-          <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
-            <button className="btn-primary" style={{ padding: '1rem 2rem', fontSize: '1.05rem' }} onClick={() => document.getElementById('contact').scrollIntoView({ behavior: 'smooth' })}>
+          <div className="hero-actions">
+            <button className="btn-primary hero-btn-main" onClick={() => document.getElementById('contact').scrollIntoView({ behavior: 'smooth' })}>
               Start Your Journey <ArrowRight size={20} />
             </button>
-            <button className="btn-outline-primary" style={{ padding: '1rem 1.75rem', fontSize: '1.05rem', background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.2)' }} onClick={() => { setAppMode('about'); window.scrollTo(0, 0); }}>
+            <button className="btn-outline-primary hero-btn-sub" onClick={() => { setAppMode('about'); window.scrollTo(0, 0); }}>
               About Academy
             </button>
-            <button className="btn-outline-primary" style={{ padding: '1rem 1.75rem', fontSize: '1.05rem', background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.2)' }} onClick={() => { setAppMode('branches'); window.scrollTo(0, 0); }}>
+            <button className="btn-outline-primary hero-btn-sub" onClick={() => { setAppMode('branches'); window.scrollTo(0, 0); }}>
               <MapPin size={18} style={{ marginRight: '6px' }} /> Our Branches
             </button>
           </div>
