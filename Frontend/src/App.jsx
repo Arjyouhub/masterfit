@@ -7524,7 +7524,7 @@ function App() {
             {
               title: 'MMA',
               desc: 'Full-spectrum mixed martial arts integrating striking, clinch control, takedowns, and comprehensive ground defense.',
-              img: 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&q=80&w=800'
+              img: '/mma.jpg'
             },
             {
               title: 'Kickboxing',
