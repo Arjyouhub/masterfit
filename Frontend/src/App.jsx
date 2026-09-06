@@ -7529,7 +7529,7 @@ function App() {
             {
               title: 'Kickboxing',
               desc: 'High-energy striking fusing explosive kicks, rapid punch combinations, and relentless cardiovascular conditioning.',
-              img: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&q=80&w=800'
+              img: '/kickboxing.jpg'
             },
             {
               title: 'Boxing',
