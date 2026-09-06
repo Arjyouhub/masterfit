@@ -7644,7 +7644,7 @@ function App() {
             <img src="/mashood.jpg" alt="Coach Mashood" className="instructor-img" style={{ objectPosition: 'center 12%' }} />
             <div className="instructor-info">
               <h3>Mashood</h3>
-              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Taekwondo & Fitness Coach</p>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Kung Fu & Karate Coach</p>
             </div>
           </div>
         </div>
