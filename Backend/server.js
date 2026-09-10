@@ -384,14 +384,16 @@ async function findStudentById(idParam) {
 }
 
 const BELT_ORDER = [
-  'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Red', 'Brown', 'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black',
-  'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Red Belt', 'Brown Belt', 'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt',
+  'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black',
+  'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt',
+  // Legacy aliases for existing student data compatibility
+  'Red', 'Red Belt', 'Brown', 'Brown Belt',
   'Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'
 ];
 
 function getNextBelt(currentBelt) {
   const belts = [
-    'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Red',
+    'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple',
     'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black'
   ];
   const levels = ['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'];
@@ -399,8 +401,8 @@ function getNextBelt(currentBelt) {
   const curr = String(currentBelt || '').toLowerCase().trim();
   const cleanCurr = curr.replace(/\s*belt$/i, '').trim();
 
-  // Legacy fallback if student currently has 'Brown' or 'Brown Belt'
-  if (cleanCurr === 'brown') return 'Brown 1';
+  // Legacy fallback if student currently has 'Brown', 'Brown Belt', 'Red', or 'Red Belt'
+  if (cleanCurr === 'brown' || cleanCurr === 'red') return 'Brown 1';
 
   const beltIdx = belts.findIndex(b => b.toLowerCase() === curr || b.toLowerCase() === cleanCurr);
   if (beltIdx !== -1) return beltIdx < belts.length - 1 ? belts[beltIdx + 1] : 'None';
