@@ -7472,17 +7472,8 @@ function App() {
           <span className="hero-subtitle">GRAB YOUR BETTER VERSION</span>
           <h1 className="hero-title">MASTER FIT <span>Academy</span></h1>
           <div className="hero-desc">
-            <p style={{ marginBottom: '0.85rem' }}>
-              At Master Fit Academy, we are dedicated to building stronger bodies, sharper minds, and confident individuals. We provide professional training in Wushu, Boxing, Karate, Kung Fu, Wrestling, Kickboxing, Judo, MMA, Taekwondo, Fitness Training, and Sports Martial Arts.
-            </p>
-            <p style={{ marginBottom: '0.85rem' }}>
-              Our comprehensive training programs are designed for students of different ages, abilities, and fitness levels. We combine traditional martial arts values with modern training techniques to develop complete physical and mental fitness. Through discipline, determination, and focused training, we help every student discover and develop their true potential.
-            </p>
-            <p style={{ marginBottom: '0.85rem' }}>
-              Our programs encourage students to achieve excellence not only in sports but also in their education, personal development, and competitive performance. Martial arts and sports achievements can help eligible students gain sports-related benefits and grace marks in accordance with applicable rules and institutional policies. We also prepare and guide students to develop the fitness, discipline, skills, and confidence that can support them in pursuing eligible government and career opportunities.
-            </p>
-            <p style={{ marginBottom: '1.25rem', color: '#fff', fontWeight: 500 }}>
-              At Master Fit Academy, we don't just teach martial arts—we build confidence, character, discipline, and champions for life. Join Master Fit Academy and take the first step toward a stronger, healthier, more confident, and successful future.
+            <p style={{ marginBottom: '1.25rem', color: '#fff', fontWeight: 400, lineHeight: 1.75 }}>
+              At MASTER FIT Academy, we provide professional training in various martial arts, fitness, and sports disciplines for students of all ages and abilities. Our programs combine traditional values with modern training to build strength, discipline, confidence, and mental fitness. We help students achieve excellence in sports, education, personal development, and competition. Our training also supports eligible students in pursuing sports-related benefits and future career opportunities. At MASTER FIT Academy, we build stronger, more confident individuals and champions for life.
             </p>
           </div>
           <div className="hero-actions">
@@ -7775,17 +7766,8 @@ function App() {
         <div className="about-story-text">
           <span className="section-subtitle" style={{ textAlign: 'left', marginBottom: '0.5rem' }}>Our Heritage & Philosophy</span>
           <h2>Empowering Champions For Life</h2>
-          <p>
-            At Master Fit Academy, we are dedicated to building stronger bodies, sharper minds, and confident individuals. We provide professional training in Wushu, Boxing, Karate, Kung Fu, Wrestling, Kickboxing, Judo, MMA, Taekwondo, Fitness Training, and Sports Martial Arts.
-          </p>
-          <p>
-            Our comprehensive training programs are designed for students of different ages, abilities, and fitness levels. We combine traditional martial arts values with modern training techniques to develop complete physical and mental fitness.
-          </p>
-          <p>
-            Through discipline, determination, and focused training, we help every student discover and develop their true potential. Our programs encourage students to achieve excellence not only in sports but also in their education, personal development, and competitive performance.
-          </p>
-          <p style={{ color: '#fff', fontWeight: 600 }}>
-            At Master Fit Academy, we don't just teach martial arts—we build confidence, character, discipline, and champions for life.
+          <p style={{ lineHeight: '1.75', fontSize: '1.05rem', color: '#d1d5db' }}>
+            At MASTER FIT Academy, we provide professional training in various martial arts, fitness, and sports disciplines for students of all ages and abilities. Our programs combine traditional values with modern training to build strength, discipline, confidence, and mental fitness. We help students achieve excellence in sports, education, personal development, and competition. Our training also supports eligible students in pursuing sports-related benefits and future career opportunities. At MASTER FIT Academy, we build stronger, more confident individuals and champions for life.
           </p>
         </div>
 

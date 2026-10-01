@@ -386,8 +386,6 @@ async function findStudentById(idParam) {
 const BELT_ORDER = [
   'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black',
   'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt', 'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt',
-  // Legacy aliases for existing student data compatibility
-  'Red', 'Red Belt', 'Brown', 'Brown Belt',
   'Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'
 ];
 
