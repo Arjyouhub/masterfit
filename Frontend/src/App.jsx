@@ -7973,6 +7973,26 @@ function App() {
             </div>
           </div>
 
+          {/* Coach 2 */}
+          <div className="instructor-card glass-panel">
+            <span className="instructor-role-tag">Coach</span>
+            <img src="/munaib.jpg" alt="Coach Munaib" className="instructor-img" style={{ objectPosition: 'center 8%' }} />
+            <div className="instructor-info">
+              <h3>Munaib</h3>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Striking & Fitness Coach</p>
+            </div>
+          </div>
+
+          {/* Coach 1 */}
+          <div className="instructor-card glass-panel">
+            <span className="instructor-role-tag">Coach</span>
+            <img src="/vindas.jpg" alt="Coach Vindas" className="instructor-img" style={{ objectPosition: 'center 6%' }} />
+            <div className="instructor-info">
+              <h3>Vindas</h3>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Head Coach</p>
+            </div>
+          </div>
+
           {/* Advocate / Legal Advisor */}
           <div className="instructor-card glass-panel">
             <span className="instructor-role-tag">Advocate</span>
@@ -7983,30 +8003,10 @@ function App() {
             </div>
           </div>
 
-          {/* Coach 1 */}
-          <div className="instructor-card glass-panel">
-            <span className="instructor-role-tag">Coach</span>
-            <img src="/vindas.jpg" alt="Coach Vindas" className="instructor-img" style={{ objectPosition: 'center 15%' }} />
-            <div className="instructor-info">
-              <h3>Vindas</h3>
-              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Head Coach</p>
-            </div>
-          </div>
-
-          {/* Coach 2 */}
-          <div className="instructor-card glass-panel">
-            <span className="instructor-role-tag">Coach</span>
-            <img src="/munaib.jpg" alt="Coach Munaib" className="instructor-img" style={{ objectPosition: 'center 12%' }} />
-            <div className="instructor-info">
-              <h3>Munaib</h3>
-              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Striking & Fitness Coach</p>
-            </div>
-          </div>
-
           {/* Coach 3 */}
           <div className="instructor-card glass-panel">
             <span className="instructor-role-tag">Coach</span>
-            <img src="/hisham.jpg" alt="Coach Hisham" className="instructor-img" style={{ objectPosition: 'center 10%' }} />
+            <img src="/hisham.jpg" alt="Coach Hisham" className="instructor-img" style={{ objectPosition: 'center 5%' }} />
             <div className="instructor-info">
               <h3>Hisham</h3>
               <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>MMA & Conditioning Coach</p>
