@@ -6,6 +6,8 @@ const sessionSchema = new mongoose.Schema({
   loginTime: { type: Date, default: Date.now, expires: '7d' },
   branch: { type: String, default: '' },
   batch: { type: String, default: '' },
+  role: { type: String, default: 'admin' },
+  studentId: { type: Number, default: null },
   ipAddress: { type: String },
   userAgent: { type: String },
   deviceName: { type: String },

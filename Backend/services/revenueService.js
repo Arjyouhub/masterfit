@@ -84,16 +84,45 @@ export async function calculateRevenueByPaymentDate({ branch, batch, targetMonth
     const amt = Number(p.amountPaid) || 0;
     totalCollected += amt;
 
-    if (p.feeType === 'admission') {
-      admissionFeeCollected += amt;
-    } else if (p.feeType === 'monthly') {
-      if (p.feeMonth === activeFeeMonth) {
-        monthlyFeeCollected += amt;
+    // Ensure p.breakdown exists on returned payment object
+    if (!Array.isArray(p.breakdown) || p.breakdown.length === 0) {
+      p.breakdown = [{
+        feeMonth: p.feeMonth || '',
+        feeType: p.feeType || 'monthly',
+        amount: amt,
+        description: p.feeType === 'admission' ? 'Admission Fee' : (p.feeMonth ? `${p.feeMonth} Fee` : 'Monthly Fee')
+      }];
+    }
+
+    // Accumulate admission and monthly fees from breakdown or top-level
+    let hasAdmission = false;
+    for (const item of p.breakdown) {
+      const itemAmt = Number(item.amount) || 0;
+      if (item.feeType === 'admission') {
+        admissionFeeCollected += itemAmt;
+        hasAdmission = true;
+      } else if (item.feeType === 'monthly') {
+        if (item.feeMonth === activeFeeMonth) {
+          monthlyFeeCollected += itemAmt;
+        } else {
+          pastDuesCollected += itemAmt;
+        }
       } else {
-        pastDuesCollected += amt;
+        otherFeeCollected += itemAmt;
       }
-    } else {
-      otherFeeCollected += amt;
+    }
+    if (!p.breakdown || p.breakdown.length === 0) {
+      if (p.feeType === 'admission') {
+        admissionFeeCollected += amt;
+      } else if (p.feeType === 'monthly') {
+        if (p.feeMonth === activeFeeMonth) {
+          monthlyFeeCollected += amt;
+        } else {
+          pastDuesCollected += amt;
+        }
+      } else {
+        otherFeeCollected += amt;
+      }
     }
 
     // Daily breakdown

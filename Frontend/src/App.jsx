@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  Users, CalendarDays, Calendar, Layers, Wallet, Bell, Settings, LogOut, UserPlus, AlertTriangle, AlertCircle, X,
+  Users, CalendarDays, Calendar, Layers, Wallet, CreditCard, Bell, Settings, LogOut, UserPlus, AlertTriangle, AlertCircle, X,
   ChevronLeft, ChevronRight, CheckCircle, XCircle, MessageCircle, MessageSquare,
   Search, Phone, Trash2, ArrowRight, Activity, MapPin, TrendingUp, Award, Menu,
-  Shield, Lock, Unlock, FileDown, FileUp, Database, Terminal, Cpu, HardDrive, Key, History,
-  Eye, EyeOff, Star, Megaphone, Send
+  Shield, ShieldCheck, Lock, Unlock, FileDown, FileUp, Database, Terminal, Cpu, HardDrive, Key, History,
+  Eye, EyeOff, Star, Megaphone, Send, Camera
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import './index.css';
+import StudentLogin from './components/StudentPortal/StudentLogin.jsx';
+import StudentPortal from './components/StudentPortal/StudentPortal.jsx';
 import gallery1Img from './assets/gallery1.jpg';
 import gallery2Img from './assets/gallery2.jpg';
 import gallery3Img from './assets/gallery3.jpg';
@@ -344,6 +346,42 @@ const renderHighlightedName = (nameStr, queryStr) => {
   );
 };
 
+const compressImage = (base64Str, maxWidth = 180, maxHeight = 180, quality = 0.75) => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = base64Str;
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+
+      if (width > height) {
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+      } else {
+        if (height > maxHeight) {
+          width = Math.round((width * maxHeight) / height);
+          height = maxHeight;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+
+      const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+      resolve(compressedBase64);
+    };
+    img.onerror = () => {
+      resolve(base64Str);
+    };
+  });
+};
+
 function App() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -373,25 +411,79 @@ function App() {
     document.cookie = "umai_session_batch=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT;";
   };
 
+  // Student Portal session helpers
+  const getStudentSessionToken = () => {
+    return localStorage.getItem('umai_student_token') || getCookieValue('umai_student_token');
+  };
+
+  const getStudentSessionData = () => {
+    try {
+      const s = localStorage.getItem('umai_student_data');
+      return s ? JSON.parse(s) : null;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const setStudentSession = (token, studentData) => {
+    localStorage.setItem('umai_student_token', token);
+    localStorage.setItem('umai_student_data', JSON.stringify(studentData));
+    document.cookie = `umai_student_token=${encodeURIComponent(token)}; path=/; max-age=604800;`;
+  };
+
+  const clearStudentSession = () => {
+    localStorage.removeItem('umai_student_token');
+    localStorage.removeItem('umai_student_data');
+    document.cookie = "umai_student_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT;";
+  };
+
   const [appMode, setAppMode] = useState(() => {
-    // Handle path-based routing (e.g. /developer/login) by redirecting to hash routing
+    // 1. Handle path-based routing (e.g. /student, /student/login, /developer/login)
     if (window.location.pathname !== '/' && window.location.pathname !== '/index.html') {
-      const cleanPath = window.location.pathname;
-      if (cleanPath.startsWith('/developer') || cleanPath === '/superadmin' || cleanPath === '/login' || cleanPath === '/admin') {
+      const cleanPath = window.location.pathname.replace(/\/$/, '');
+      if (cleanPath.startsWith('/student')) {
         window.location.replace('/#' + cleanPath + window.location.search);
-        return 'website';
+        const sToken = localStorage.getItem('umai_student_token');
+        if (cleanPath.includes('portal') && sToken) return 'student-portal';
+        return 'student-login';
+      }
+      if (cleanPath.startsWith('/developer')) {
+        window.location.replace('/#' + cleanPath + window.location.search);
+        return 'developer-login';
+      }
+      if (cleanPath === '/superadmin') {
+        window.location.replace('/#' + cleanPath + window.location.search);
+        return 'superadmin-login';
+      }
+      if (cleanPath === '/login' || cleanPath === '/admin') {
+        window.location.replace('/#' + cleanPath + window.location.search);
+        return 'login';
       }
     }
 
-    const hash = window.location.hash;
-    const hasSession = getSessionUser();
+    const hash = window.location.hash || '';
+    const cleanHash = hash.replace(/^#\/?/, '/').replace(/\/$/, '');
 
-    if (hasSession) {
+    // 2. Student route handling (ALWAYS takes precedence over staff/admin session!)
+    if (cleanHash.startsWith('/student') || cleanHash === 'student') {
+      const sToken = localStorage.getItem('umai_student_token');
+      if (cleanHash.includes('portal')) {
+        if (sToken) return 'student-portal';
+        return 'student-login';
+      }
+      // Direct access to /student or /student/login
+      if (sToken && cleanHash === '/student') return 'student-portal';
+      return 'student-login';
+    }
+
+    // 3. Staff / Admin session check (only applies when NOT on a student or login route)
+    const hasSession = getSessionUser();
+    if (hasSession && hash !== '#/login' && hash !== '#/student/login') {
       const cleanUser = hasSession.toLowerCase().trim();
       if (cleanUser === 'developer' || cleanUser.startsWith('developer@')) {
         return 'developer';
       }
-      return 'admin'; // Always restore admin dashboard if session exists!
+      return 'admin';
     }
 
     if (hash === '#/developer/login') {
@@ -401,7 +493,7 @@ function App() {
     } else if (hash === '#/login' || hash === '#/branch' || hash === '#/batch') {
       return 'login';
     } else if (hash === '#/admin') {
-      return 'login'; // No session? Force login
+      return hasSession ? 'admin' : 'login';
     } else if (hash === '#/about' || hash === '#about') {
       return 'about';
     } else if (hash === '#/branches' || hash === '#branches') {
@@ -411,6 +503,17 @@ function App() {
   });
 
   const [currentView, setCurrentView] = useState('dashboard');
+  const [paymentSubmissions, setPaymentSubmissions] = useState([]);
+  const [loadingPaymentSubmissions, setLoadingPaymentSubmissions] = useState(false);
+  const [paymentSubmissionFilter, setPaymentSubmissionFilter] = useState('all');
+  const [viewingProofSubmission, setViewingProofSubmission] = useState(null);
+  const [rejectingSubmission, setRejectingSubmission] = useState(null);
+  const [rejectionReasonInput, setRejectionReasonInput] = useState('');
+  const [approvingSubId, setApprovingSubId] = useState(null);
+  const [approvalFeedbackMsg, setApprovalFeedbackMsg] = useState('');
+  const [approvalErrorMsg, setApprovalErrorMsg] = useState('');
+  const [adminResetMpinModal, setAdminResetMpinModal] = useState(null);
+  const [createdStudentTempMpin, setCreatedStudentTempMpin] = useState(null);
   const [feeDetailsStudentId, setFeeDetailsStudentId] = useState(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -864,14 +967,10 @@ function App() {
   // Trainer Registration & Approval States
   const [loginTab, setLoginTab] = useState('login');
   const [trainerRegForm, setTrainerRegForm] = useState({
-    username: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
     fullName: '',
+    email: '',
     phone: '',
-    preferredBranch: '',
-    preferredBatch: ''
+    profilePhoto: ''
   });
   const [trainerRegError, setTrainerRegError] = useState('');
   const [trainerRegSuccess, setTrainerRegSuccess] = useState('');
@@ -882,6 +981,10 @@ function App() {
   const [loadingPendingTrainers, setLoadingPendingTrainers] = useState(false);
   const [approvalBranchSelections, setApprovalBranchSelections] = useState({});
   const [approvalBatchSelections, setApprovalBatchSelections] = useState({});
+  const [approvalUsernameSelections, setApprovalUsernameSelections] = useState({});
+  const [approvalPasswordSelections, setApprovalPasswordSelections] = useState({});
+  const [showApprovalPassword, setShowApprovalPassword] = useState({});
+  const [approvedTrainerCredentialsModal, setApprovedTrainerCredentialsModal] = useState(null);
   const [activeTrainerBranchSelections, setActiveTrainerBranchSelections] = useState({});
   const [activeTrainerBatchSelections, setActiveTrainerBatchSelections] = useState({});
   const [trainerApprovalSuccess, setTrainerApprovalSuccess] = useState('');
@@ -2009,15 +2112,29 @@ function App() {
     }
   }, [currentView, loggedInUser]);
 
-  const handleApproveTrainer = (trainerId) => {
+  const handleApproveTrainer = (trainerId, explicitBranch, explicitBatch, explicitUsername, explicitPassword) => {
     const token = getSessionToken();
     if (!token) return;
     setTrainerApprovalError('');
     setTrainerApprovalSuccess('');
 
     const targetTrainer = pendingTrainers.find(t => t._id === trainerId);
-    const branch = approvalBranchSelections[trainerId] || (targetTrainer ? targetTrainer.branch : '') || (branches[0] || 'Kuttiady');
-    const batch = approvalBatchSelections[trainerId] || (targetTrainer ? targetTrainer.batch : '') || 'batch1';
+    const branch = explicitBranch || approvalBranchSelections[trainerId] || (targetTrainer ? targetTrainer.branch : '') || (branches[0] || 'Kuttiady');
+    const availableBatches = getFilteredBatchOptions(branch);
+    const fallbackBatch = availableBatches[0] ? availableBatches[0].id : 'batch1';
+    const batch = explicitBatch || approvalBatchSelections[trainerId] || (targetTrainer ? targetTrainer.batch : '') || fallbackBatch;
+
+    const username = (explicitUsername !== undefined ? explicitUsername : (approvalUsernameSelections[trainerId] || '')).trim().toLowerCase();
+    const password = explicitPassword !== undefined ? explicitPassword : (approvalPasswordSelections[trainerId] || '');
+
+    if (!username || username.length < 3) {
+      setTrainerApprovalError('Please assign a valid username (at least 3 characters) for the trainer.');
+      return;
+    }
+    if (!password || password.length < 6) {
+      setTrainerApprovalError('Please assign a password (at least 6 characters) for the trainer.');
+      return;
+    }
 
     fetch(`${API_BASE_URL}/admin/approve-trainer/${trainerId}`, {
       method: 'POST',
@@ -2025,7 +2142,7 @@ function App() {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({ branch, batch })
+      body: JSON.stringify({ branch, batch, username, password })
     })
       .then(res => {
         if (!res.ok) {
@@ -2034,7 +2151,15 @@ function App() {
         return res.json();
       })
       .then(data => {
-        setTrainerApprovalSuccess(data.message || 'Trainer approved successfully!');
+        setTrainerApprovalSuccess(data.message || 'Trainer approved and credentials created successfully!');
+        setApprovedTrainerCredentialsModal({
+          fullName: targetTrainer ? targetTrainer.fullName : username,
+          username: username,
+          password: password,
+          branch: branch,
+          batch: batch,
+          phone: targetTrainer ? targetTrainer.phone : ''
+        });
         loadPendingTrainers();
         reloadAllAppData();
       })
@@ -2105,13 +2230,30 @@ function App() {
       });
   };
 
+  const handleTrainerPhotoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        setTrainerRegError('Photo size exceeds 5MB. Please choose a smaller image.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        compressImage(reader.result, 240, 240, 0.75).then(compressedDataUrl => {
+          setTrainerRegForm(prev => ({ ...prev, profilePhoto: compressedDataUrl }));
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handleTrainerRegistration = (e) => {
     e.preventDefault();
     setTrainerRegError('');
     setTrainerRegSuccess('');
 
-    if (trainerRegForm.password !== trainerRegForm.confirmPassword) {
-      setTrainerRegError('Passwords do not match.');
+    if (!trainerRegForm.fullName || !trainerRegForm.email || !trainerRegForm.phone) {
+      setTrainerRegError('Full Name, Email Address, and Mobile Phone are required.');
       return;
     }
 
@@ -2120,13 +2262,10 @@ function App() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        username: trainerRegForm.username,
-        email: trainerRegForm.email,
-        password: trainerRegForm.password,
-        fullName: trainerRegForm.fullName,
-        phone: trainerRegForm.phone,
-        preferredBranch: trainerRegForm.preferredBranch,
-        preferredBatch: trainerRegForm.preferredBatch
+        fullName: trainerRegForm.fullName.trim(),
+        email: trainerRegForm.email.trim(),
+        phone: trainerRegForm.phone.trim(),
+        profilePhoto: trainerRegForm.profilePhoto || ''
       })
     })
       .then(res => {
@@ -2137,16 +2276,12 @@ function App() {
       })
       .then(data => {
         setIsSubmittingTrainerReg(false);
-        setTrainerRegSuccess(data.message || 'Registration submitted successfully! Your account is pending Super Admin approval.');
+        setTrainerRegSuccess(data.message || 'Application submitted successfully! Super Admin will review your application, create your login credentials, and assign your branch & batch.');
         setTrainerRegForm({
-          username: '',
-          email: '',
-          password: '',
-          confirmPassword: '',
           fullName: '',
+          email: '',
           phone: '',
-          preferredBranch: branches[0] || 'Kuttiady',
-          preferredBatch: ''
+          profilePhoto: ''
         });
       })
       .catch(err => {
@@ -3891,9 +4026,34 @@ function App() {
   // Hash-based routing to support separate page navigation
   useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash;
+      const hash = window.location.hash || '';
+      const cleanHash = hash.replace(/^#\/?/, '/').replace(/\/$/, '');
       const hasSession = getSessionUser();
       const isDevSession = hasSession && (hasSession.toLowerCase() === 'developer' || hasSession.toLowerCase().startsWith('developer@'));
+
+      // 1. Student route handling (Always isolate and prioritize student pages)
+      if (cleanHash.startsWith('/student') || cleanHash === 'student') {
+        const sToken = getStudentSessionToken();
+        if (cleanHash.includes('portal')) {
+          if (sToken) {
+            setAppMode('student-portal');
+          } else {
+            window.location.hash = '#/student/login';
+            setAppMode('student-login');
+          }
+        } else {
+          // Any other /student or /student/login
+          if (sToken && cleanHash === '/student') {
+            window.location.hash = '#/student/portal';
+            setAppMode('student-portal');
+          } else {
+            setAppMode('student-login');
+          }
+        }
+        setIsMobileMenuOpen(false);
+        setIsSidebarOpen(false);
+        return;
+      }
 
       if (hash === '#/developer/login') {
         if (hasSession) {
@@ -3911,7 +4071,6 @@ function App() {
           const subview = hash.split('/')[2] || 'dashboard';
           setDevView(subview);
         } else {
-          // If a session exists but it's not developer, go to admin dashboard
           if (hasSession) {
             window.location.hash = '#/admin';
           } else {
@@ -3929,15 +4088,7 @@ function App() {
           setAppMode('superadmin-login');
         }
       } else if (hash === '#/login' || hash === '#/branch' || hash === '#/batch') {
-        if (hasSession) {
-          if (isDevSession) {
-            window.location.hash = '#/developer/dashboard';
-          } else {
-            window.location.hash = '#/admin';
-          }
-        } else {
-          setAppMode('login');
-        }
+        setAppMode('login');
       } else if (hash === '#/admin') {
         if (hasSession) {
           if (isDevSession) {
@@ -3966,10 +4117,18 @@ function App() {
 
   // Sync state changes back to URL hash
   useEffect(() => {
-    const currentHash = window.location.hash;
+    const currentHash = window.location.hash || '';
     if (appMode === 'website') {
-      if (currentHash !== '' && currentHash !== '#/' && currentHash !== '#/home') {
+      if (currentHash !== '' && currentHash !== '#/' && currentHash !== '#/home' && !currentHash.includes('student')) {
         window.location.hash = '#/';
+      }
+    } else if (appMode === 'student-login') {
+      if (currentHash !== '#/student/login' && currentHash !== '#/student') {
+        window.location.hash = '#/student/login';
+      }
+    } else if (appMode === 'student-portal') {
+      if (currentHash !== '#/student/portal') {
+        window.location.hash = '#/student/portal';
       }
     } else if (appMode === 'login' && currentHash !== '#/login') {
       window.location.hash = '#/login';
@@ -4364,41 +4523,6 @@ function App() {
     customBranches, loggedInUser
   ]);
 
-  const compressImage = (base64Str, maxWidth = 150, maxHeight = 150, quality = 0.7) => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.src = base64Str;
-      img.onload = () => {
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height) {
-          if (width > maxWidth) {
-            height = Math.round((height * maxWidth) / width);
-            width = maxWidth;
-          }
-        } else {
-          if (height > maxHeight) {
-            width = Math.round((width * maxHeight) / height);
-            height = maxHeight;
-          }
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-
-        const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
-        resolve(compressedBase64);
-      };
-      img.onerror = () => {
-        resolve(base64Str);
-      };
-    });
-  };
 
   const handlePhotoUpload = (e) => {
     const file = e.target.files[0];
@@ -4598,6 +4722,13 @@ function App() {
         setIsAddModalOpen(false);
         setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: defaultBranch === 'All' ? (branches[0] || 'Kuttiady') : defaultBranch, photo: null, isPriority: false, trainer: '', art: '' });
 
+        if (savedStudent.temporaryMPIN) {
+          setCreatedStudentTempMpin({
+            name: savedStudent.name,
+            phone: savedStudent.phone,
+            mpin: savedStudent.temporaryMPIN
+          });
+        }
         setGlobalSuccess("Student added successfully.");
         reloadAllAppData();
       })
@@ -4605,6 +4736,109 @@ function App() {
         console.error("Error creating student:", err);
         setGlobalError(`Failed to save student: ${err.message}`);
       });
+  };
+
+  const fetchPaymentSubmissions = async () => {
+    try {
+      setLoadingPaymentSubmissions(true);
+      const token = getSessionToken();
+      const res = await fetch(`${API_BASE_URL}/admin/payment-submissions?status=${paymentSubmissionFilter}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPaymentSubmissions(data);
+      }
+    } catch (e) {
+      console.error('Error loading payment submissions:', e);
+    } finally {
+      setLoadingPaymentSubmissions(false);
+    }
+  };
+
+  const handleApproveSubmission = async (subId) => {
+    if (!window.confirm('Are you sure you want to approve this payment submission? This will mark the relevant fee months as PAID, generate an official receipt, and record revenue.')) {
+      return;
+    }
+    setApprovingSubId(subId);
+    setApprovalErrorMsg('');
+    setApprovalFeedbackMsg('');
+    try {
+      const token = getSessionToken();
+      const res = await fetch(`${API_BASE_URL}/admin/payment-submissions/${subId}/approve`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to approve payment');
+      }
+      setApprovalFeedbackMsg(`Payment approved! Receipt #${data.receiptNumber} generated.`);
+      fetchPaymentSubmissions();
+      reloadAllAppData();
+    } catch (err) {
+      setApprovalErrorMsg(err.message);
+    } finally {
+      setApprovingSubId(null);
+    }
+  };
+
+  const handleRejectSubmission = async () => {
+    if (!rejectingSubmission || !rejectionReasonInput.trim()) {
+      alert('Please provide a reason for rejecting this payment submission.');
+      return;
+    }
+    try {
+      const token = getSessionToken();
+      const res = await fetch(`${API_BASE_URL}/admin/payment-submissions/${rejectingSubmission.submissionId}/reject`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ rejectionReason: rejectionReasonInput.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to reject payment');
+      }
+      setApprovalFeedbackMsg('Payment rejected and student notified.');
+      setRejectingSubmission(null);
+      setRejectionReasonInput('');
+      fetchPaymentSubmissions();
+    } catch (err) {
+      setApprovalErrorMsg(err.message);
+    }
+  };
+
+  const handleAdminResetStudentMpin = async (studentToReset) => {
+    if (!window.confirm(`Reset portal MPIN for ${studentToReset.name} (#${studentToReset.id})? A new temporary 6-digit MPIN will be generated.`)) {
+      return;
+    }
+    try {
+      const token = getSessionToken();
+      const res = await fetch(`${API_BASE_URL}/admin/students/${studentToReset.id}/reset-mpin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to reset MPIN');
+      }
+      setAdminResetMpinModal({
+        studentId: studentToReset.id,
+        studentName: studentToReset.name,
+        temporaryMPIN: data.temporaryMPIN
+      });
+    } catch (err) {
+      alert('Error resetting MPIN: ' + err.message);
+    }
   };
 
   const formatMonthName = (monthStr) => {
@@ -4970,29 +5204,144 @@ function App() {
     }
   };
 
-  const openRecordPaymentModal = (student, targetMonth = feeMonth, feeType = 'monthly') => {
-    let dueAmount = 600;
-    if (student) {
-      if (feeType === 'admission') {
-        const rateAdmission = student.customAdmissionRate !== undefined && student.customAdmissionRate !== null
-          ? student.customAdmissionRate
-          : admissionFeeRate;
-        const admissionCoupon = resolveCouponCode(student.appliedAdmissionCoupon);
-        let admissionDiscountAmount = 0;
-        if (admissionCoupon) {
-          admissionDiscountAmount = admissionCoupon.type === 'percentage'
-            ? Math.round(rateAdmission * admissionCoupon.value / 100)
-            : admissionCoupon.value;
-        }
-        dueAmount = Math.max(0, rateAdmission - admissionDiscountAmount);
-      } else {
-        const rateMonthly = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
-          ? student.customMonthlyRate
-          : monthlyFeeRate;
-        const discountAmount = getStudentDiscountForMonth(student, rateMonthly, targetMonth);
-        dueAmount = Math.max(0, rateMonthly - discountAmount);
+  const getStudentUnpaidItems = (student, targetMonth, feeType) => {
+    if (!student) return [];
+    const items = [];
+
+    // Check admission fee
+    const isAdmPaid = Boolean(student.admissionPaid);
+    const admissionRate = student.customAdmissionRate !== undefined && student.customAdmissionRate !== null
+      ? student.customAdmissionRate
+      : admissionFeeRate;
+    const admissionCoupon = resolveCouponCode(student.appliedAdmissionCoupon);
+    let admDiscount = 0;
+    if (admissionCoupon) {
+      admDiscount = admissionCoupon.type === 'percentage'
+        ? Math.round(admissionRate * admissionCoupon.value / 100)
+        : admissionCoupon.value;
+    }
+    const finalAdmRate = Math.max(0, admissionRate - admDiscount);
+
+    if (!isAdmPaid || feeType === 'admission') {
+      items.push({
+        id: 'admission',
+        feeType: 'admission',
+        feeMonth: '',
+        amount: finalAdmRate,
+        description: 'Admission Fee',
+        label: 'Admission Fee'
+      });
+    }
+
+    // Monthly fee items
+    const currentMonthStr = new Date().toISOString().slice(0, 7);
+    const joinMonthStr = student.joinDate ? student.joinDate.slice(0, 7) : currentMonthStr;
+    const endMonthStr = (targetMonth && targetMonth > currentMonthStr) ? targetMonth : currentMonthStr;
+
+    let [joinYear, joinMonth] = (joinMonthStr || currentMonthStr).split('-').map(Number);
+    let [endYear, endMonth] = (endMonthStr || currentMonthStr).split('-').map(Number);
+
+    const baseMonthlyRate = student.customMonthlyRate !== undefined && student.customMonthlyRate !== null
+      ? student.customMonthlyRate
+      : monthlyFeeRate;
+
+    const rawPaid = student.paidMonths && (student.paidMonths instanceof Map ? Object.fromEntries(student.paidMonths) : student.paidMonths) || {};
+
+    let tempYear = joinYear;
+    let tempMonth = joinMonth;
+
+    while (tempYear < endYear || (tempYear === endYear && tempMonth <= endMonth)) {
+      const mStr = `${tempYear}-${String(tempMonth).padStart(2, '0')}`;
+      const isPaidMonth = Boolean(rawPaid[mStr]);
+
+      if (!isPaidMonth || mStr === targetMonth) {
+        const discountAmount = getStudentDiscountForMonth(student, baseMonthlyRate, mStr);
+        const dueRate = Math.max(0, baseMonthlyRate - discountAmount);
+        const isSelected = mStr === targetMonth;
+        const isPast = mStr < (targetMonth || currentMonthStr);
+
+        items.push({
+          id: `monthly_${mStr}`,
+          feeType: 'monthly',
+          feeMonth: mStr,
+          amount: dueRate,
+          description: `${formatMonthName(mStr)} Fee`,
+          label: `${formatMonthName(mStr)} Fee${isSelected ? ' (Current)' : (isPast ? ' (Pending Arrear)' : '')}`
+        });
+      }
+
+      tempMonth++;
+      if (tempMonth > 12) {
+        tempMonth = 1;
+        tempYear++;
       }
     }
+
+    if (targetMonth && feeType === 'monthly' && !items.some(i => i.feeMonth === targetMonth)) {
+      const discountAmount = getStudentDiscountForMonth(student, baseMonthlyRate, targetMonth);
+      items.push({
+        id: `monthly_${targetMonth}`,
+        feeType: 'monthly',
+        feeMonth: targetMonth,
+        amount: Math.max(0, baseMonthlyRate - discountAmount),
+        description: `${formatMonthName(targetMonth)} Fee`,
+        label: `${formatMonthName(targetMonth)} Fee`
+      });
+    }
+
+    return items;
+  };
+
+  const togglePaymentItem = (itemId) => {
+    setPaymentFormData(prev => {
+      const currentIds = prev.selectedItemIds || [];
+      let newIds = currentIds.includes(itemId)
+        ? currentIds.filter(id => id !== itemId)
+        : [...currentIds, itemId];
+
+      if (newIds.length === 0) newIds = [itemId];
+
+      const selectedItems = (prev.availableItems || []).filter(i => newIds.includes(i.id));
+      const newDue = selectedItems.reduce((acc, curr) => acc + curr.amount, 0);
+
+      const primaryItem = selectedItems.find(i => i.feeType === 'monthly') || selectedItems[0];
+      const feeMonth = primaryItem ? primaryItem.feeMonth : prev.feeMonth;
+      const feeType = primaryItem ? primaryItem.feeType : prev.feeType;
+
+      return {
+        ...prev,
+        selectedItemIds: newIds,
+        feeMonth,
+        feeType,
+        amountDue: newDue,
+        amountPaid: newDue,
+        selectedBreakdown: selectedItems.map(i => ({
+          feeMonth: i.feeMonth,
+          feeType: i.feeType,
+          amount: i.amount,
+          description: i.description
+        }))
+      };
+    });
+  };
+
+  const openRecordPaymentModal = (student, targetMonth = feeMonth, feeType = 'monthly') => {
+    const availableItems = getStudentUnpaidItems(student, targetMonth, feeType);
+
+    // Initial selected items: targetMonth or admission
+    let defaultSelectedIds = [];
+    if (feeType === 'admission') {
+      defaultSelectedIds = ['admission'];
+    } else {
+      defaultSelectedIds = [`monthly_${targetMonth}`];
+    }
+
+    if (!availableItems.some(i => defaultSelectedIds.includes(i.id)) && availableItems.length > 0) {
+      defaultSelectedIds = [availableItems[0].id];
+    }
+
+    const selectedItems = availableItems.filter(i => defaultSelectedIds.includes(i.id));
+    const totalDue = selectedItems.reduce((acc, curr) => acc + curr.amount, 0);
 
     setPaymentFormData({
       studentId: student ? student.id : '',
@@ -5001,12 +5350,20 @@ function App() {
       batch: student ? student.batch : '',
       feeType,
       feeMonth: targetMonth,
-      amountDue: dueAmount,
-      amountPaid: dueAmount,
+      amountDue: totalDue,
+      amountPaid: totalDue,
       paymentDate: getLocalDateString(),
       paymentMethod: 'Cash',
       transactionRef: '',
-      notes: ''
+      notes: '',
+      availableItems,
+      selectedItemIds: defaultSelectedIds,
+      selectedBreakdown: selectedItems.map(i => ({
+        feeMonth: i.feeMonth,
+        feeType: i.feeType,
+        amount: i.amount,
+        description: i.description
+      }))
     });
     setIsRecordPaymentModalOpen(true);
   };
@@ -5014,13 +5371,26 @@ function App() {
   const handleRecordPaymentSubmit = (e) => {
     e.preventDefault();
     const token = getSessionToken();
+    const payload = {
+      studentId: paymentFormData.studentId,
+      feeType: paymentFormData.feeType,
+      feeMonth: paymentFormData.feeMonth,
+      amountDue: Number(paymentFormData.amountDue),
+      amountPaid: Number(paymentFormData.amountPaid),
+      paymentDate: paymentFormData.paymentDate,
+      paymentMethod: paymentFormData.paymentMethod,
+      transactionRef: paymentFormData.transactionRef,
+      notes: paymentFormData.notes,
+      breakdown: paymentFormData.selectedBreakdown
+    };
+
     fetch(`${API_BASE_URL}/payments/record`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { 'Authorization': `Bearer ${token}` } : {})
       },
-      body: JSON.stringify(paymentFormData)
+      body: JSON.stringify(payload)
     })
       .then(res => res.json())
       .then(data => {
@@ -5037,11 +5407,25 @@ function App() {
         const updatedList = students.map(s => {
           if (s.id === targetId) {
             const updated = { ...s };
-            if (paymentFormData.feeType === 'monthly') {
-              updated.paidMonths = { ...(s.paidMonths || {}), [paymentFormData.feeMonth]: true };
-            } else if (paymentFormData.feeType === 'admission') {
-              updated.admissionPaid = paymentFormData.paymentDate.slice(0, 7);
+            const rawPaid = s.paidMonths instanceof Map ? Object.fromEntries(s.paidMonths) : (s.paidMonths || {});
+            const newPaidMonths = { ...rawPaid };
+
+            if (Array.isArray(paymentFormData.selectedBreakdown) && paymentFormData.selectedBreakdown.length > 0) {
+              paymentFormData.selectedBreakdown.forEach(item => {
+                if (item.feeType === 'monthly' && item.feeMonth) {
+                  newPaidMonths[item.feeMonth] = true;
+                } else if (item.feeType === 'admission') {
+                  updated.admissionPaid = paymentFormData.paymentDate.slice(0, 7);
+                }
+              });
+            } else {
+              if (paymentFormData.feeType === 'monthly') {
+                newPaidMonths[paymentFormData.feeMonth] = true;
+              } else if (paymentFormData.feeType === 'admission') {
+                updated.admissionPaid = paymentFormData.paymentDate.slice(0, 7);
+              }
             }
+            updated.paidMonths = newPaidMonths;
             return updated;
           }
           return s;
@@ -7457,7 +7841,7 @@ function App() {
           <a href="#instructors" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>TEAM MASTERFIT</a>
           <a href="#gallery" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Gallery</a>
           <a href="#contact" className="nav-link" onClick={() => setIsMobileMenuOpen(false)}>Contact</a>
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <button className="btn-outline-primary" onClick={() => { setAppMode('login'); setIsMobileMenuOpen(false); }}>
               Login
             </button>
@@ -7713,7 +8097,7 @@ function App() {
           <a href="/#instructors" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('instructors')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>TEAM MASTERFIT</a>
           <a href="/#gallery" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('gallery')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Gallery</a>
           <a href="/#contact" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Contact</a>
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <button className="btn-outline-primary" onClick={() => { setAppMode('login'); setIsMobileMenuOpen(false); }}>
               Login
             </button>
@@ -7989,7 +8373,7 @@ function App() {
             <a href="/#instructors" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('instructors')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>TEAM MASTERFIT</a>
             <a href="/#gallery" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('gallery')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Gallery</a>
             <a href="/#contact" className="nav-link" onClick={(e) => { e.preventDefault(); setAppMode('website'); setIsMobileMenuOpen(false); setTimeout(() => document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' }), 100); }}>Contact</a>
-            <div style={{ display: 'flex', gap: '10px' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
               <button className="btn-outline-primary" onClick={() => { setAppMode('login'); setIsMobileMenuOpen(false); }}>
                 Login
               </button>
@@ -8895,7 +9279,7 @@ function App() {
       let matchStatus = true;
       if (feeStatusFilter !== 'All') {
         const paidStatus = isPaid(s);
-        const pRec = feePaymentsList.find(p => p.studentId === s.id && p.feeMonth === feeMonth && p.feeType === 'monthly');
+        const pRec = feePaymentsList.find(p => p.studentId === s.id && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
         const effectiveStatus = pRec ? pRec.status : (paidStatus ? 'Paid' : 'Pending');
         matchStatus = effectiveStatus.toLowerCase() === feeStatusFilter.toLowerCase();
       }
@@ -8903,7 +9287,7 @@ function App() {
       // Method filter
       let matchMethod = true;
       if (feeMethodFilter !== 'All') {
-        const pRec = feePaymentsList.find(p => p.studentId === s.id && p.feeMonth === feeMonth && p.feeType === 'monthly');
+        const pRec = feePaymentsList.find(p => p.studentId === s.id && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
         matchMethod = pRec && pRec.paymentMethod && pRec.paymentMethod.toLowerCase() === feeMethodFilter.toLowerCase();
       }
 
@@ -8913,47 +9297,42 @@ function App() {
     const totalUnpaid = filteredFeeStudents.filter(s => !isPaid(s)).length;
     const totalPaid = filteredFeeStudents.filter(s => isPaid(s)).length;
 
-    // Revenue strictly based on paymentDate (revenueMonth === paymentMonth)
+    // Revenue strictly based on actual paymentDate (revenueMonth === paymentMonth)
     let paymentMonthRevenue = 0;
-    let paymentMonthMonthly = 0; // Strictly feeMonth === feeMonth (selected due month)
     let paymentMonthAdmission = 0;
     let paymentCount = 0;
 
-    if (revenueSummaryData && revenueSummaryData.targetMonth === paymentMonth && revenueSummaryData.activeFeeMonth === feeMonth && revenueSummaryData.totalCollected > 0) {
+    const targetPayments = feePaymentsList.filter(p => {
+      if (p.revenueMonth !== paymentMonth) return false;
+      if (branchFilter !== 'All' && p.branch && p.branch.toLowerCase().trim() !== branchFilter.toLowerCase().trim()) return false;
+      if (batchFilter !== 'All' && p.batch && p.batch.toLowerCase().trim() !== batchFilter.toLowerCase().trim()) return false;
+      return true;
+    });
+
+    if (revenueSummaryData && revenueSummaryData.targetMonth === paymentMonth) {
       paymentMonthRevenue = revenueSummaryData.totalCollected;
-      paymentMonthMonthly = revenueSummaryData.monthlyFeeCollected;
       paymentMonthAdmission = revenueSummaryData.admissionFeeCollected;
       paymentCount = revenueSummaryData.paymentCount || 0;
     } else {
-      const targetPayments = feePaymentsList.filter(p => {
-        if (p.revenueMonth !== paymentMonth) return false;
-        if (branchFilter !== 'All' && p.branch && p.branch.toLowerCase().trim() !== branchFilter.toLowerCase().trim()) return false;
-        if (batchFilter !== 'All' && p.batch && p.batch.toLowerCase().trim() !== batchFilter.toLowerCase().trim()) return false;
-        return true;
-      });
-      // All money physically received in this paymentMonth (including past dues like August paid in Sep)
+      // All money physically received in this paymentMonth (regardless of fee month)
       paymentMonthRevenue = targetPayments.reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
-      // ONLY monthly fees for the selected fee month (e.g. September fee paid in Sep):
-      paymentMonthMonthly = targetPayments.filter(p => p.feeType === 'monthly' && p.feeMonth === feeMonth).reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
-      paymentMonthAdmission = targetPayments.filter(p => p.feeType === 'admission').reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
+      paymentMonthAdmission = targetPayments.reduce((sum, p) => {
+        if (Array.isArray(p.breakdown) && p.breakdown.length > 0) {
+          return sum + p.breakdown.filter(b => b.feeType === 'admission').reduce((bs, b) => bs + (Number(b.amount) || 0), 0);
+        }
+        return sum + (p.feeType === 'admission' ? (Number(p.amountPaid) || 0) : 0);
+      }, 0);
       paymentCount = targetPayments.length;
     }
 
-    // Direct fallback: If no revenue records returned from server yet, calculate from students marked paid for feeMonth
-    if (paymentMonthMonthly === 0 && totalPaid > 0) {
-      const paidMonthlySum = filteredFeeStudents.filter(s => isPaid(s)).reduce((sum, s) => {
+    // Pending Fees for selected feeMonth (unpaid students for feeMonth)
+    const pendingFeesTotal = filteredFeeStudents
+      .filter(s => !isPaid(s))
+      .reduce((sum, s) => {
         const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null ? s.customMonthlyRate : monthlyFeeRate;
         const discountAmount = getStudentDiscountForMonth(s, rateToUse, feeMonth);
         return sum + Math.max(0, rateToUse - discountAmount);
       }, 0);
-      if (paidMonthlySum > 0) {
-        paymentMonthMonthly = paidMonthlySum;
-        if (paymentMonthRevenue === 0) {
-          paymentMonthRevenue = paidMonthlySum;
-          paymentCount = totalPaid;
-        }
-      }
-    }
 
     return (
       <div className="fees-container">
@@ -9041,7 +9420,7 @@ function App() {
           </div>
         )}
 
-        {/* Revenue Cards based on Payment Date */}
+        {/* Dashboard Revenue & Fee Cards */}
         <div className="stats-grid fees-stats-grid">
           <div className="stat-card" style={{ borderLeft: '4px solid #38bdf8' }}>
             <div className="stat-details">
@@ -9054,30 +9433,30 @@ function App() {
               </span>
             </div>
           </div>
-          <div className="stat-card" style={{ borderLeft: '4px solid #4CAF50' }}>
-            <div className="stat-details">
-              <h3 style={{ color: '#4CAF50', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Monthly Fees Collected</h3>
-              <p className="stat-value" style={{ color: '#4CAF50', margin: 0 }}>₹{paymentMonthMonthly.toLocaleString()}</p>
-              <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
-                For {formatMonthName(feeMonth)}
-              </span>
-            </div>
-          </div>
           <div className="stat-card" style={{ borderLeft: '4px solid #FFD700' }}>
             <div className="stat-details">
-              <h3 style={{ color: '#FFD700', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Admission Fees Collected</h3>
+              <h3 style={{ color: '#FFD700', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Admission Fees</h3>
               <p className="stat-value" style={{ color: '#FFD700', margin: 0 }}>₹{paymentMonthAdmission.toLocaleString()}</p>
               <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
                 Received in {formatMonthName(paymentMonth)}
               </span>
             </div>
           </div>
+          <div className="stat-card" style={{ borderLeft: '4px solid #ff6b6b' }}>
+            <div className="stat-details">
+              <h3 style={{ color: '#ff6b6b', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Pending Fees</h3>
+              <p className="stat-value" style={{ color: '#ff6b6b', margin: 0 }}>₹{pendingFeesTotal.toLocaleString()}</p>
+              <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
+                {totalUnpaid} student{totalUnpaid === 1 ? '' : 's'} unpaid for {formatMonthName(feeMonth)}
+              </span>
+            </div>
+          </div>
           <div className="stat-card" style={{ borderLeft: '4px solid #c084fc' }}>
             <div className="stat-details">
-              <h3 style={{ color: '#c084fc', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Total Payments Received</h3>
+              <h3 style={{ color: '#c084fc', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Total Payments</h3>
               <p className="stat-value" style={{ color: '#fff', margin: 0 }}>{paymentCount}</p>
               <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
-                Receipt transactions
+                Receipt transactions in {formatMonthName(paymentMonth)}
               </span>
             </div>
           </div>
@@ -9149,7 +9528,7 @@ function App() {
                 <tbody>
                   {filteredFeeStudents.map(student => {
                     const feeDetails = calculateStudentFees(student, feeMonth);
-                    const pRec = feePaymentsList.find(p => p.studentId === student.id && p.feeMonth === feeMonth && p.feeType === 'monthly');
+                    const pRec = feePaymentsList.find(p => p.studentId === student.id && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
                     const paid = isPaid(student);
 
                     return (
@@ -9343,7 +9722,7 @@ function App() {
 
     const months = getMonthsList(student);
     const unpaidCount = months.filter(m => {
-      const pRec = feePaymentsList.find(p => p.studentId === student.id && p.feeMonth === m.monthStr && p.feeType === 'monthly');
+      const pRec = feePaymentsList.find(p => p.studentId === student.id && (p.feeMonth === m.monthStr || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === m.monthStr))) && p.feeType === 'monthly');
       return !(m.isPaid || (pRec && pRec.status === 'Paid'));
     }).length;
     const paidCount = months.length - unpaidCount;
@@ -9441,7 +9820,7 @@ function App() {
           ) : (
             <div className="student-fees-grid">
               {months.map(({ monthStr, isPaid }) => {
-                const pRec = feePaymentsList.find(p => p.studentId === student.id && p.feeMonth === monthStr && p.feeType === 'monthly');
+                const pRec = feePaymentsList.find(p => p.studentId === student.id && (p.feeMonth === monthStr || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === monthStr))) && p.feeType === 'monthly');
                 const monthIsPaid = Boolean(isPaid || (pRec && pRec.status === 'Paid'));
                 const isPartial = !monthIsPaid && pRec && pRec.status === 'Partial';
 
@@ -9489,6 +9868,11 @@ function App() {
                     {pRec && (
                       <div style={{ fontSize: '0.72rem', color: '#38bdf8', textAlign: 'center' }}>
                         <div>📅 Paid: <strong>{pRec.paymentDate}</strong></div>
+                        {pRec.revenueMonth && pRec.revenueMonth !== monthStr && (
+                          <div style={{ color: '#FFD700', fontSize: '0.68rem', fontWeight: 600 }}>
+                            Paid in {formatMonthName(pRec.revenueMonth)}
+                          </div>
+                        )}
                         <div style={{ color: 'var(--color-text-muted)', fontSize: '0.68rem' }}>Mode: {pRec.paymentMethod || 'Cash'}</div>
                         {pRec.receiptNumber && (
                           <button
@@ -14035,7 +14419,7 @@ function App() {
                   <tr>
                     <th>Trainer Details</th>
                     <th>Email & Contact</th>
-                    <th>Requested Branch</th>
+                    <th>Status & Allocation</th>
                     <th style={{ textAlign: 'center' }}>Approval & Allocation</th>
                   </tr>
                 </thead>
@@ -14049,16 +14433,29 @@ function App() {
                             onClick={() => setSelectedPendingTrainerForApproval(trainer)}
                             style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit' }}
                           >
-                            <div style={{ display: 'flex', flexDirection: 'column' }}>
-                              <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.95rem', textDecoration: 'underline' }}>
-                                {trainer.fullName || trainer.username}
-                              </span>
-                              <span style={{ fontSize: '0.78rem', color: '#FFD700', fontWeight: 600 }}>
-                                @{trainer.username}
-                              </span>
-                              <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                                Registered: {new Date(trainer.createdAt).toLocaleDateString()}
-                              </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              {trainer.profilePhoto ? (
+                                <img
+                                  src={trainer.profilePhoto}
+                                  alt={trainer.fullName || trainer.username}
+                                  style={{ width: '42px', height: '42px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #FFD700', flexShrink: 0 }}
+                                />
+                              ) : (
+                                <div className="avatar" style={{ width: '42px', height: '42px', fontSize: '1rem', background: 'linear-gradient(135deg, #FFD700, #b89600)', color: '#000', fontWeight: 'bold', flexShrink: 0 }}>
+                                  {(trainer.fullName || trainer.username).charAt(0).toUpperCase()}
+                                </div>
+                              )}
+                              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.95rem', textDecoration: 'underline' }}>
+                                  {trainer.fullName || trainer.username}
+                                </span>
+                                <span style={{ fontSize: '0.78rem', color: '#FFD700', fontWeight: 600 }}>
+                                  @{trainer.username}
+                                </span>
+                                <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                                  Registered: {new Date(trainer.createdAt).toLocaleDateString()}
+                                </span>
+                              </div>
                             </div>
                           </button>
                         </td>
@@ -14068,9 +14465,9 @@ function App() {
                             <span style={{ color: 'var(--color-text-muted)', marginTop: '2px' }}>📞 {trainer.phone || 'N/A'}</span>
                           </div>
                         </td>
-                        <td data-label="Requested Branch">
-                          <span className="badge badge-gold" style={{ width: 'fit-content', padding: '4px 10px', fontSize: '0.75rem' }}>
-                            📍 {trainer.branch || 'None Selected'}
+                        <td data-label="Status & Allocation">
+                          <span className="badge badge-gold" style={{ width: 'fit-content', padding: '4px 10px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                            ⏳ Pending Admin Allocation
                           </span>
                         </td>
                         <td data-label="Approval & Allocation">
@@ -14080,7 +14477,7 @@ function App() {
                               style={{ background: '#30d158', borderColor: '#30d158', padding: '6px 14px', fontWeight: 700, whiteSpace: 'nowrap' }}
                               onClick={() => setSelectedPendingTrainerForApproval(trainer)}
                             >
-                              🛡️ Review & Approve
+                              🛡️ Review & Allocate
                             </button>
                             <button
                               className="btn-danger btn-small"
@@ -14106,41 +14503,118 @@ function App() {
           const cleanRequestedBranch = String(trainer.branch || '').split(',')[0].trim();
           const selBranch = approvalBranchSelections[trainer._id] || (cleanRequestedBranch && branches.includes(cleanRequestedBranch) ? cleanRequestedBranch : (branches[0] || 'Kuttiady'));
           const availableBatches = getFilteredBatchOptions(selBranch);
-          const selBatch = approvalBatchSelections[trainer._id] || trainer.batch || (availableBatches[0] ? availableBatches[0].id : 'batch1');
+          const selBatch = approvalBatchSelections[trainer._id] || (trainer.batch && availableBatches.some(b => b.id === trainer.batch) ? trainer.batch : (availableBatches[0] ? availableBatches[0].id : 'batch1'));
+
+          const defaultSuggestedUser = (trainer.fullName || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12) || (trainer.email || '').split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+          const curUsername = approvalUsernameSelections[trainer._id] !== undefined ? approvalUsernameSelections[trainer._id] : defaultSuggestedUser;
+          const curPassword = approvalPasswordSelections[trainer._id] !== undefined ? approvalPasswordSelections[trainer._id] : 'Trainer@123';
+          const isPwdVisible = !!showApprovalPassword[trainer._id];
 
           return (
             <div className="modal-overlay" style={{ zIndex: 1100 }}>
-              <div className="modal-content" style={{ maxWidth: '520px', width: '95%', background: '#0e0f17', border: '1px solid var(--glass-border-gold)', borderRadius: '16px', padding: '1.75rem' }}>
+              <div className="modal-content" style={{ maxWidth: '540px', width: '95%', background: '#0e0f17', border: '1px solid var(--glass-border-gold)', borderRadius: '16px', padding: '1.75rem', maxHeight: '90vh', overflowY: 'auto' }}>
                 <div className="panel-header" style={{ marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <h3 className="panel-title" style={{ margin: 0, fontSize: '1.1rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Bell size={18} color="#FFD700" /> Review Trainer Registration Request
+                    <Shield size={18} color="#FFD700" /> Review & Create Trainer Credentials
                   </h3>
                   <button className="btn-icon" onClick={() => setSelectedPendingTrainerForApproval(null)}><X size={20} /></button>
                 </div>
 
-                {/* Trainer Info Card */}
-                <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '12px', padding: '1rem', marginBottom: '1.25rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '0.75rem' }}>
-                    <div className="avatar" style={{ width: '44px', height: '44px', fontSize: '1.1rem', background: 'linear-gradient(135deg, #FFD700, #b89600)', color: '#000', fontWeight: 'bold' }}>
-                      {(trainer.fullName || trainer.username).charAt(0).toUpperCase()}
-                    </div>
+                {/* Trainer Applicant Info Card */}
+                <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '12px', padding: '1.1rem', marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '0.75rem' }}>
+                    {trainer.profilePhoto ? (
+                      <img
+                        src={trainer.profilePhoto}
+                        alt={trainer.fullName || 'Trainer'}
+                        style={{ width: '56px', height: '56px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #FFD700', boxShadow: '0 0 10px rgba(255, 215, 0, 0.3)', flexShrink: 0 }}
+                      />
+                    ) : (
+                      <div className="avatar" style={{ width: '56px', height: '56px', fontSize: '1.4rem', background: 'linear-gradient(135deg, #FFD700, #b89600)', color: '#000', fontWeight: 'bold', flexShrink: 0 }}>
+                        {(trainer.fullName || 'T').charAt(0).toUpperCase()}
+                      </div>
+                    )}
                     <div>
-                      <div style={{ fontWeight: 700, fontSize: '1rem', color: '#fff' }}>{trainer.fullName || trainer.username}</div>
-                      <div style={{ fontSize: '0.8rem', color: '#FFD700', fontWeight: 600 }}>@{trainer.username}</div>
+                      <div style={{ fontWeight: 800, fontSize: '1.1rem', color: '#fff' }}>{trainer.fullName}</div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Applicant Email: {trainer.email}</div>
+                      <span className="badge badge-gold" style={{ fontSize: '0.7rem', padding: '2px 8px', marginTop: '4px', display: 'inline-block' }}>
+                        ⏳ Pending Credential Creation
+                      </span>
                     </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '0.8rem', color: 'var(--color-text-muted)', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                    <div>📧 Email: <strong style={{ color: '#fff' }}>{trainer.email || 'N/A'}</strong></div>
-                    <div>📞 Phone: <strong style={{ color: '#fff' }}>{trainer.phone || 'N/A'}</strong></div>
-                    <div>🏢 Requested Branch: <strong style={{ color: '#FFD700' }}>{trainer.branch || 'None Selected'}</strong></div>
-                    <div>📅 Date: <strong style={{ color: '#fff' }}>{new Date(trainer.createdAt).toLocaleDateString()}</strong></div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '0.8rem', color: 'var(--color-text-muted)', paddingTop: '0.65rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div>📞 Mobile Phone: <strong style={{ color: '#fff' }}>{trainer.phone || 'N/A'}</strong></div>
+                    <div>📅 Applied: <strong style={{ color: '#fff' }}>{new Date(trainer.createdAt).toLocaleDateString()}</strong></div>
                   </div>
                 </div>
 
-                {/* Allocation Controls Form */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {/* Form Controls */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
+                  {/* SECTION A: ASSIGN CREDENTIALS */}
+                  <div style={{ background: 'rgba(255, 215, 0, 0.04)', border: '1px solid rgba(255, 215, 0, 0.2)', borderRadius: '12px', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#FFD700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Key size={16} /> Assign Login Credentials for Trainer
+                    </div>
+
+                    <div className="grid-2-col" style={{ gap: '10px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.8rem', color: '#fff', fontWeight: 600, marginBottom: '5px' }}>
+                          Create Username *
+                        </label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          style={{ height: '38px', background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.18)', fontSize: '0.85rem' }}
+                          placeholder="e.g. trainer.alex"
+                          value={curUsername}
+                          onChange={(e) => setApprovalUsernameSelections(prev => ({ ...prev, [trainer._id]: e.target.value.toLowerCase().trim() }))}
+                        />
+                      </div>
+
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                          <label style={{ fontSize: '0.8rem', color: '#fff', fontWeight: 600, margin: 0 }}>
+                            Create Password *
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$';
+                              let gen = 'Tr@';
+                              for (let i = 0; i < 6; i++) gen += chars.charAt(Math.floor(Math.random() * chars.length));
+                              setApprovalPasswordSelections(prev => ({ ...prev, [trainer._id]: gen }));
+                            }}
+                            style={{ background: 'none', border: 'none', color: '#38bdf8', fontSize: '0.72rem', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}
+                          >
+                            🎲 Auto Generate
+                          </button>
+                        </div>
+                        <div style={{ position: 'relative' }}>
+                          <input
+                            type={isPwdVisible ? 'text' : 'password'}
+                            className="form-control"
+                            style={{ height: '38px', background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.18)', fontSize: '0.85rem', paddingRight: '36px' }}
+                            placeholder="Min 6 characters"
+                            value={curPassword}
+                            onChange={(e) => setApprovalPasswordSelections(prev => ({ ...prev, [trainer._id]: e.target.value }))}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowApprovalPassword(prev => ({ ...prev, [trainer._id]: !prev[trainer._id] }))}
+                            style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 0 }}
+                          >
+                            {isPwdVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SECTION B: ASSIGN BRANCH & BATCH */}
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', color: '#fff', fontWeight: 600, marginBottom: '6px' }}>Allocate Branch *</label>
+                    <label style={{ display: 'block', fontSize: '0.82rem', color: '#fff', fontWeight: 600, marginBottom: '6px' }}>
+                      Allocate Branch * <span style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}>(Admin Allocation)</span>
+                    </label>
                     <select
                       className="form-control"
                       style={{ width: '100%', height: '40px', background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.15)' }}
@@ -14161,7 +14635,9 @@ function App() {
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', color: '#fff', fontWeight: 600, marginBottom: '6px' }}>Allocate Batch *</label>
+                    <label style={{ display: 'block', fontSize: '0.82rem', color: '#fff', fontWeight: 600, marginBottom: '6px' }}>
+                      Allocate Batch * <span style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}>(Admin Allocation)</span>
+                    </label>
                     <select
                       className="form-control"
                       style={{ width: '100%', height: '40px', background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.15)' }}
@@ -14175,6 +14651,10 @@ function App() {
                         <option key={opt.id} value={opt.id}>{opt.name} ({opt.schedule})</option>
                       ))}
                     </select>
+                  </div>
+
+                  <div style={{ padding: '0.65rem 0.85rem', background: 'rgba(56, 189, 248, 0.08)', borderRadius: '8px', border: '1px solid rgba(56, 189, 248, 0.2)', fontSize: '0.78rem', color: '#e2e8f0', lineHeight: '1.4' }}>
+                    ℹ️ Approving will activate this account with username <strong>@{curUsername || '...'}</strong> and link them to <strong>{selBranch}</strong> ({resolveBatchDisplayNames(selBatch)}).
                   </div>
 
                   <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
@@ -14192,13 +14672,13 @@ function App() {
                     <button
                       type="button"
                       className="btn-primary btn-small"
-                      style={{ background: '#30d158', borderColor: '#30d158', padding: '8px 16px', fontWeight: 700 }}
+                      style={{ background: '#30d158', borderColor: '#30d158', padding: '8px 20px', fontWeight: 700 }}
                       onClick={() => {
-                        handleApproveTrainer(trainer._id);
+                        handleApproveTrainer(trainer._id, selBranch, selBatch, curUsername, curPassword);
                         setSelectedPendingTrainerForApproval(null);
                       }}
                     >
-                      ✓ Approve & Allocate Account
+                      ✓ Approve & Create Credentials
                     </button>
                   </div>
                 </div>
@@ -14206,6 +14686,80 @@ function App() {
             </div>
           );
         })()}
+
+        {/* MODAL: APPROVED TRAINER CREDENTIALS DISPLAY */}
+        {approvedTrainerCredentialsModal && (
+          <div className="modal-overlay" style={{ zIndex: 12000 }} onClick={() => setApprovedTrainerCredentialsModal(null)}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px', textAlign: 'center', padding: '2rem', position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => setApprovedTrainerCredentialsModal(null)}
+                style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+                title="Close"
+              >
+                <X size={20} />
+              </button>
+              <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(48, 209, 88, 0.15)', color: '#30d158', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem' }}>
+                <CheckCircle size={32} />
+              </div>
+              <h3 style={{ margin: '0 0 0.5rem', color: '#fff', fontSize: '1.25rem' }}>Trainer Account Approved & Created!</h3>
+              <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', margin: '0 0 1.25rem' }}>
+                Account created for <strong>{approvedTrainerCredentialsModal.fullName}</strong>. Share these login credentials with the trainer:
+              </p>
+
+              <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255, 215, 0, 0.3)', borderRadius: '12px', padding: '1.25rem', margin: '0 0 1.25rem', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>Username:</span>
+                  <strong style={{ color: '#FFD700', fontSize: '0.95rem' }}>{approvedTrainerCredentialsModal.username}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>Password:</span>
+                  <strong style={{ color: '#fff', fontSize: '0.95rem' }}>{approvedTrainerCredentialsModal.password}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>Assigned Branch:</span>
+                  <span style={{ color: '#38bdf8', fontSize: '0.85rem', fontWeight: 600 }}>{approvedTrainerCredentialsModal.branch}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>Assigned Batch:</span>
+                  <span style={{ color: '#a78bfa', fontSize: '0.85rem', fontWeight: 600 }}>{resolveBatchDisplayNames(approvedTrainerCredentialsModal.batch)}</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    const text = `Master Fit Trainer Credentials:\nUsername: ${approvedTrainerCredentialsModal.username}\nPassword: ${approvedTrainerCredentialsModal.password}\nBranch: ${approvedTrainerCredentialsModal.branch}\nBatch: ${resolveBatchDisplayNames(approvedTrainerCredentialsModal.batch)}\nLogin at: ${window.location.origin}/#/login`;
+                    navigator.clipboard.writeText(text);
+                    alert('Trainer credentials copied to clipboard!');
+                  }}
+                >
+                  📋 Copy Details
+                </button>
+                {approvedTrainerCredentialsModal.phone && (
+                  <a
+                    href={`https://wa.me/91${approvedTrainerCredentialsModal.phone}?text=${encodeURIComponent(`Hi ${approvedTrainerCredentialsModal.fullName}, your Master Fit Trainer Account has been approved!\n\nUsername: ${approvedTrainerCredentialsModal.username}\nPassword: ${approvedTrainerCredentialsModal.password}\nBranch: ${approvedTrainerCredentialsModal.branch}\nBatch: ${resolveBatchDisplayNames(approvedTrainerCredentialsModal.batch)}\n\nLogin here: ${window.location.origin}/#/login`)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn-primary"
+                    style={{ background: '#25D366', borderColor: '#25D366', color: '#fff', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <MessageCircle size={16} /> Send via WhatsApp
+                  </a>
+                )}
+                <button
+                  type="button"
+                  className="btn-outline-primary"
+                  onClick={() => setApprovedTrainerCredentialsModal(null)}
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* SECTION 2: ACTIVE TRAINERS & BATCH ALLOCATION MATRIX */}
         <div className="panel" style={{ borderRadius: '14px' }}>
@@ -14239,13 +14793,26 @@ function App() {
                           onClick={() => setSelectedTrainerForAllocation(tr)}
                           style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit' }}
                         >
-                          <div style={{ display: 'flex', flexDirection: 'column' }}>
-                            <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.92rem', textDecoration: 'underline' }}>
-                              {tr.fullName || tr.username}
-                            </span>
-                            <span style={{ fontSize: '0.78rem', color: 'var(--color-primary)' }}>
-                              @{tr.username}
-                            </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            {tr.profilePhoto ? (
+                              <img
+                                src={tr.profilePhoto}
+                                alt={tr.fullName || tr.username}
+                                style={{ width: '38px', height: '38px', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255,255,255,0.2)', flexShrink: 0 }}
+                              />
+                            ) : (
+                              <div className="avatar" style={{ width: '38px', height: '38px', fontSize: '0.9rem', background: 'linear-gradient(135deg, var(--color-primary), #900)', color: '#fff', fontWeight: 'bold', flexShrink: 0 }}>
+                                {(tr.fullName || tr.username).charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                              <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.92rem', textDecoration: 'underline' }}>
+                                {tr.fullName || tr.username}
+                              </span>
+                              <span style={{ fontSize: '0.78rem', color: 'var(--color-primary)' }}>
+                                @{tr.username}
+                              </span>
+                            </div>
                           </div>
                         </button>
                       </td>
@@ -14329,10 +14896,18 @@ function App() {
 
                 {/* Trainer Profile Card */}
                 <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '12px', padding: '1rem', marginBottom: '1.25rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '0.75rem' }}>
-                    <div className="avatar" style={{ width: '44px', height: '44px', fontSize: '1.1rem', background: 'linear-gradient(135deg, var(--color-primary), #900)' }}>
-                      {(tr.fullName || tr.username).charAt(0).toUpperCase()}
-                    </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '0.75rem' }}>
+                    {tr.profilePhoto ? (
+                      <img
+                        src={tr.profilePhoto}
+                        alt={tr.fullName || tr.username}
+                        style={{ width: '46px', height: '46px', borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--color-primary)', flexShrink: 0 }}
+                      />
+                    ) : (
+                      <div className="avatar" style={{ width: '46px', height: '46px', fontSize: '1.1rem', background: 'linear-gradient(135deg, var(--color-primary), #900)', flexShrink: 0 }}>
+                        {(tr.fullName || tr.username).charAt(0).toUpperCase()}
+                      </div>
+                    )}
                     <div>
                       <div style={{ fontWeight: 700, fontSize: '1rem', color: '#fff' }}>{tr.fullName || tr.username}</div>
                       <div style={{ fontSize: '0.8rem', color: 'var(--color-primary)', fontWeight: 600 }}>@{tr.username}</div>
@@ -14599,6 +15174,340 @@ function App() {
       )}
     </div>
   );
+
+  const renderPaymentApprovals = () => {
+    const isSuper = isAdminUser(loggedInUser);
+    const isBranchAdm = isBranchAdmin(loggedInUser);
+    const hasAccess = isSuper || isBranchAdm || userRole === 'developer';
+
+    if (!hasAccess) {
+      return (
+        <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
+          <h3 className="panel-title" style={{ color: '#E50914' }}>Access Denied</h3>
+          <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>Only administrators can access Online Fee Payment Approvals.</p>
+        </div>
+      );
+    }
+
+    const filtered = paymentSubmissions.filter(sub => {
+      if (paymentSubmissionFilter === 'all') return true;
+      return sub.status === paymentSubmissionFilter;
+    });
+
+    const pendingCount = paymentSubmissions.filter(s => s.status === 'PAYMENT UNDER REVIEW').length;
+
+    return (
+      <div className="portal-payment-approvals-view" style={{ padding: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+          <div>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <CreditCard size={24} style={{ color: '#38bdf8' }} /> Student Online Payment Approvals
+            </h2>
+            <p style={{ margin: '4px 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+              Verify student UPI/Bank transfer proofs, allocate fee months, and generate official receipts.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <button
+              className="btn-secondary"
+              onClick={fetchPaymentSubmissions}
+              disabled={loadingPaymentSubmissions}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+            >
+              <History size={16} /> {loadingPaymentSubmissions ? 'Refreshing...' : 'Refresh'}
+            </button>
+          </div>
+        </div>
+
+        {approvalFeedbackMsg && (
+          <div style={{ background: 'rgba(34, 197, 94, 0.15)', border: '1px solid rgba(34, 197, 94, 0.3)', color: '#4ade80', padding: '0.85rem 1.25rem', borderRadius: '8px', marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <CheckCircle size={18} />
+              <span>{approvalFeedbackMsg}</span>
+            </div>
+            <button onClick={() => setApprovalFeedbackMsg('')} style={{ background: 'none', border: 'none', color: '#4ade80', cursor: 'pointer' }}><X size={16} /></button>
+          </div>
+        )}
+
+        {approvalErrorMsg && (
+          <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', padding: '0.85rem 1.25rem', borderRadius: '8px', marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertCircle size={18} />
+              <span>{approvalErrorMsg}</span>
+            </div>
+            <button onClick={() => setApprovalErrorMsg('')} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }}><X size={16} /></button>
+          </div>
+        )}
+
+        {/* Filter Pills */}
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+          {[
+            { key: 'all', label: `All Submissions (${paymentSubmissions.length})` },
+            { key: 'PAYMENT UNDER REVIEW', label: `Pending Review (${pendingCount})` },
+            { key: 'APPROVED', label: `Approved (${paymentSubmissions.filter(s => s.status === 'APPROVED').length})` },
+            { key: 'REJECTED', label: `Rejected (${paymentSubmissions.filter(s => s.status === 'REJECTED').length})` }
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setPaymentSubmissionFilter(tab.key)}
+              className={paymentSubmissionFilter === tab.key ? 'btn-primary' : 'btn-secondary'}
+              style={{ fontSize: '0.82rem', padding: '0.45rem 0.9rem', borderRadius: '20px' }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Submissions Table */}
+        <div className="table-container" style={{ background: 'var(--color-bg-card)', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--color-border)' }}>
+          {loadingPaymentSubmissions ? (
+            <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>
+              Loading payment submissions...
+            </div>
+          ) : filtered.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>
+              <CreditCard size={36} style={{ opacity: 0.4, marginBottom: '0.75rem' }} />
+              <div style={{ fontWeight: 600, color: '#fff' }}>No Submissions Found</div>
+              <div style={{ fontSize: '0.85rem' }}>No student payment submissions match the selected filter.</div>
+            </div>
+          ) : (
+            <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
+              <thead>
+                <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
+                  <th style={{ padding: '12px 14px' }}>Submission ID / Date</th>
+                  <th style={{ padding: '12px 14px' }}>Student</th>
+                  <th style={{ padding: '12px 14px' }}>Branch & Batch</th>
+                  <th style={{ padding: '12px 14px' }}>Amount & Method</th>
+                  <th style={{ padding: '12px 14px' }}>UTR / Txn ID</th>
+                  <th style={{ padding: '12px 14px' }}>Fee Months</th>
+                  <th style={{ padding: '12px 14px' }}>Proof</th>
+                  <th style={{ padding: '12px 14px' }}>Status</th>
+                  <th style={{ padding: '12px 14px', textAlign: 'right' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(sub => {
+                  const isPending = sub.status === 'PAYMENT UNDER REVIEW';
+                  const isApproved = sub.status === 'APPROVED';
+                  const isRejected = sub.status === 'REJECTED';
+
+                  return (
+                    <tr key={sub.submissionId} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <td style={{ padding: '12px 14px' }}>
+                        <div style={{ fontWeight: 600, color: '#38bdf8', fontSize: '0.8rem' }}>{sub.submissionId}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                          {sub.createdAt ? new Date(sub.createdAt).toLocaleDateString('en-GB') : sub.paymentDate}
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 14px' }}>
+                        <div style={{ fontWeight: 600, color: '#fff' }}>{sub.studentName}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>ID: #{sub.studentId}</div>
+                      </td>
+                      <td style={{ padding: '12px 14px' }}>
+                        <div>{sub.branch}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{sub.batch}</div>
+                      </td>
+                      <td style={{ padding: '12px 14px' }}>
+                        <div style={{ fontWeight: 700, color: '#4ade80', fontSize: '1rem' }}>₹{sub.totalAmount}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{sub.paymentMethod}</div>
+                      </td>
+                      <td style={{ padding: '12px 14px', fontFamily: 'monospace', fontSize: '0.82rem', color: '#e2e8f0' }}>
+                        {sub.transactionId || '—'}
+                      </td>
+                      <td style={{ padding: '12px 14px' }}>
+                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                          {(sub.feeAllocations || []).map((alloc, i) => (
+                            <span
+                              key={i}
+                              style={{
+                                background: 'rgba(56, 189, 248, 0.15)',
+                                color: '#38bdf8',
+                                border: '1px solid rgba(56, 189, 248, 0.3)',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                fontSize: '0.72rem'
+                              }}
+                            >
+                              {alloc.feeMonth} (₹{alloc.amount})
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 14px' }}>
+                        {sub.proofImage ? (
+                          <button
+                            className="btn-secondary"
+                            style={{ padding: '4px 8px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                            onClick={() => setViewingProofSubmission(sub)}
+                          >
+                            <Eye size={12} /> View Proof
+                          </button>
+                        ) : (
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>No proof</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px 14px' }}>
+                        {isPending && (
+                          <span style={{ background: 'rgba(234, 179, 8, 0.15)', color: '#facc15', border: '1px solid rgba(234, 179, 8, 0.3)', padding: '3px 8px', borderRadius: '12px', fontSize: '0.72rem', fontWeight: 600 }}>
+                            PENDING REVIEW
+                          </span>
+                        )}
+                        {isApproved && (
+                          <span style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)', padding: '3px 8px', borderRadius: '12px', fontSize: '0.72rem', fontWeight: 600 }}>
+                            APPROVED
+                          </span>
+                        )}
+                        {isRejected && (
+                          <div>
+                            <span style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '3px 8px', borderRadius: '12px', fontSize: '0.72rem', fontWeight: 600 }}>
+                              REJECTED
+                            </span>
+                            {sub.rejectionReason && (
+                              <div style={{ fontSize: '0.72rem', color: '#f87171', marginTop: '4px', maxWidth: '140px' }} title={sub.rejectionReason}>
+                                {sub.rejectionReason.slice(0, 30)}...
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                        {isPending && (
+                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                            <button
+                              className="btn-primary"
+                              style={{ background: '#22c55e', borderColor: '#22c55e', padding: '5px 10px', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
+                              disabled={approvingSubId === sub.submissionId}
+                              onClick={() => handleApproveSubmission(sub.submissionId)}
+                            >
+                              <CheckCircle size={14} />
+                              {approvingSubId === sub.submissionId ? 'Approving...' : 'Approve'}
+                            </button>
+                            <button
+                              className="btn-secondary"
+                              style={{ color: '#ef4444', borderColor: '#ef4444', padding: '5px 10px', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
+                              onClick={() => {
+                                setRejectingSubmission(sub);
+                                setRejectionReasonInput('');
+                              }}
+                            >
+                              <XCircle size={14} /> Reject
+                            </button>
+                          </div>
+                        )}
+                        {isApproved && (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                            Approved by {sub.approvedBy || 'Admin'}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* View Proof Modal */}
+        {viewingProofSubmission && (
+          <div className="modal-overlay" style={{ zIndex: 12000 }} onClick={() => setViewingProofSubmission(null)}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px', width: '90%' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--color-border)', paddingBottom: '0.75rem' }}>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#fff' }}>Payment Proof Verification</h3>
+                <button onClick={() => setViewingProofSubmission(null)} style={{ background: 'none', border: 'none', color: '#aaa', cursor: 'pointer' }}><X size={20} /></button>
+              </div>
+              <div style={{ marginBottom: '1rem', fontSize: '0.85rem', color: 'var(--color-text-muted)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div><strong>Student:</strong> {viewingProofSubmission.studentName} (#{viewingProofSubmission.studentId})</div>
+                <div><strong>Amount:</strong> ₹{viewingProofSubmission.totalAmount}</div>
+                <div><strong>Method:</strong> {viewingProofSubmission.paymentMethod}</div>
+                <div><strong>UTR / Txn ID:</strong> {viewingProofSubmission.transactionId || 'None'}</div>
+                <div><strong>Date:</strong> {viewingProofSubmission.paymentDate}</div>
+                <div><strong>Status:</strong> {viewingProofSubmission.status}</div>
+              </div>
+              <div style={{ textAlign: 'center', background: '#000', padding: '10px', borderRadius: '8px', maxHeight: '420px', overflowY: 'auto' }}>
+                <img
+                  src={viewingProofSubmission.proofImage}
+                  alt="Payment Proof Screenshot"
+                  style={{ maxWidth: '100%', maxHeight: '400px', objectFit: 'contain', borderRadius: '4px' }}
+                />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '1rem' }}>
+                <button className="btn-secondary" onClick={() => setViewingProofSubmission(null)}>Close</button>
+                {viewingProofSubmission.status === 'PAYMENT UNDER REVIEW' && (
+                  <>
+                    <button
+                      className="btn-secondary"
+                      style={{ color: '#ef4444', borderColor: '#ef4444' }}
+                      onClick={() => {
+                        setRejectingSubmission(viewingProofSubmission);
+                        setViewingProofSubmission(null);
+                        setRejectionReasonInput('');
+                      }}
+                    >
+                      Reject
+                    </button>
+                    <button
+                      className="btn-primary"
+                      style={{ background: '#22c55e', borderColor: '#22c55e' }}
+                      disabled={approvingSubId === viewingProofSubmission.submissionId}
+                      onClick={() => {
+                        handleApproveSubmission(viewingProofSubmission.submissionId);
+                        setViewingProofSubmission(null);
+                      }}
+                    >
+                      Approve Payment
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Reject Dialog Modal */}
+        {rejectingSubmission && (
+          <div className="modal-overlay" style={{ zIndex: 12000 }} onClick={() => setRejectingSubmission(null)}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px', width: '90%' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--color-border)', paddingBottom: '0.75rem' }}>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <AlertCircle size={20} /> Reject Payment Submission
+                </h3>
+                <button onClick={() => setRejectingSubmission(null)} style={{ background: 'none', border: 'none', color: '#aaa', cursor: 'pointer' }}><X size={20} /></button>
+              </div>
+              <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+                Rejecting submission <strong>{rejectingSubmission.submissionId}</strong> for <strong>{rejectingSubmission.studentName}</strong> (₹{rejectingSubmission.totalAmount}).
+                The student will be notified and asked to re-upload.
+              </p>
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '4px' }}>
+                  Reason for Rejection *
+                </label>
+                <textarea
+                  className="form-control"
+                  rows={3}
+                  value={rejectionReasonInput}
+                  onChange={e => setRejectionReasonInput(e.target.value)}
+                  placeholder="e.g., UTR / Transaction ID could not be matched with bank account, or incorrect screenshot."
+                  style={{ width: '100%', resize: 'vertical' }}
+                  required
+                />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                <button className="btn-secondary" onClick={() => setRejectingSubmission(null)}>Cancel</button>
+                <button
+                  className="btn-primary"
+                  style={{ background: '#ef4444', borderColor: '#ef4444' }}
+                  onClick={handleRejectSubmission}
+                >
+                  Confirm Rejection
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderSettings = () => {
     const isSuper = isAdminUser(loggedInUser);
@@ -15409,6 +16318,84 @@ function App() {
             Academy Branch & Batch Portal
           </p>
 
+          {/* Student Portal Quick Access Banner */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: 'rgba(0, 230, 118, 0.08)',
+            border: '1px solid rgba(0, 230, 118, 0.25)',
+            borderRadius: '12px',
+            padding: '10px 14px',
+            marginBottom: '1.25rem',
+            textAlign: 'left'
+          }}>
+            <div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#00e676', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <ShieldCheck size={16} /> Student Portal
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)' }}>
+                Sign in with registered Mobile & MPIN
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setAppMode('student-login');
+                window.location.hash = '#/student/login';
+              }}
+              style={{
+                background: 'linear-gradient(135deg, #00e676, #00b0ff)',
+                color: '#000',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '6px 12px',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              Student Login <ArrowRight size={13} />
+            </button>
+          </div>
+
+          {getSessionUser() && (
+            <div style={{
+              background: 'rgba(229, 9, 20, 0.12)',
+              border: '1px solid rgba(229, 9, 20, 0.3)',
+              borderRadius: '10px',
+              padding: '8px 12px',
+              marginBottom: '1rem',
+              fontSize: '0.8rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              color: '#ff9999'
+            }}>
+              <span>Staff session active: <strong>{getSessionUser()}</strong></span>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => { setAppMode('admin'); window.location.hash = '#/admin'; }}
+                  style={{ background: '#E50914', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '6px', fontSize: '0.72rem', cursor: 'pointer', fontWeight: 700 }}
+                >
+                  Admin Page
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { clearSession(); sessionStorage.clear(); setLoggedInUser(null); window.location.reload(); }}
+                  style={{ background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', padding: '4px 8px', borderRadius: '6px', fontSize: '0.72rem', cursor: 'pointer' }}
+                >
+                  Logout
+                </button>
+              </div>
+            </div>
+          )}
+
           {!isForgotPassword && (
             <div style={{
               display: 'flex',
@@ -15496,7 +16483,7 @@ function App() {
             <div style={{ textAlign: 'left' }}>
               <h3 style={{ fontSize: '1.05rem', color: '#fff', marginBottom: '0.2rem', textAlign: 'center' }}>Trainer Sign Up</h3>
               <p style={{ color: 'var(--color-text-muted)', fontSize: '0.78rem', marginBottom: '1rem', textAlign: 'center' }}>
-                Register your account. Super Admin approval required before login.
+                Register your account. Admin will review, approve, and assign your branch & batch.
               </p>
 
               {trainerRegSuccess && (
@@ -15526,18 +16513,6 @@ function App() {
 
                 <div className="grid-2-col" style={{ gap: '8px' }}>
                   <div className="form-group" style={{ marginBottom: '0.75rem' }}>
-                    <label style={{ fontSize: '0.8rem', marginBottom: '2px' }}>Username *</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="Username"
-                      value={trainerRegForm.username}
-                      onChange={(e) => setTrainerRegForm({ ...trainerRegForm, username: e.target.value.toLowerCase().trim() })}
-                      required
-                      style={{ height: '36px' }}
-                    />
-                  </div>
-                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
                     <label style={{ fontSize: '0.8rem', marginBottom: '2px' }}>Mobile Phone *</label>
                     <input
                       type="tel"
@@ -15550,42 +16525,14 @@ function App() {
                       style={{ height: '36px' }}
                     />
                   </div>
-                </div>
-
-                <div className="form-group" style={{ marginBottom: '0.75rem' }}>
-                  <label style={{ fontSize: '0.8rem', marginBottom: '2px' }}>Email Address *</label>
-                  <input
-                    type="email"
-                    className="form-control"
-                    placeholder="trainer@example.com"
-                    value={trainerRegForm.email}
-                    onChange={(e) => setTrainerRegForm({ ...trainerRegForm, email: e.target.value.trim() })}
-                    required
-                    style={{ height: '36px' }}
-                  />
-                </div>
-
-                <div className="grid-2-col" style={{ gap: '8px' }}>
                   <div className="form-group" style={{ marginBottom: '0.75rem' }}>
-                    <label style={{ fontSize: '0.8rem', marginBottom: '2px' }}>Password *</label>
+                    <label style={{ fontSize: '0.8rem', marginBottom: '2px' }}>Email Address *</label>
                     <input
-                      type="password"
+                      type="email"
                       className="form-control"
-                      placeholder="Password"
-                      value={trainerRegForm.password}
-                      onChange={(e) => setTrainerRegForm({ ...trainerRegForm, password: e.target.value })}
-                      required
-                      style={{ height: '36px' }}
-                    />
-                  </div>
-                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
-                    <label style={{ fontSize: '0.8rem', marginBottom: '2px' }}>Confirm Password *</label>
-                    <input
-                      type="password"
-                      className="form-control"
-                      placeholder="Confirm password"
-                      value={trainerRegForm.confirmPassword}
-                      onChange={(e) => setTrainerRegForm({ ...trainerRegForm, confirmPassword: e.target.value })}
+                      placeholder="trainer@example.com"
+                      value={trainerRegForm.email}
+                      onChange={(e) => setTrainerRegForm({ ...trainerRegForm, email: e.target.value.trim() })}
                       required
                       style={{ height: '36px' }}
                     />
@@ -15593,26 +16540,79 @@ function App() {
                 </div>
 
                 <div className="form-group" style={{ marginBottom: '0.75rem' }}>
-                  <label style={{ fontSize: '0.8rem', marginBottom: '2px' }}>Preferred Branch *</label>
-                  <select
-                    className="form-control"
-                    value={trainerRegForm.preferredBranch || branches[0]}
-                    onChange={(e) => setTrainerRegForm({ ...trainerRegForm, preferredBranch: e.target.value, preferredBatch: '' })}
-                    style={{ height: '38px', background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '10px' }}
-                  >
-                    {branches.map(b => (
-                      <option key={b} value={b} style={{ background: '#1a1a1a', color: '#fff' }}>{b}</option>
-                    ))}
-                  </select>
+                  <label style={{ fontSize: '0.8rem', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Camera size={14} color="#FFD700" /> Trainer Profile Photo
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    {trainerRegForm.profilePhoto ? (
+                      <div style={{ position: 'relative', width: '50px', height: '50px', flexShrink: 0 }}>
+                        <img
+                          src={trainerRegForm.profilePhoto}
+                          alt="Trainer Preview"
+                          style={{ width: '50px', height: '50px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #FFD700' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setTrainerRegForm(prev => ({ ...prev, profilePhoto: '' }))}
+                          style={{
+                            position: 'absolute',
+                            top: '-4px',
+                            right: '-4px',
+                            background: '#ff453a',
+                            border: 'none',
+                            borderRadius: '50%',
+                            width: '18px',
+                            height: '18px',
+                            color: '#fff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            fontSize: '11px',
+                            padding: 0
+                          }}
+                          title="Remove Photo"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ width: '50px', height: '50px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px dashed rgba(255,255,255,0.25)', flexShrink: 0 }}>
+                        <UserPlus size={20} color="rgba(255,255,255,0.4)" />
+                      </div>
+                    )}
+                    <div style={{ flex: 1 }}>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        id="trainer-signup-photo"
+                        className="form-control"
+                        onChange={handleTrainerPhotoUpload}
+                        style={{ height: '36px', fontSize: '0.78rem', paddingTop: '6px' }}
+                      />
+                      <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                        Optional: Upload trainer photo (Auto-compressed)
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ padding: '0.75rem 0.9rem', background: 'rgba(255, 215, 0, 0.08)', borderRadius: '10px', border: '1px solid rgba(255, 215, 0, 0.2)', marginBottom: '0.85rem', textAlign: 'left' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#FFD700', fontWeight: 700, marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Shield size={14} /> Admin Credential Creation
+                  </div>
+                  <div style={{ fontSize: '0.74rem', color: 'rgba(255,255,255,0.7)', lineHeight: 1.4 }}>
+                    Username, Password, and Branch/Batch assignment will be configured and provided by the Super Admin upon reviewing your application.
+                  </div>
                 </div>
 
                 <button
                   type="submit"
                   className="btn-primary"
-                  style={{ width: '100%', justifyContent: 'center', marginTop: '0.5rem', height: '38px', fontWeight: 700 }}
+                  style={{ width: '100%', justifyContent: 'center', marginTop: '0.5rem', height: '40px', fontWeight: 700 }}
                   disabled={isSubmittingTrainerReg}
                 >
-                  {isSubmittingTrainerReg ? 'Submitting Registration...' : 'Submit Trainer Registration'}
+                  {isSubmittingTrainerReg ? 'Submitting Application...' : 'Submit Application for Review'}
                 </button>
               </form>
 
@@ -16489,6 +17489,58 @@ function App() {
   };
 
 
+  if (appMode === 'student-login') {
+    return (
+      <StudentLogin
+        apiBaseUrl={API_BASE_URL}
+        onLoginSuccess={(authRes) => {
+          const sToken = authRes?.token;
+          const sData = authRes?.student;
+          if (sToken) {
+            setStudentSession(sToken, sData || {});
+          }
+          setAppMode('student-portal');
+          window.location.hash = '#/student/portal';
+        }}
+        onGoToWebsite={() => {
+          setAppMode('website');
+          window.location.hash = '#/';
+        }}
+        onBackToWebsite={() => {
+          setAppMode('website');
+          window.location.hash = '#/';
+        }}
+        onGoToStaffLogin={() => {
+          setAppMode('login');
+          window.location.hash = '#/login';
+        }}
+      />
+    );
+  }
+
+  if (appMode === 'student-portal') {
+    const studentData = getStudentSessionData();
+    const studentToken = getStudentSessionToken();
+    if (!studentToken) {
+      setAppMode('student-login');
+      window.location.hash = '#/student/login';
+      return null;
+    }
+    return (
+      <StudentPortal
+        apiBaseUrl={API_BASE_URL}
+        initialStudent={studentData}
+        token={studentToken}
+        sessionToken={studentToken}
+        onLogout={() => {
+          clearStudentSession();
+          setAppMode('student-login');
+          window.location.hash = '#/student/login';
+        }}
+      />
+    );
+  }
+
   if (appMode === 'website') {
     return renderPublic();
   }
@@ -16546,6 +17598,22 @@ function App() {
           <a className={`nav-item ${currentView === 'fees' ? 'active' : ''}`} onClick={() => setCurrentView('fees')}>
             <Wallet className="nav-icon" /> <span>Fees</span>
           </a>
+          {(userRole === 'superadmin' || userRole === 'developer' || userRole === 'branchadmin') && (
+            <a
+              className={`nav-item ${currentView === 'payment-approvals' ? 'active' : ''}`}
+              onClick={() => {
+                setCurrentView('payment-approvals');
+                fetchPaymentSubmissions();
+              }}
+            >
+              <CreditCard className="nav-icon" /> <span>Payment Approvals</span>
+              {paymentSubmissions.filter(s => s.status === 'PAYMENT UNDER REVIEW').length > 0 && (
+                <span className="badge badge-gold" style={{ marginLeft: 'auto', fontSize: '0.7rem', padding: '2px 6px', borderRadius: '10px' }}>
+                  {paymentSubmissions.filter(s => s.status === 'PAYMENT UNDER REVIEW').length}
+                </span>
+              )}
+            </a>
+          )}
           <a className={`nav-item ${currentView === 'reminders' ? 'active' : ''}`} onClick={() => setCurrentView('reminders')}>
             <Bell className="nav-icon" /> <span>Reminders</span>
           </a>
@@ -17146,6 +18214,17 @@ function App() {
                                     >
                                       <Eye size={16} />
                                     </button>
+                                    {(isAdminUser(loggedInUser) || isBranchAdmin(loggedInUser) || userRole === 'developer') && (
+                                      <button
+                                        type="button"
+                                        className="btn-icon"
+                                        onClick={() => handleAdminResetStudentMpin(student)}
+                                        style={{ color: '#f59e0b', padding: '6px' }}
+                                        title="Reset Portal MPIN"
+                                      >
+                                        <Key size={16} />
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       className="btn-icon"
@@ -17263,6 +18342,7 @@ function App() {
           {currentView === 'attendance' && (lockAttendancePage && userRole !== 'developer' ? renderSectionMaintenance('Attendance Tracking') : renderAttendance())}
           {currentView === 'fees' && (lockFeesPage && userRole !== 'developer' ? renderSectionMaintenance('Fees Portal') : renderFees())}
           {currentView === 'student-fees' && (lockFeesPage && userRole !== 'developer' ? renderSectionMaintenance('Fees Portal') : renderStudentFees())}
+          {currentView === 'payment-approvals' && renderPaymentApprovals()}
           {currentView === 'reminders' && (lockRemindersPage && userRole !== 'developer' ? renderSectionMaintenance('Alerts & Reminders') : renderReminders())}
           {currentView === 'performance' && (
             (userRole === 'trainer' || userRole === 'coordinator') ? (
@@ -19367,30 +20447,55 @@ function App() {
                 </div>
               </div>
 
-              <div className="payment-modal-grid">
-                <div>
-                  <label style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>Fee Due Month:</label>
-                  <input
-                    type="month"
-                    className="form-control"
-                    value={paymentFormData.feeMonth}
-                    onChange={e => setPaymentFormData({ ...paymentFormData, feeMonth: e.target.value })}
-                    required
-                  />
+              {/* Multi-Month / Multi-Fee Selection Checklist */}
+              {paymentFormData.availableItems && paymentFormData.availableItems.length > 0 && (
+                <div style={{ marginBottom: '1.25rem', background: 'rgba(255,255,255,0.02)', padding: '0.9rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                    <label style={{ fontSize: '0.82rem', color: '#38bdf8', fontWeight: 700, margin: 0 }}>
+                      Select Fee Months / Dues to Settle:
+                    </label>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+                      {paymentFormData.selectedItemIds?.length || 1} selected
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '180px', overflowY: 'auto' }}>
+                    {paymentFormData.availableItems.map(item => {
+                      const isChecked = paymentFormData.selectedItemIds?.includes(item.id);
+                      return (
+                        <label
+                          key={item.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            background: isChecked ? 'rgba(56, 189, 248, 0.12)' : 'rgba(255, 255, 255, 0.02)',
+                            border: isChecked ? '1px solid rgba(56, 189, 248, 0.45)' : '1px solid rgba(255, 255, 255, 0.06)',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => togglePaymentItem(item.id)}
+                              style={{ accentColor: '#38bdf8', cursor: 'pointer', width: '16px', height: '16px' }}
+                            />
+                            <span style={{ fontSize: '0.85rem', color: isChecked ? '#fff' : 'var(--color-text-muted)', fontWeight: isChecked ? 600 : 400 }}>
+                              {item.label || item.description}
+                            </span>
+                          </div>
+                          <strong style={{ fontSize: '0.9rem', color: isChecked ? '#51CF66' : 'var(--color-text-muted)' }}>
+                            ₹{item.amount?.toLocaleString()}
+                          </strong>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div>
-                  <label style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>Fee Type:</label>
-                  <select
-                    className="form-control"
-                    value={paymentFormData.feeType}
-                    onChange={e => setPaymentFormData({ ...paymentFormData, feeType: e.target.value })}
-                  >
-                    <option value="monthly">Monthly Fee</option>
-                    <option value="admission">Admission Fee</option>
-                    <option value="custom">Custom Fee</option>
-                  </select>
-                </div>
-              </div>
+              )}
 
               <div className="payment-modal-grid">
                 <div>
@@ -19404,7 +20509,7 @@ function App() {
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.82rem', color: '#51CF66', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Amount Paid (₹):</label>
+                  <label style={{ fontSize: '0.82rem', color: '#51CF66', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Total Amount Paid (₹):</label>
                   <input
                     type="number"
                     className="form-control"
@@ -19424,7 +20529,7 @@ function App() {
               <div className="payment-modal-grid">
                 <div>
                   <label style={{ fontSize: '0.82rem', color: '#38bdf8', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                    Actual Payment Date:
+                    Actual Payment Received Date:
                   </label>
                   <input
                     type="date"
@@ -19435,7 +20540,7 @@ function App() {
                     required
                   />
                   <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: '2px', display: 'block' }}>
-                    Revenue counted in: <strong>{paymentFormData.paymentDate.slice(0, 7)}</strong>
+                    Revenue counted in: <strong>{formatMonthName(paymentFormData.paymentDate.slice(0, 7))}</strong>
                   </span>
                 </div>
                 <div>
@@ -19454,6 +20559,10 @@ function App() {
                 </div>
               </div>
 
+              <div style={{ padding: '0.65rem 0.85rem', background: 'rgba(56, 189, 248, 0.08)', borderRadius: '8px', border: '1px solid rgba(56, 189, 248, 0.25)', marginBottom: '1.25rem', fontSize: '0.78rem', color: '#bae6fd', lineHeight: 1.45 }}>
+                💡 <strong>Revenue Attribution:</strong> The full amount of <strong>₹{Number(paymentFormData.amountPaid || 0).toLocaleString()}</strong> will be added to <strong>{formatMonthName(paymentFormData.paymentDate.slice(0, 7))} Revenue</strong> based on the actual payment date ({paymentFormData.paymentDate}). Each selected fee month retains its original month identity and will be marked Paid.
+              </div>
+
               <div style={{ marginBottom: '1.5rem' }}>
                 <label style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>Reference / Notes (Optional):</label>
                 <input
@@ -19468,7 +20577,7 @@ function App() {
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                 <button type="button" className="btn-secondary" onClick={() => setIsRecordPaymentModalOpen(false)}>Cancel</button>
                 <button type="submit" className="btn-primary" style={{ background: '#4CAF50', borderColor: '#4CAF50' }}>
-                  <CheckCircle size={16} /> Save & Generate Receipt
+                  <CheckCircle size={16} /> Save Payment & Receipt
                 </button>
               </div>
             </form>
@@ -19477,85 +20586,223 @@ function App() {
       )}
 
       {/* Modal: View & Print Receipt */}
-      {isReceiptModalOpen && activeReceipt && (
-        <div className="modal-overlay" style={{ zIndex: 11500 }}>
-          <div className="modal-content glass-panel receipt-modal-content" style={{ maxWidth: '560px', borderRadius: '16px', background: '#0d0e15', border: '1px solid var(--glass-border)', boxShadow: '0 30px 80px rgba(0,0,0,0.9)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '2px solid rgba(229,9,20,0.3)', paddingBottom: '1rem' }}>
-              <div>
-                <h2 style={{ margin: 0, fontSize: '1.4rem', fontFamily: 'Outfit, sans-serif', color: '#fff', letterSpacing: '1px' }}>
-                  <span style={{ color: '#E50914' }}>MASTER</span> FIT ACADEMY
-                </h2>
-                <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>Official Fee Payment Receipt</span>
-              </div>
-              <button className="btn-icon" onClick={() => setIsReceiptModalOpen(false)}><X size={20} /></button>
-            </div>
+      {isReceiptModalOpen && activeReceipt && (() => {
+        const receiptBreakdown = Array.isArray(activeReceipt.breakdown) && activeReceipt.breakdown.length > 0
+          ? activeReceipt.breakdown
+          : [{
+              feeMonth: activeReceipt.feeMonth || '',
+              feeType: activeReceipt.feeType || 'monthly',
+              amount: activeReceipt.amountPaid,
+              description: activeReceipt.feeType === 'admission' ? 'Admission Fee' : (activeReceipt.feeMonth ? `${formatMonthName(activeReceipt.feeMonth)} Fee` : 'Monthly Fee')
+            }];
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem', background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
-              <div>
-                <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', display: 'block' }}>Receipt Number:</span>
-                <strong style={{ fontSize: '1rem', color: '#FFD700', fontFamily: 'monospace' }}>{activeReceipt.receiptNumber}</strong>
+        return (
+          <div className="modal-overlay" style={{ zIndex: 11500 }}>
+            <div className="modal-content glass-panel receipt-modal-content" style={{ maxWidth: '560px', borderRadius: '16px', background: '#0d0e15', border: '1px solid var(--glass-border)', boxShadow: '0 30px 80px rgba(0,0,0,0.9)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '2px solid rgba(229,9,20,0.3)', paddingBottom: '1rem' }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: '1.4rem', fontFamily: 'Outfit, sans-serif', color: '#fff', letterSpacing: '1px' }}>
+                    <span style={{ color: '#E50914' }}>MASTER</span> FIT ACADEMY
+                  </h2>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>Official Fee Payment Receipt</span>
+                </div>
+                <button className="btn-icon" onClick={() => setIsReceiptModalOpen(false)}><X size={20} /></button>
               </div>
-              <div style={{ textAlign: 'right' }}>
-                <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', display: 'block' }}>Payment Date:</span>
-                <strong style={{ fontSize: '0.95rem', color: '#fff' }}>{activeReceipt.paymentDate}</strong>
-              </div>
-            </div>
 
-            <div style={{ marginBottom: '1.5rem' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
-                <tbody>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                    <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Student Name:</td>
-                    <td style={{ padding: '8px 0', textAlign: 'right', fontWeight: 700, color: '#fff' }}>{activeReceipt.studentName}</td>
-                  </tr>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                    <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Branch:</td>
-                    <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff' }}>{activeReceipt.branch}</td>
-                  </tr>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                    <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Batch:</td>
-                    <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff' }}>{activeReceipt.batch || 'Regular'}</td>
-                  </tr>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                    <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Fee Description (Fee Month):</td>
-                    <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff', fontWeight: 600 }}>
-                      {activeReceipt.feeType === 'admission' ? 'Admission Fee' : `Monthly Fee (${formatMonthName(activeReceipt.feeMonth)})`}
-                    </td>
-                  </tr>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                    <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Payment Mode:</td>
-                    <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff' }}>{activeReceipt.paymentMethod}</td>
-                  </tr>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                    <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Amount Due:</td>
-                    <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff' }}>₹{activeReceipt.amountDue}</td>
-                  </tr>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                    <td style={{ padding: '10px 0', color: '#51CF66', fontWeight: 700, fontSize: '1.05rem' }}>Amount Paid:</td>
-                    <td style={{ padding: '10px 0', textAlign: 'right', color: '#51CF66', fontWeight: 800, fontSize: '1.25rem' }}>
-                      ₹{activeReceipt.amountPaid}
-                    </td>
-                  </tr>
-                  {activeReceipt.balance > 0 && (
-                    <tr>
-                      <td style={{ padding: '8px 0', color: '#FFD700', fontWeight: 600 }}>Remaining Balance:</td>
-                      <td style={{ padding: '8px 0', textAlign: 'right', color: '#FFD700', fontWeight: 700 }}>₹{activeReceipt.balance}</td>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.25rem', background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <div>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', display: 'block' }}>Receipt Number:</span>
+                  <strong style={{ fontSize: '1rem', color: '#FFD700', fontFamily: 'monospace' }}>{activeReceipt.receiptNumber}</strong>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', display: 'block' }}>Payment Received Date:</span>
+                  <strong style={{ fontSize: '0.95rem', color: '#38bdf8' }}>{activeReceipt.paymentDate}</strong>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', display: 'block', marginTop: '2px' }}>
+                    Revenue Month: <strong>{formatMonthName(activeReceipt.revenueMonth || activeReceipt.paymentDate?.slice(0, 7))}</strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* Fee Breakdown Box */}
+              <div style={{ marginBottom: '1.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '1rem', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                  <span style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#38bdf8', fontWeight: 700 }}>
+                    Fee Breakdown
+                  </span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                    {receiptBreakdown.length} item{receiptBreakdown.length > 1 ? 's' : ''} covered
+                  </span>
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                  <tbody>
+                    {receiptBreakdown.map((item, idx) => (
+                      <tr key={idx} style={{ borderBottom: idx < receiptBreakdown.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
+                        <td style={{ padding: '6px 0', color: '#fff' }}>
+                          <span style={{ fontWeight: 600 }}>
+                            {item.description || (item.feeType === 'admission' ? 'Admission Fee' : (item.feeMonth ? `${formatMonthName(item.feeMonth)} Fee` : 'Monthly Fee'))}
+                          </span>
+                          {item.feeMonth && item.feeType === 'monthly' && (
+                            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginLeft: '6px' }}>
+                              ({item.feeMonth})
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 700, color: '#51CF66' }}>
+                          ₹{Number(item.amount || 0).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                  <tbody>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                      <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Student Name:</td>
+                      <td style={{ padding: '8px 0', textAlign: 'right', fontWeight: 700, color: '#fff' }}>{activeReceipt.studentName}</td>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                      <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Branch / Batch:</td>
+                      <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff' }}>{activeReceipt.branch} • {activeReceipt.batch || 'Regular'}</td>
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                      <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Payment Mode:</td>
+                      <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff' }}>{activeReceipt.paymentMethod}</td>
+                    </tr>
+                    {activeReceipt.transactionRef && (
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                        <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Transaction Reference:</td>
+                        <td style={{ padding: '8px 0', textAlign: 'right', color: '#38bdf8' }}>{activeReceipt.transactionRef}</td>
+                      </tr>
+                    )}
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                      <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Total Amount Due:</td>
+                      <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff' }}>₹{Number(activeReceipt.amountDue || 0).toLocaleString()}</td>
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                      <td style={{ padding: '10px 0', color: '#51CF66', fontWeight: 700, fontSize: '1.05rem' }}>Total Amount Paid:</td>
+                      <td style={{ padding: '10px 0', textAlign: 'right', color: '#51CF66', fontWeight: 800, fontSize: '1.25rem' }}>
+                        ₹{Number(activeReceipt.amountPaid || 0).toLocaleString()}
+                      </td>
+                    </tr>
+                    {activeReceipt.balance > 0 && (
+                      <tr>
+                        <td style={{ padding: '8px 0', color: '#FFD700', fontWeight: 600 }}>Remaining Balance:</td>
+                        <td style={{ padding: '8px 0', textAlign: 'right', color: '#FFD700', fontWeight: 700 }}>₹{Number(activeReceipt.balance || 0).toLocaleString()}</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2rem', paddingTop: '1rem', borderTop: '1px dashed rgba(255,255,255,0.15)' }}>
-              <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
-                Recorded by: <strong>{activeReceipt.collectedBy || 'Admin'}</strong>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px dashed rgba(255,255,255,0.15)' }}>
+                <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                  Recorded by: <strong>{activeReceipt.collectedBy || 'Admin'}</strong>
+                </div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button className="btn-secondary" onClick={() => setIsReceiptModalOpen(false)}>Close</button>
+                  <button className="btn-primary" onClick={() => window.print()} style={{ background: '#38bdf8', borderColor: '#38bdf8', color: '#000', fontWeight: 700 }}>
+                    🖨️ Print Receipt
+                  </button>
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button className="btn-secondary" onClick={() => setIsReceiptModalOpen(false)}>Close</button>
-                <button className="btn-primary" onClick={() => window.print()} style={{ background: '#38bdf8', borderColor: '#38bdf8', color: '#000', fontWeight: 700 }}>
-                  🖨️ Print Receipt
-                </button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Student Admission Generated MPIN Modal */}
+      {createdStudentTempMpin && (
+        <div className="modal-overlay" style={{ zIndex: 15000 }} onClick={() => setCreatedStudentTempMpin(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px', textAlign: 'center', padding: '2rem', position: 'relative' }}>
+            <button
+              type="button"
+              onClick={() => setCreatedStudentTempMpin(null)}
+              style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+              title="Close"
+            >
+              <X size={20} />
+            </button>
+            <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem' }}>
+              <CheckCircle size={32} />
+            </div>
+            <h3 style={{ margin: '0 0 0.5rem', color: '#fff', fontSize: '1.3rem' }}>Student Admission Successful!</h3>
+            <p style={{ color: 'var(--color-text-muted)', fontSize: '0.88rem', margin: '0 0 1.25rem' }}>
+              Student account created for <strong>{createdStudentTempMpin.name}</strong>. Provide this temporary MPIN to the student for their initial portal login:
+            </p>
+            <div style={{ background: 'rgba(56, 189, 248, 0.1)', border: '1px dashed #38bdf8', borderRadius: '10px', padding: '1rem', margin: '0 0 1.25rem' }}>
+              <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Temporary 6-Digit MPIN</div>
+              <div style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '0.25em', color: '#38bdf8', margin: '0.25rem 0' }}>
+                {createdStudentTempMpin.mpin}
               </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Registered Mobile: {createdStudentTempMpin.phone}</div>
+            </div>
+            <p style={{ fontSize: '0.78rem', color: '#f59e0b', marginBottom: '1.25rem' }}>
+              ⚠️ The student will be prompted to set their own secret 6-digit MPIN upon their first login. This temporary MPIN will not be shown again.
+            </p>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  navigator.clipboard.writeText(`Hi ${createdStudentTempMpin.name}, your Master Fit Student Portal temporary MPIN is: ${createdStudentTempMpin.mpin}. Login at: ${window.location.origin}/#/student/login`);
+                  alert('Copied student portal credentials to clipboard!');
+                }}
+              >
+                Copy Details
+              </button>
+              <button type="button" className="btn-primary" onClick={() => setCreatedStudentTempMpin(null)}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Reset Student MPIN Modal */}
+      {adminResetMpinModal && (
+        <div className="modal-overlay" style={{ zIndex: 15000 }} onClick={() => setAdminResetMpinModal(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '460px', textAlign: 'center', padding: '2rem', position: 'relative' }}>
+            <button
+              type="button"
+              onClick={() => setAdminResetMpinModal(null)}
+              style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+              title="Close"
+            >
+              <X size={20} />
+            </button>
+            <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem' }}>
+              <Key size={30} />
+            </div>
+            <h3 style={{ margin: '0 0 0.5rem', color: '#fff', fontSize: '1.25rem' }}>MPIN Reset Successful</h3>
+            <p style={{ color: 'var(--color-text-muted)', fontSize: '0.88rem', margin: '0 0 1.25rem' }}>
+              A new temporary 6-digit MPIN has been generated for <strong>{adminResetMpinModal.studentName}</strong> (#{adminResetMpinModal.studentId}):
+            </p>
+            <div style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px dashed #f59e0b', borderRadius: '10px', padding: '1rem', margin: '0 0 1.25rem' }}>
+              <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>New Temporary MPIN</div>
+              <div style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '0.25em', color: '#f59e0b', margin: '0.25rem 0' }}>
+                {adminResetMpinModal.temporaryMPIN}
+              </div>
+            </div>
+            <p style={{ fontSize: '0.78rem', color: '#94a3b8', marginBottom: '1.25rem' }}>
+              The student must use this temporary MPIN to log in and will be immediately required to create a new secret 6-digit MPIN.
+            </p>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  navigator.clipboard.writeText(`Hi ${adminResetMpinModal.studentName}, your Master Fit Student Portal temporary MPIN has been reset to: ${adminResetMpinModal.temporaryMPIN}. Login at: ${window.location.origin}/#/student/login`);
+                  alert('Copied reset MPIN details to clipboard!');
+                }}
+              >
+                Copy Details
+              </button>
+              <button type="button" className="btn-primary" onClick={() => setAdminResetMpinModal(null)}>
+                Done
+              </button>
             </div>
           </div>
         </div>

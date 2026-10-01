@@ -24,6 +24,9 @@ import Branch from './models/Branch.js';
 import Batch from './models/Batch.js';
 import Class from './models/Class.js';
 import FeePayment from './models/FeePayment.js';
+import StudentAuth from './models/StudentAuth.js';
+import StudentPaymentSubmission from './models/StudentPaymentSubmission.js';
+import bcrypt from 'bcryptjs';
 import { calculateRevenueByPaymentDate, getRevenueTrends, generateReceiptNumber, getRevenueMonthFromDate } from './services/revenueService.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -343,6 +346,49 @@ function decryptStudent(student) {
   return doc;
 }
 
+// Helper to resolve raw batch code/ID to clean human-readable Batch Name
+async function resolveBatchDisplayName(rawBatch, branchName = null) {
+  if (!rawBatch) return 'General Training';
+  const clean = String(rawBatch).trim();
+  try {
+    const isObjId = mongoose.Types.ObjectId.isValid(clean) && clean.length === 24;
+    const query = {
+      $or: [
+        { code: new RegExp(`^${clean}$`, 'i') },
+        { name: new RegExp(`^${clean}$`, 'i') },
+        { batchCode: new RegExp(`^${clean}$`, 'i') },
+        { batchName: new RegExp(`^${clean}$`, 'i') }
+      ]
+    };
+    if (isObjId) {
+      query.$or.push({ _id: clean });
+    }
+
+    let batchDoc = await Batch.findOne(query).lean();
+    if (batchDoc) {
+      return batchDoc.name || batchDoc.batchName || clean;
+    }
+
+    // Try without prefix or with batch_ prefix
+    const altCode = clean.startsWith('batch_') ? clean.replace('batch_', '') : `batch_${clean}`;
+    batchDoc = await Batch.findOne({
+      $or: [
+        { code: new RegExp(`^${altCode}$`, 'i') },
+        { batchCode: new RegExp(`^${altCode}$`, 'i') },
+        { name: new RegExp(`^${altCode}$`, 'i') },
+        { batchName: new RegExp(`^${altCode}$`, 'i') }
+      ]
+    }).lean();
+
+    if (batchDoc) {
+      return batchDoc.name || batchDoc.batchName || clean;
+    }
+  } catch (e) {
+    console.error('Error resolving batch name:', e);
+  }
+  return clean;
+}
+
 // Grading Module helpers
 function calculateNextEligibleDate(baseDateStr) {
   if (!baseDateStr || baseDateStr === 'N/A') return '';
@@ -585,6 +631,74 @@ const authorizeDeveloper = (req, res, next) => {
     return res.status(403).json({ error: 'Access denied: Developer privilege required' });
   }
   next();
+};
+
+// Student Portal Security Helpers
+const generateSecureMpin = () => {
+  return String(Math.floor(100000 + Math.random() * 900000));
+};
+
+const isWeakMpin = (mpin, mobile = '', dob = '') => {
+  if (!mpin || typeof mpin !== 'string' || !/^\d{6}$/.test(mpin)) return true;
+  const weakList = [
+    '000000', '111111', '222222', '333333', '444444', '555555', '666666', '777777', '888888', '999999',
+    '123456', '234567', '345678', '456789', '567890', '654321', '765432', '876543', '987654', '098765'
+  ];
+  if (weakList.includes(mpin)) return true;
+  if (/^(\d{2})\1\1$/.test(mpin) || /^(\d{3})\2$/.test(mpin)) return true;
+  if (mobile && typeof mobile === 'string' && mobile.length >= 6 && mobile.includes(mpin)) return true;
+  if (dob && typeof dob === 'string') {
+    const cleanDob = dob.replace(/[^0-9]/g, '');
+    if (cleanDob.includes(mpin)) return true;
+  }
+  return false;
+};
+
+// Student Authentication Middleware
+const authenticateStudentSession = async (req, res, next) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    let token = (authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null) || req.query.token || req.body.token;
+
+    if (!token || typeof token !== 'string') {
+      return res.status(401).json({ error: 'Student authentication token is required' });
+    }
+
+    token = String(token).trim();
+    const session = await Session.findOne({ token }).lean();
+    if (!session || session.role !== 'student' || !session.studentId) {
+      return res.status(401).json({ error: 'Invalid or expired student session' });
+    }
+
+    const authRecord = await StudentAuth.findOne({ studentId: session.studentId });
+    if (!authRecord || !authRecord.isActive) {
+      return res.status(403).json({ error: 'Student portal account is inactive or disabled' });
+    }
+
+    if (authRecord.lockedUntil && new Date(authRecord.lockedUntil) > new Date()) {
+      return res.status(423).json({ error: 'Account is temporarily locked. Please try again later or contact academy.' });
+    }
+
+    const studentDoc = await Student.findOne({ id: session.studentId });
+    if (!studentDoc) {
+      return res.status(404).json({ error: 'Student record not found' });
+    }
+
+    req.student = {
+      studentId: session.studentId,
+      mobileNumber: authRecord.mobileNumber,
+      mustChangeMPIN: authRecord.mustChangeMPIN,
+      token: session.token
+    };
+    req.studentDoc = decryptStudent(studentDoc);
+
+    // Update last activity
+    await Session.updateOne({ token }, { updatedAt: new Date() });
+    next();
+  } catch (err) {
+    console.error('Student auth middleware error:', err);
+    res.status(500).json({ error: 'Student authentication failed: ' + err.message });
+  }
 };
 
 const app = express();
@@ -1421,64 +1535,42 @@ app.get('/api/public/batches', async (req, res) => {
 // --- Public Trainer Registration Route ---
 app.post('/api/public/register/trainer', async (req, res) => {
   try {
-    const { username, email, password, fullName, phone, preferredBranch, preferredBatch } = req.body;
+    const { email, fullName, phone, profilePhoto } = req.body;
 
-    if (!username || !email || !password || !fullName) {
-      return res.status(400).json({ error: 'Username, Email, Password, and Full Name are required.' });
+    if (!email || !fullName) {
+      return res.status(400).json({ error: 'Full Name and Email Address are required.' });
     }
 
-    if (typeof username !== 'string' || typeof password !== 'string' || typeof email !== 'string') {
+    if (typeof fullName !== 'string' || typeof email !== 'string') {
       return res.status(400).json({ error: 'Invalid input data types.' });
     }
 
-    const cleanUsername = username.toLowerCase().trim();
     const cleanEmail = email.toLowerCase().trim();
+    const cleanFullName = fullName.trim();
+    const cleanPhone = phone ? String(phone).trim() : '';
 
-    if (password.length < (cachedSettings.minPasswordLength || 6)) {
-      return res.status(400).json({ error: `Password must be at least ${cachedSettings.minPasswordLength || 6} characters long.` });
-    }
-
-    const existingUser = await User.findOne({
-      $or: [
-        { username: cleanUsername },
-        { email: cleanEmail }
-      ]
-    });
-
+    const existingUser = await User.findOne({ email: cleanEmail });
     if (existingUser) {
-      if (existingUser.username === cleanUsername) {
-        return res.status(400).json({ error: 'Username is already registered.' });
-      }
-      if (existingUser.email === cleanEmail) {
-        return res.status(400).json({ error: 'Email address is already registered.' });
-      }
+      return res.status(400).json({ error: 'This email address is already registered.' });
     }
 
-    let resolvedBranch = preferredBranch || '';
-    let resolvedBatch = preferredBatch || '';
-    let resolvedSchedule = '';
+    // Generate temporary pending username & placeholder password until Super Admin creates credentials upon review
+    const sanitizedEmailPrefix = cleanEmail.split('@')[0].replace(/[^a-z0-9]/g, '').slice(0, 10);
+    const tempUsername = `pending_${sanitizedEmailPrefix}_${Date.now().toString().slice(-4)}`;
+    const tempPassword = hashPassword(crypto.randomBytes(16).toString('hex'));
 
-    if (resolvedBranch && resolvedBatch) {
-      const dbBatch = await validateBranchBatchMapping(resolvedBranch, resolvedBatch);
-      if (dbBatch) {
-        resolvedBranch = dbBatch.branchName;
-        resolvedBatch = dbBatch.code;
-        resolvedSchedule = dbBatch.schedule;
-      }
-    }
-
-    const hashedPassword = hashPassword(password);
     const newTrainer = new User({
-      username: cleanUsername,
+      username: tempUsername,
       email: cleanEmail,
-      password: hashedPassword,
+      password: tempPassword,
       role: 'trainer',
-      branch: resolvedBranch,
-      batch: resolvedBatch,
-      schedule: resolvedSchedule,
+      branch: '',
+      batch: '',
+      schedule: '',
       status: 'Pending',
-      fullName: fullName.trim(),
-      phone: phone ? phone.trim() : '',
+      fullName: cleanFullName,
+      phone: cleanPhone,
+      profilePhoto: profilePhoto || '',
       passwordChangedAt: new Date()
     });
 
@@ -1489,10 +1581,10 @@ app.post('/api/public/register/trainer', async (req, res) => {
       await new Notification({
         targetUser: 'superadmin',
         title: 'New Trainer Registration Request',
-        message: `Trainer ${fullName.trim()} (${cleanUsername}) has registered and is pending approval.`,
+        message: `Trainer ${cleanFullName} (${cleanEmail}) has submitted registration. Review application to create username, password, and allocate batch.`,
         type: 'TrainerRegistration',
         priority: 'high',
-        branch: resolvedBranch || 'all'
+        branch: 'all'
       }).save();
     } catch (notifErr) {
       console.error('Error creating registration notification:', notifErr);
@@ -1500,16 +1592,16 @@ app.post('/api/public/register/trainer', async (req, res) => {
 
     await new SecurityLog({
       eventType: 'TrainerRegistration',
-      username: cleanUsername,
+      username: tempUsername,
       role: 'trainer',
-      description: `Trainer self-registered: ${cleanUsername} (${cleanEmail}). Status: Pending approval.`,
+      description: `Trainer applicant registered: ${cleanFullName} (${cleanEmail}). Photo: ${profilePhoto ? 'Uploaded' : 'None'}. Pending credentials & allocation by Admin.`,
       ipAddress: getClientIp(req),
       userAgent: req.headers['user-agent']
     }).save();
 
     res.status(201).json({
       success: true,
-      message: 'Trainer registration submitted successfully! Your account is pending Super Admin approval.'
+      message: 'Trainer application submitted successfully! Super Admin will review your application, create your login credentials, and assign your branch & batch.'
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2384,7 +2476,16 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
       console.error("Error calculating payment-date revenue in stats:", e);
     }
 
-    const finalFeeCollection = paymentDateRevenue > 0 ? paymentDateRevenue : Math.round(feeCollection);
+    let pendingPaymentApprovals = 0;
+    try {
+      const approvalQuery = { status: 'PAYMENT UNDER REVIEW' };
+      if (selectedBranchName && selectedBranchName.toLowerCase() !== 'all') {
+        approvalQuery.branch = new RegExp(`^${selectedBranchName.trim()}$`, 'i');
+      }
+      pendingPaymentApprovals = await StudentPaymentSubmission.countDocuments(approvalQuery);
+    } catch (e) {
+      console.error("Error counting pending payment submissions in stats:", e);
+    }
 
     res.json({
       totalStudents,
@@ -2398,7 +2499,8 @@ app.get('/api/dashboard/stats', authenticateSession, async (req, res) => {
       absentToday,
       attendancePercentage,
       feeCollection: finalFeeCollection,
-      pendingFees: Math.round(pendingFees)
+      pendingFees: Math.round(pendingFees),
+      pendingPaymentApprovals
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2490,11 +2592,12 @@ app.post('/api/payments/record', authenticateSession, async (req, res) => {
       paymentDate,
       paymentMethod = 'Cash',
       transactionRef = '',
-      notes = ''
+      notes = '',
+      breakdown = []
     } = req.body;
 
-    if (!studentId || !feeMonth || amountDue === undefined || amountPaid === undefined) {
-      return res.status(400).json({ error: 'studentId, feeMonth, amountDue, and amountPaid are required' });
+    if (!studentId) {
+      return res.status(400).json({ error: 'studentId is required' });
     }
 
     const student = await Student.findOne({ id: Number(studentId) });
@@ -2511,17 +2614,34 @@ app.post('/api/payments/record', authenticateSession, async (req, res) => {
     const { paymentDate: cleanDate, revenueMonth, revenueYear } = getRevenueMonthFromDate(paymentDate);
     const receiptNumber = generateReceiptNumber(cleanDate);
 
-    // Sum existing payments for this student & feeMonth
-    const existingPayments = await FeePayment.find({
-      studentId: Number(studentId),
-      feeType,
-      feeMonth
-    }).lean();
+    // Normalize breakdown items
+    let normalizedBreakdown = [];
+    if (Array.isArray(breakdown) && breakdown.length > 0) {
+      normalizedBreakdown = breakdown.map(item => ({
+        feeMonth: item.feeMonth || feeMonth || '',
+        feeType: item.feeType || 'monthly',
+        amount: Number(item.amount) || 0,
+        description: item.description || (item.feeType === 'admission' ? 'Admission Fee' : (item.feeMonth ? `${item.feeMonth} Fee` : 'Monthly Fee'))
+      }));
+    } else {
+      if (!feeMonth || amountDue === undefined || amountPaid === undefined) {
+        return res.status(400).json({ error: 'studentId, feeMonth, amountDue, and amountPaid (or a valid breakdown) are required' });
+      }
+      normalizedBreakdown = [{
+        feeMonth: feeMonth || '',
+        feeType: feeType || 'monthly',
+        amount: Number(amountPaid),
+        description: feeType === 'admission' ? 'Admission Fee' : `${feeMonth} Fee`
+      }];
+    }
 
-    const prevPaid = existingPayments.reduce((acc, curr) => acc + (Number(curr.amountPaid) || 0), 0);
-    const totalPaidNow = prevPaid + Number(amountPaid);
-    const balance = Math.max(0, Number(amountDue) - totalPaidNow);
-    const status = balance === 0 ? 'Paid' : (totalPaidNow > 0 ? 'Partial' : 'Pending');
+    const calcAmountPaid = amountPaid !== undefined ? Number(amountPaid) : normalizedBreakdown.reduce((acc, curr) => acc + curr.amount, 0);
+    const calcAmountDue = amountDue !== undefined ? Number(amountDue) : calcAmountPaid;
+    const balance = Math.max(0, calcAmountDue - calcAmountPaid);
+    const status = balance === 0 ? 'Paid' : (calcAmountPaid > 0 ? 'Partial' : 'Pending');
+
+    const primaryFeeMonth = feeMonth || (normalizedBreakdown[0] ? normalizedBreakdown[0].feeMonth : cleanDate.slice(0, 7));
+    const feeYear = parseInt(primaryFeeMonth.split('-')[0], 10) || revenueYear;
 
     const decrypted = decryptStudent(student);
     const studentName = decrypted.name || `Student #${student.id}`;
@@ -2532,10 +2652,10 @@ app.post('/api/payments/record', authenticateSession, async (req, res) => {
       branch: student.branch,
       batch: student.batch,
       feeType,
-      feeMonth,
-      feeYear: parseInt(feeMonth.split('-')[0], 10),
-      amountDue: Number(amountDue),
-      amountPaid: Number(amountPaid),
+      feeMonth: primaryFeeMonth,
+      feeYear,
+      amountDue: calcAmountDue,
+      amountPaid: calcAmountPaid,
       balance,
       status,
       paymentDate: cleanDate,
@@ -2547,25 +2667,28 @@ app.post('/api/payments/record', authenticateSession, async (req, res) => {
       paymentMethod,
       transactionRef,
       notes,
-      collectedBy: req.user.username || req.user.role || 'Admin'
+      collectedBy: req.user.username || req.user.role || 'Admin',
+      breakdown: normalizedBreakdown
     });
 
     await newPayment.save();
 
-    // Sync student model
-    if (status === 'Paid') {
-      if (feeType === 'monthly') {
-        const paidMonths = student.paidMonths || new Map();
-        if (paidMonths instanceof Map) {
-          paidMonths.set(feeMonth, true);
-        } else {
-          student.paidMonths[feeMonth] = true;
+    // Sync student model: mark all covered fee months and/or admission as paid
+    if (status === 'Paid' || calcAmountPaid > 0) {
+      const paidMonths = student.paidMonths || new Map();
+      for (const item of normalizedBreakdown) {
+        if (item.feeType === 'monthly' && item.feeMonth) {
+          if (paidMonths instanceof Map) {
+            paidMonths.set(item.feeMonth, true);
+          } else {
+            student.paidMonths[item.feeMonth] = true;
+          }
+        } else if (item.feeType === 'admission') {
+          student.admissionPaid = cleanDate.slice(0, 7);
+          student.markModified('admissionPaid');
         }
-        student.markModified('paidMonths');
-      } else if (feeType === 'admission') {
-        student.admissionPaid = cleanDate.slice(0, 7);
-        student.markModified('admissionPaid');
       }
+      student.markModified('paidMonths');
       await student.save();
     }
 
@@ -2613,28 +2736,42 @@ app.delete('/api/payments/:id', authenticateSession, async (req, res) => {
     }
 
     const sId = Number(payment.studentId);
-    if (payment.feeType === 'monthly' && payment.feeMonth) {
-      await Student.updateOne(
-        { id: sId },
-        { $unset: { [`paidMonths.${payment.feeMonth}`]: 1 } }
-      );
-    } else if (payment.feeType === 'admission') {
-      await Student.updateOne(
-        { id: sId },
-        { $set: { admissionPaid: false } }
-      );
+    const monthsToUnset = [];
+    let unsetAdmission = false;
+
+    if (Array.isArray(payment.breakdown) && payment.breakdown.length > 0) {
+      payment.breakdown.forEach(item => {
+        if (item.feeType === 'monthly' && item.feeMonth) monthsToUnset.push(item.feeMonth);
+        if (item.feeType === 'admission') unsetAdmission = true;
+      });
+    } else {
+      if (payment.feeType === 'monthly' && payment.feeMonth) monthsToUnset.push(payment.feeMonth);
+      if (payment.feeType === 'admission') unsetAdmission = true;
+    }
+
+    const unsets = {};
+    monthsToUnset.forEach(m => {
+      unsets[`paidMonths.${m}`] = 1;
+    });
+
+    if (Object.keys(unsets).length > 0) {
+      await Student.updateOne({ id: sId }, { $unset: unsets });
+    }
+    if (unsetAdmission) {
+      await Student.updateOne({ id: sId }, { $set: { admissionPaid: false } });
     }
 
     const student = await Student.findOne({ id: sId });
     if (student) {
-      if (payment.feeType === 'monthly') {
+      monthsToUnset.forEach(m => {
         if (student.paidMonths instanceof Map) {
-          student.paidMonths.delete(payment.feeMonth);
+          student.paidMonths.delete(m);
         } else if (student.paidMonths) {
-          delete student.paidMonths[payment.feeMonth];
+          delete student.paidMonths[m];
         }
-        student.markModified('paidMonths');
-      } else if (payment.feeType === 'admission') {
+      });
+      if (monthsToUnset.length > 0) student.markModified('paidMonths');
+      if (unsetAdmission) {
         student.admissionPaid = false;
         student.markModified('admissionPaid');
       }
@@ -3081,8 +3218,34 @@ app.post('/api/public/students', async (req, res) => {
       throw new Error('Failed to generate a unique student ID after multiple attempts');
     }
 
+    // Auto-create student portal account with temporary MPIN
+    let temporaryMPIN = null;
+    try {
+      const cleanMobile = String(req.body.phone).replace(/[^0-9]/g, '').slice(-10);
+      temporaryMPIN = generateSecureMpin();
+      const mpinHash = await bcrypt.hash(temporaryMPIN, 10);
+      await StudentAuth.findOneAndUpdate(
+        { studentId: saved.id },
+        {
+          studentId: saved.id,
+          mobileNumber: cleanMobile,
+          mpinHash,
+          mustChangeMPIN: true,
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+          isActive: true
+        },
+        { upsert: true, new: true }
+      );
+      console.log(`[Student Auth] Created student portal account for public student ID ${saved.id}`);
+    } catch (authErr) {
+      console.error('[Student Auth Error] Failed to initialize student auth:', authErr);
+    }
+
     console.log(`[Student Creation] Successfully saved public student to database. ID: ${saved.id}`);
-    res.status(201).json(decryptStudent(saved));
+    const responseData = decryptStudent(saved);
+    if (temporaryMPIN) responseData.temporaryMPIN = temporaryMPIN;
+    res.status(201).json(responseData);
   } catch (err) {
     console.error(`[Student Creation Error] Exception caught: ${err.message}`);
     addLog('error', `Failed to create student: ${err.message}`);
@@ -3193,8 +3356,34 @@ app.post('/api/students', authenticateSession, async (req, res) => {
       throw new Error('Failed to generate a unique student ID after multiple attempts');
     }
 
+    // Auto-create student portal account with temporary MPIN
+    let temporaryMPIN = null;
+    try {
+      const cleanMobile = String(req.body.phone).replace(/[^0-9]/g, '').slice(-10);
+      temporaryMPIN = generateSecureMpin();
+      const mpinHash = await bcrypt.hash(temporaryMPIN, 10);
+      await StudentAuth.findOneAndUpdate(
+        { studentId: saved.id },
+        {
+          studentId: saved.id,
+          mobileNumber: cleanMobile,
+          mpinHash,
+          mustChangeMPIN: true,
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+          isActive: true
+        },
+        { upsert: true, new: true }
+      );
+      console.log(`[Student Auth] Created student portal account for student ID ${saved.id}`);
+    } catch (authErr) {
+      console.error('[Student Auth Error] Failed to initialize student auth:', authErr);
+    }
+
     console.log(`[Student Creation] Successfully saved student to database. ID: ${saved.id}`);
-    res.status(201).json(decryptStudent(saved));
+    const responseData = decryptStudent(saved);
+    if (temporaryMPIN) responseData.temporaryMPIN = temporaryMPIN;
+    res.status(201).json(responseData);
   } catch (err) {
     console.error(`[Student Creation Error] Exception caught: ${err.message}`);
     addLog('error', `Failed to create student: ${err.message}`);
@@ -3257,6 +3446,17 @@ app.put('/api/students/:id', authenticateSession, async (req, res) => {
 
     const encryptedBody = encryptStudentData(req.body);
     const updated = await Student.findOneAndUpdate({ id: Number(id) }, encryptedBody, { new: true });
+
+    // If mobile number changed, update StudentAuth
+    if (req.body.phone) {
+      try {
+        const cleanMobile = String(req.body.phone).replace(/[^0-9]/g, '').slice(-10);
+        await StudentAuth.updateOne({ studentId: Number(id) }, { mobileNumber: cleanMobile });
+      } catch (e) {
+        console.error('Failed to sync mobile number in StudentAuth:', e);
+      }
+    }
+
     res.json(decryptStudent(updated));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -3279,6 +3479,7 @@ app.delete('/api/students/:id', authenticateSession, async (req, res) => {
     }
 
     await Student.findOneAndDelete({ id: Number(id) });
+    await StudentAuth.deleteOne({ studentId: Number(id) });
     res.json({ message: 'Student deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -6476,18 +6677,17 @@ app.get('/api/admins', authenticateSession, authorizeRoles('superadmin', 'develo
 
     const admins = await User.find(query).lean();
 
-    const enriched = [];
-    for (const adm of admins) {
+    const enriched = await Promise.all(admins.map(async (adm) => {
       const lastLoginLog = await LoginHistory.findOne({
         username: adm.username,
         status: 'Success'
       }).sort({ createdAt: -1 }).lean();
 
-      enriched.push({
+      return {
         ...adm,
         lastLoginLog: lastLoginLog || null
-      });
-    }
+      };
+    }));
 
     res.json(enriched);
   } catch (err) {
@@ -6999,7 +7199,12 @@ app.get('/api/admin/pending-trainers', authenticateSession, authorizeRoles('supe
     const { role, branch } = req.user;
     let query = { role: 'trainer', status: 'Pending' };
     if (role === 'branchadmin') {
-      query.branch = new RegExp(`^${branch}$`, 'i');
+      query.$or = [
+        { branch: new RegExp(`^${branch}$`, 'i') },
+        { branch: '' },
+        { branch: null },
+        { branch: { $exists: false } }
+      ];
     }
     const pendingList = await User.find(query).select('-password').sort({ createdAt: -1 }).lean();
     res.json(pendingList);
@@ -7011,7 +7216,7 @@ app.get('/api/admin/pending-trainers', authenticateSession, authorizeRoles('supe
 app.post('/api/admin/approve-trainer/:id', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { branch, batch } = req.body;
+    const { branch, batch, username, password } = req.body;
 
     const user = await User.findById(id);
     if (!user) {
@@ -7022,14 +7227,37 @@ app.post('/api/admin/approve-trainer/:id', authenticateSession, authorizeRoles('
       return res.status(400).json({ error: 'Selected account is not a trainer account.' });
     }
 
+    if (!branch || !batch) {
+      return res.status(400).json({ error: 'Branch and Batch allocation are required to approve the trainer.' });
+    }
+
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and Password must be created for the trainer account.' });
+    }
+
+    const cleanUsername = String(username).toLowerCase().trim();
+    if (cleanUsername.length < 3) {
+      return res.status(400).json({ error: 'Username must be at least 3 characters long.' });
+    }
+
+    if (String(password).length < (cachedSettings.minPasswordLength || 6)) {
+      return res.status(400).json({ error: `Password must be at least ${cachedSettings.minPasswordLength || 6} characters long.` });
+    }
+
+    // Check if the username is taken by any other user
+    const existing = await User.findOne({ username: cleanUsername, _id: { $ne: user._id } });
+    if (existing) {
+      return res.status(400).json({ error: `Username "${cleanUsername}" is already taken by another account.` });
+    }
+
     if (req.user.role === 'branchadmin') {
       if (branch && branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
         return res.status(403).json({ error: 'Access denied: Cannot approve trainer for another branch.' });
       }
     }
 
-    let resolvedBranch = branch || user.branch;
-    let resolvedBatch = batch || user.batch;
+    let resolvedBranch = branch;
+    let resolvedBatch = batch;
     let resolvedSchedule = user.schedule || 'Mon-Thu';
 
     if (resolvedBranch && resolvedBatch) {
@@ -7039,21 +7267,24 @@ app.post('/api/admin/approve-trainer/:id', authenticateSession, authorizeRoles('
         resolvedBatch = dbBatch.code;
         resolvedSchedule = dbBatch.schedule;
 
-        dbBatch.trainer = user.username;
+        dbBatch.trainer = cleanUsername;
         await dbBatch.save();
       }
     }
 
+    user.username = cleanUsername;
+    user.password = hashPassword(password);
     user.status = 'Active';
     user.branch = resolvedBranch;
     user.batch = resolvedBatch;
     user.schedule = resolvedSchedule;
+    user.passwordChangedAt = new Date();
     await user.save();
 
     const creds = await Credential.findOne({ configType: 'main' });
     if (creds) {
       const key = `${resolvedBranch || 'Kuttiady'}_${resolvedBatch || 'batch1'}`;
-      const entry = { username: user.username, password: user.password };
+      const entry = { username: cleanUsername, password: user.password };
       if (creds.batchCredentials instanceof Map) {
         creds.batchCredentials.set(key, entry);
       } else {
@@ -7067,12 +7298,17 @@ app.post('/api/admin/approve-trainer/:id', authenticateSession, authorizeRoles('
     await new SecurityLog({
       eventType: 'TrainerApproval',
       username: req.user.username,
-      description: `Approved trainer account: ${user.username} for Branch: ${resolvedBranch}, Batch: ${resolvedBatch}`,
+      description: `Approved trainer account: ${cleanUsername} (${user.fullName}) for Branch: ${resolvedBranch}, Batch: ${resolvedBatch}`,
       ipAddress: getClientIp(req),
       userAgent: req.headers['user-agent']
     }).save();
 
-    res.json({ success: true, message: `Trainer ${user.username} approved successfully!`, user });
+    res.json({
+      success: true,
+      message: `Trainer ${user.fullName || cleanUsername} approved successfully with username "${cleanUsername}"!`,
+      credentials: { username: cleanUsername, password },
+      user
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -7157,6 +7393,948 @@ app.post('/api/admin/allocate-batch', authenticateSession, authorizeRoles('super
     }).save();
 
     res.json({ success: true, message: `Batch ${dbBatch.name} allocated to ${user.username} successfully!`, user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// --- STUDENT PORTAL API ENDPOINTS ---
+// ==========================================
+
+// 1. Student Login (Mobile + 6-digit MPIN)
+app.post('/api/student/login', async (req, res) => {
+  try {
+    const { mobileNumber, mpin } = req.body;
+    if (!mobileNumber || !mpin) {
+      return res.status(400).json({ error: 'Registered mobile number and 6-digit MPIN are required' });
+    }
+
+    const cleanMobile = String(mobileNumber).replace(/[^0-9]/g, '').slice(-10);
+    const cleanMpin = String(mpin).trim();
+
+    if (cleanMobile.length !== 10) {
+      return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number' });
+    }
+    if (!/^\d{6}$/.test(cleanMpin)) {
+      return res.status(400).json({ error: 'MPIN must be exactly 6 numeric digits' });
+    }
+
+    let auth = await StudentAuth.findOne({ mobileNumber: cleanMobile });
+
+    // Fallback: If no StudentAuth exists yet for an existing student admitted earlier, check if student is enrolled
+    if (!auth) {
+      const allStudents = await Student.find({}).lean();
+      const match = allStudents.find(s => {
+        try {
+          const decPhone = String(decrypt(s.phone)).replace(/[^0-9]/g, '').slice(-10);
+          const decParent = s.parentPhone ? String(decrypt(s.parentPhone)).replace(/[^0-9]/g, '').slice(-10) : '';
+          return decPhone === cleanMobile || (decParent && decParent === cleanMobile);
+        } catch (e) {
+          return false;
+        }
+      });
+      if (match) {
+        return res.status(400).json({
+          error: 'MPIN has not been set up yet for this registered mobile number. Please switch to the "Create MPIN" tab to create your 6-digit MPIN.',
+          needsMpinSetup: true
+        });
+      }
+    }
+
+    if (!auth) {
+      return res.status(401).json({ error: 'No student account registered with this mobile number. Please contact academy admin.' });
+    }
+
+    if (!auth.isActive) {
+      return res.status(403).json({ error: 'Student portal account has been deactivated. Please contact academy admin.' });
+    }
+
+    if (auth.lockedUntil && new Date(auth.lockedUntil) > new Date()) {
+      const remainingMins = Math.ceil((new Date(auth.lockedUntil) - Date.now()) / (60 * 1000));
+      return res.status(423).json({ error: `Account is temporarily locked due to failed attempts. Please try again in ${remainingMins} minute(s) or contact academy.` });
+    }
+
+    const isMatch = await bcrypt.compare(cleanMpin, auth.mpinHash);
+    if (!isMatch) {
+      auth.failedLoginAttempts = (auth.failedLoginAttempts || 0) + 1;
+      if (auth.failedLoginAttempts >= 5) {
+        auth.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+        await auth.save();
+        return res.status(423).json({ error: 'Account locked for 15 minutes due to 5 consecutive failed login attempts.' });
+      }
+      await auth.save();
+      return res.status(401).json({ error: `Invalid MPIN. ${5 - auth.failedLoginAttempts} attempt(s) remaining.` });
+    }
+
+    // Success: Reset failed attempts & unlock
+    auth.failedLoginAttempts = 0;
+    auth.lockedUntil = null;
+    auth.lastLoginAt = new Date();
+    await auth.save();
+
+    const studentDoc = await Student.findOne({ id: auth.studentId });
+    if (!studentDoc) {
+      return res.status(404).json({ error: 'Student profile record not found' });
+    }
+    const decStudent = decryptStudent(studentDoc);
+
+    const token = crypto.randomBytes(32).toString('hex');
+    await Session.create({
+      username: cleanMobile,
+      token,
+      role: 'student',
+      studentId: auth.studentId,
+      branch: decStudent.branch || '',
+      batch: decStudent.batch || '',
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent']
+    });
+
+    const resolvedBatch = await resolveBatchDisplayName(decStudent.batch, decStudent.branch);
+
+    res.json({
+      success: true,
+      token,
+      student: {
+        id: decStudent.id,
+        name: decStudent.name,
+        branch: decStudent.branch,
+        batch: resolvedBatch,
+        batchId: decStudent.batch,
+        batchName: resolvedBatch,
+        belt: decStudent.belt,
+        mobileNumber: cleanMobile,
+        photo: decStudent.photo || null,
+        mustChangeMPIN: auth.mustChangeMPIN
+      }
+    });
+  } catch (err) {
+    console.error('Student login error:', err);
+    res.status(500).json({ error: 'Login failed: ' + err.message });
+  }
+});
+
+// 1b. Create / Set MPIN using Registered Mobile Number Only
+app.post('/api/student/create-mpin', async (req, res) => {
+  try {
+    const { mobileNumber, newMpin, confirmMpin } = req.body;
+    if (!mobileNumber || !newMpin || !confirmMpin) {
+      return res.status(400).json({ error: 'Mobile number, new MPIN, and confirm MPIN are required' });
+    }
+
+    const cleanMobile = String(mobileNumber).replace(/[^0-9]/g, '').slice(-10);
+    const cleanNew = String(newMpin).trim();
+    const cleanConfirm = String(confirmMpin).trim();
+
+    if (cleanMobile.length !== 10) {
+      return res.status(400).json({ error: 'Please enter a valid 10-digit registered mobile number' });
+    }
+    if (!/^\d{6}$/.test(cleanNew)) {
+      return res.status(400).json({ error: 'MPIN must be exactly 6 numeric digits' });
+    }
+    if (cleanNew !== cleanConfirm) {
+      return res.status(400).json({ error: 'New MPIN and Confirm MPIN do not match' });
+    }
+
+    // Lookup student by registered mobile number
+    let studentDoc = null;
+    let auth = await StudentAuth.findOne({ mobileNumber: cleanMobile });
+    if (auth) {
+      studentDoc = await Student.findOne({ id: auth.studentId });
+    }
+
+    if (!studentDoc) {
+      // Find in Student collection by decrypted phone or parent phone
+      const allStudents = await Student.find({}).lean();
+      const match = allStudents.find(s => {
+        try {
+          const decPhone = String(decrypt(s.phone)).replace(/[^0-9]/g, '').slice(-10);
+          const decParent = s.parentPhone ? String(decrypt(s.parentPhone)).replace(/[^0-9]/g, '').slice(-10) : '';
+          return decPhone === cleanMobile || (decParent && decParent === cleanMobile);
+        } catch (e) {
+          return false;
+        }
+      });
+      if (match) {
+        studentDoc = await Student.findOne({ id: match.id });
+      }
+    }
+
+    if (!studentDoc) {
+      return res.status(404).json({
+        error: 'This mobile number is not registered with any student in our academy. Please check the number or contact academy administration.'
+      });
+    }
+
+    if (studentDoc.status && studentDoc.status.toLowerCase() === 'inactive') {
+      return res.status(403).json({
+        error: 'This student account is currently inactive. Please contact academy administration.'
+      });
+    }
+
+    if (isWeakMpin(cleanNew, cleanMobile, studentDoc.dob)) {
+      return res.status(400).json({
+        error: 'Predictable or weak MPIN. Please avoid repeated digits (000000, 111111), sequences (123456, 654321), or your birth year/mobile digits.'
+      });
+    }
+
+    const hashed = await bcrypt.hash(cleanNew, 10);
+    await StudentAuth.findOneAndUpdate(
+      { studentId: studentDoc.id },
+      {
+        studentId: studentDoc.id,
+        mobileNumber: cleanMobile,
+        mpinHash: hashed,
+        mustChangeMPIN: false,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        lastLoginAt: new Date(),
+        isActive: true
+      },
+      { upsert: true, new: true }
+    );
+
+    const decStudent = decryptStudent(studentDoc);
+    const token = crypto.randomBytes(32).toString('hex');
+    await Session.create({
+      username: cleanMobile,
+      token,
+      role: 'student',
+      studentId: studentDoc.id,
+      branch: decStudent.branch || '',
+      batch: decStudent.batch || '',
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent']
+    });
+
+    const resolvedBatch = await resolveBatchDisplayName(decStudent.batch, decStudent.branch);
+
+    res.json({
+      success: true,
+      message: 'MPIN created successfully! Access granted to student portal.',
+      token,
+      student: {
+        id: decStudent.id,
+        name: decStudent.name,
+        branch: decStudent.branch,
+        batch: resolvedBatch,
+        batchId: decStudent.batch,
+        batchName: resolvedBatch,
+        belt: decStudent.belt,
+        mobileNumber: cleanMobile,
+        photo: decStudent.photo || null,
+        mustChangeMPIN: false
+      }
+    });
+  } catch (err) {
+    console.error('Student create MPIN error:', err);
+    res.status(500).json({ error: 'Failed to create MPIN: ' + err.message });
+  }
+});
+
+// 2. Change / Set MPIN
+app.post('/api/student/change-mpin', authenticateStudentSession, async (req, res) => {
+  try {
+    const { newMpin, confirmMpin } = req.body;
+    if (!newMpin || !confirmMpin) {
+      return res.status(400).json({ error: 'New MPIN and Confirm MPIN are required' });
+    }
+    const cleanNew = String(newMpin).trim();
+    const cleanConfirm = String(confirmMpin).trim();
+
+    if (!/^\d{6}$/.test(cleanNew)) {
+      return res.status(400).json({ error: 'MPIN must be exactly 6 numeric digits' });
+    }
+    if (cleanNew !== cleanConfirm) {
+      return res.status(400).json({ error: 'New MPIN and Confirm MPIN do not match' });
+    }
+
+    if (isWeakMpin(cleanNew, req.student.mobileNumber, req.studentDoc.dob)) {
+      return res.status(400).json({
+        error: 'Predictable or weak MPIN. Please avoid repeated digits (000000, 111111), sequences (123456, 654321), or your birth year/mobile digits.'
+      });
+    }
+
+    const hashed = await bcrypt.hash(cleanNew, 10);
+    await StudentAuth.updateOne(
+      { studentId: req.student.studentId },
+      {
+        mpinHash: hashed,
+        mustChangeMPIN: false,
+        failedLoginAttempts: 0,
+        lockedUntil: null
+      }
+    );
+
+    res.json({ success: true, message: 'MPIN updated successfully!' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update MPIN: ' + err.message });
+  }
+});
+
+// 3. Authenticated Student Profile & Summary
+app.get('/api/student/me', authenticateStudentSession, async (req, res) => {
+  try {
+    const s = req.studentDoc;
+    const auth = await StudentAuth.findOne({ studentId: req.student.studentId }).lean();
+
+    // Fetch attendance summary
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const attendances = await Attendance.find({ date: { $regex: `^${currentMonth}` } }).lean();
+    let presentCount = 0;
+    let absentCount = 0;
+    attendances.forEach(att => {
+      const rec = att.records ? (att.records.get ? att.records.get(String(s.id)) : att.records[String(s.id)]) : null;
+      if (rec) {
+        const val = typeof rec === 'object' ? rec.status : rec;
+        if (val === 'present') presentCount++;
+        else if (val === 'absent') absentCount++;
+      }
+    });
+    const totalClasses = presentCount + absentCount;
+    const attendancePercentage = totalClasses > 0 ? Math.round((presentCount / totalClasses) * 100) : 100;
+
+    // Fetch fee summary
+    const monthlyRate = s.customMonthlyRate !== null && s.customMonthlyRate !== undefined ? s.customMonthlyRate : 1000;
+    const isCurrentPaid = s.paidMonths ? (s.paidMonths.get ? s.paidMonths.get(currentMonth) : s.paidMonths[currentMonth]) : false;
+
+    // Fetch unread notifications count
+    const unreadCount = await Notification.countDocuments({
+      $or: [
+        { targetUser: 'all' },
+        { targetUser: 'students' },
+        { targetUser: String(s.id) },
+        { branch: s.branch }
+      ],
+      readBy: { $ne: String(s.id) }
+    });
+
+    const resolvedBatch = await resolveBatchDisplayName(s.batch, s.branch);
+
+    res.json({
+      student: {
+        id: s.id,
+        name: s.name,
+        branch: s.branch,
+        batch: resolvedBatch,
+        batchId: s.batch,
+        batchName: resolvedBatch,
+        belt: s.belt,
+        joinDate: s.joinDate,
+        dob: s.dob,
+        phone: req.student.mobileNumber,
+        parentPhone: s.parentPhone,
+        photo: s.photo || null,
+        status: s.status,
+        monthlyRate,
+        mustChangeMPIN: auth ? auth.mustChangeMPIN : false
+      },
+      attendance: {
+        currentMonth,
+        presentCount,
+        absentCount,
+        totalClasses,
+        attendancePercentage
+      },
+      fee: {
+        currentMonth,
+        isCurrentPaid: !!isCurrentPaid,
+        monthlyRate
+      },
+      unreadNotifications: unreadCount
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Student Month-Wise Fee Records & Summary
+app.get('/api/student/fees', authenticateStudentSession, async (req, res) => {
+  try {
+    const s = req.studentDoc;
+    const monthlyRate = s.customMonthlyRate !== null && s.customMonthlyRate !== undefined ? s.customMonthlyRate : 1000;
+
+    // Determine start month
+    const joinMonth = (s.joinDate || '2026-01-01').slice(0, 7);
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonthNum = now.getMonth() + 1;
+    const currentMonthStr = `${currentYear}-${String(currentMonthNum).padStart(2, '0')}`;
+
+    // Generate list of months from joinMonth (or up to 6 months back) to current month
+    const monthsList = [];
+    const [jYear, jMonth] = joinMonth.split('-').map(Number);
+    let iterYear = isNaN(jYear) ? currentYear : jYear;
+    let iterMonth = isNaN(jMonth) ? 1 : jMonth;
+
+    while (iterYear < currentYear || (iterYear === currentYear && iterMonth <= currentMonthNum)) {
+      monthsList.push(`${iterYear}-${String(iterMonth).padStart(2, '0')}`);
+      iterMonth++;
+      if (iterMonth > 12) {
+        iterMonth = 1;
+        iterYear++;
+      }
+    }
+
+    // Also get active pending and rejected submissions for this student
+    const activeSubmissions = await StudentPaymentSubmission.find({
+      studentId: s.id,
+      status: { $in: ['PAYMENT UNDER REVIEW', 'REJECTED'] }
+    }).sort({ submittedAt: -1 }).lean();
+
+    let totalPendingAmount = 0;
+    let totalPaidAmount = 0;
+    let pendingMonthsCount = 0;
+    let paidMonthsCount = 0;
+
+    const feeRecords = monthsList.map(ym => {
+      const isPaid = s.paidMonths ? (s.paidMonths.get ? s.paidMonths.get(ym) : s.paidMonths[ym]) : false;
+
+      if (isPaid) {
+        totalPaidAmount += monthlyRate;
+        paidMonthsCount++;
+        return {
+          feeMonth: ym,
+          amount: monthlyRate,
+          status: 'PAID'
+        };
+      }
+
+      // Check review status
+      const reviewSub = activeSubmissions.find(sub => sub.status === 'PAYMENT UNDER REVIEW' && sub.feeAllocations?.some(a => a.feeMonth === ym));
+      if (reviewSub) {
+        return {
+          feeMonth: ym,
+          amount: monthlyRate,
+          status: 'PAYMENT UNDER REVIEW',
+          submissionId: reviewSub.submissionId,
+          submittedAt: reviewSub.submittedAt
+        };
+      }
+
+      // Check rejection status
+      const rejectedSub = activeSubmissions.find(sub => sub.status === 'REJECTED' && sub.feeAllocations?.some(a => a.feeMonth === ym));
+      if (rejectedSub) {
+        totalPendingAmount += monthlyRate;
+        pendingMonthsCount++;
+        return {
+          feeMonth: ym,
+          amount: monthlyRate,
+          status: 'REJECTED',
+          rejectionReason: rejectedSub.rejectionReason,
+          submissionId: rejectedSub.submissionId
+        };
+      }
+
+      totalPendingAmount += monthlyRate;
+      pendingMonthsCount++;
+      return {
+        feeMonth: ym,
+        amount: monthlyRate,
+        status: 'PENDING'
+      };
+    }).reverse(); // Most recent months first
+
+    res.json({
+      feeRecords,
+      summary: {
+        currentMonth: currentMonthStr,
+        currentMonthFee: monthlyRate,
+        totalPendingAmount,
+        totalPaidAmount,
+        pendingMonthsCount,
+        paidMonthsCount
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. Submit Payment Proof (Single or Multi-Month)
+app.post('/api/student/payments/submit', authenticateStudentSession, async (req, res) => {
+  try {
+    const { paymentDate, totalAmount, paymentMethod, transactionId, feeAllocations, proofImage } = req.body;
+    const s = req.studentDoc;
+
+    if (!paymentDate || !/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) {
+      return res.status(400).json({ error: 'Valid payment date (YYYY-MM-DD) is required' });
+    }
+    if (!totalAmount || isNaN(Number(totalAmount)) || Number(totalAmount) <= 0) {
+      return res.status(400).json({ error: 'Valid total payment amount is required' });
+    }
+    if (!Array.isArray(feeAllocations) || feeAllocations.length === 0) {
+      return res.status(400).json({ error: 'At least one fee month allocation is required' });
+    }
+    if (!proofImage || typeof proofImage !== 'string' || !proofImage.trim()) {
+      return res.status(400).json({ error: 'Payment receipt / screenshot proof image is required' });
+    }
+
+    // Verify sum of allocations matches totalAmount
+    const allocationSum = feeAllocations.reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
+    if (Math.round(allocationSum) !== Math.round(Number(totalAmount))) {
+      return res.status(400).json({ error: `Allocations total (₹${allocationSum}) does not match the payment amount (₹${totalAmount})` });
+    }
+
+    const submissionId = `SUB-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const submission = new StudentPaymentSubmission({
+      submissionId,
+      studentId: s.id,
+      studentName: s.name,
+      branch: s.branch,
+      batch: s.batch,
+      paymentDate,
+      totalAmount: Number(totalAmount),
+      paymentMethod: paymentMethod || 'UPI',
+      transactionId: transactionId ? String(transactionId).trim() : '',
+      feeAllocations: feeAllocations.map(a => ({
+        feeMonth: a.feeMonth,
+        feeType: a.feeType || 'monthly',
+        amount: Number(a.amount),
+        description: a.description || `${a.feeMonth} Fee`
+      })),
+      proofImage,
+      status: 'PAYMENT UNDER REVIEW',
+      submittedAt: new Date()
+    });
+
+    await submission.save();
+
+    // Create acknowledgement notification for student
+    const monthsText = feeAllocations.map(a => a.feeMonth).join(', ');
+    await Notification.create({
+      title: 'Payment Proof Submitted',
+      message: `Your payment proof of ₹${totalAmount} for ${monthsText} has been submitted and is currently under review by the academy.`,
+      type: 'general',
+      targetUser: String(s.id),
+      branch: s.branch,
+      batch: s.batch,
+      sender: 'system'
+    });
+
+    res.status(201).json({
+      success: true,
+      submissionId,
+      message: 'Payment proof submitted successfully. Fee status is now PAYMENT UNDER REVIEW.'
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to submit payment: ' + err.message });
+  }
+});
+
+// 6. Student Payment History (Submissions & Official Receipts)
+app.get('/api/student/payments/history', authenticateStudentSession, async (req, res) => {
+  try {
+    const s = req.studentDoc;
+
+    const submissions = await StudentPaymentSubmission.find({ studentId: s.id })
+      .sort({ submittedAt: -1 })
+      .lean();
+
+    const officialPayments = await FeePayment.find({ studentId: s.id, status: { $ne: 'cancelled' } })
+      .sort({ paymentDate: -1 })
+      .lean();
+
+    res.json({
+      submissions,
+      officialPayments
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 7. Student Attendance (Monthly Calendar & Stats)
+app.get('/api/student/attendance', authenticateStudentSession, async (req, res) => {
+  try {
+    const s = req.studentDoc;
+    const month = req.query.month || new Date().toISOString().slice(0, 7);
+
+    const attendances = await Attendance.find({ date: { $regex: `^${month}` } })
+      .sort({ date: 1 })
+      .lean();
+
+    let presentCount = 0;
+    let absentCount = 0;
+
+    const days = attendances.map(att => {
+      const rec = att.records ? (att.records.get ? att.records.get(String(s.id)) : att.records[String(s.id)]) : null;
+      let status = 'none';
+      if (rec) {
+        const val = typeof rec === 'object' ? rec.status : rec;
+        if (val === 'present') {
+          status = 'present';
+          presentCount++;
+        } else if (val === 'absent') {
+          status = 'absent';
+          absentCount++;
+        }
+      }
+      return {
+        date: att.date,
+        status
+      };
+    });
+
+    const totalClasses = presentCount + absentCount;
+    const percentage = totalClasses > 0 ? Math.round((presentCount / totalClasses) * 100) : 100;
+
+    res.json({
+      month,
+      presentCount,
+      absentCount,
+      totalClasses,
+      percentage,
+      days
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 8. Student Notifications
+app.get('/api/student/notifications', authenticateStudentSession, async (req, res) => {
+  try {
+    const s = req.studentDoc;
+    const notifs = await Notification.find({
+      $or: [
+        { targetUser: 'all' },
+        { targetUser: 'students' },
+        { targetUser: String(s.id) },
+        { branch: s.branch }
+      ]
+    }).sort({ createdAt: -1 }).limit(50).lean();
+
+    const formatted = notifs.map(n => ({
+      _id: n._id,
+      title: n.title,
+      message: n.message,
+      type: n.type,
+      sender: n.sender,
+      priority: n.priority,
+      createdAt: n.createdAt,
+      isRead: Array.isArray(n.readBy) && n.readBy.includes(String(s.id))
+    }));
+
+    const unreadCount = formatted.filter(n => !n.isRead).length;
+
+    res.json({
+      notifications: formatted,
+      unreadCount
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 9. Mark Notification as Read
+app.post('/api/student/notifications/:id/read', authenticateStudentSession, async (req, res) => {
+  try {
+    await Notification.findByIdAndUpdate(req.params.id, {
+      $addToSet: { readBy: String(req.student.studentId) }
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 10. Student Logout
+app.post('/api/student/logout', authenticateStudentSession, async (req, res) => {
+  try {
+    await Session.deleteOne({ token: req.student.token });
+    res.json({ success: true, message: 'Logged out successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// --- ADMIN PAYMENT APPROVALS & MPIN APIS ---
+// ==========================================
+
+// 1. Get Payment Submissions (Admin)
+app.get('/api/admin/payment-submissions', authenticateSession, async (req, res) => {
+  try {
+    const { status, branch } = req.query;
+    const filter = {};
+    if (status && status !== 'all') {
+      filter.status = status;
+    }
+    if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
+      filter.branch = req.user.branch;
+    } else if (branch && branch !== 'all') {
+      filter.branch = branch;
+    }
+
+    const submissions = await StudentPaymentSubmission.find(filter)
+      .sort({ submittedAt: -1 })
+      .lean();
+
+    res.json(submissions);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Approve Payment Submission (Admin)
+app.post('/api/admin/payment-submissions/:id/approve', authenticateSession, async (req, res) => {
+  try {
+    const submission = await StudentPaymentSubmission.findOne({ submissionId: req.params.id });
+    if (!submission) {
+      return res.status(404).json({ error: 'Payment submission not found' });
+    }
+
+    if (submission.status === 'APPROVED') {
+      return res.status(400).json({ error: 'Payment submission has already been approved' });
+    }
+
+    // Role check
+    if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
+      if (submission.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Unauthorized: cannot approve payment for another branch' });
+      }
+    }
+
+    const student = await Student.findOne({ id: submission.studentId });
+    if (!student) {
+      return res.status(404).json({ error: 'Associated student record not found' });
+    }
+
+    // 1. Mark submission APPROVED
+    submission.status = 'APPROVED';
+    submission.approvedAt = new Date();
+    submission.approvedBy = req.user.username;
+    await submission.save();
+
+    // 2. Create official FeePayment record
+    const receiptNumber = await generateReceiptNumber();
+    const payDate = submission.paymentDate;
+    const revInfo = getRevenueMonthFromDate(payDate);
+    const payMonth = revInfo.revenueMonth;
+    const payYear = revInfo.revenueYear;
+    const targetFeeMonth = submission.feeAllocations[0]?.feeMonth || payMonth;
+    const targetFeeYear = parseInt(targetFeeMonth.split('-')[0], 10);
+
+    const feePayment = new FeePayment({
+      studentId: submission.studentId,
+      studentName: submission.studentName,
+      branch: submission.branch,
+      batch: submission.batch,
+      receiptNumber,
+      receiptNo: receiptNumber,
+      feeMonth: targetFeeMonth,
+      feeYear: targetFeeYear,
+      feeType: submission.feeAllocations[0]?.feeType || 'monthly',
+      amountDue: submission.totalAmount,
+      amountPaid: submission.totalAmount,
+      balance: 0,
+      status: 'Paid',
+      paymentDate: payDate,
+      paymentMonth: payMonth,
+      paymentYear: payYear,
+      revenueMonth: payMonth,
+      revenueYear: payYear,
+      paymentMethod: submission.paymentMethod || 'UPI',
+      transactionRef: submission.transactionId || '',
+      notes: `Online submission ${submission.submissionId} approved by ${req.user.username}`,
+      collectedBy: req.user.username,
+      breakdown: submission.feeAllocations.map(a => ({
+        feeMonth: a.feeMonth,
+        feeType: a.feeType || 'monthly',
+        amount: a.amount,
+        description: a.description || `${a.feeMonth} Fee`
+      }))
+    });
+    await feePayment.save();
+
+    // 3. Mark relevant fee records as PAID in student document
+    if (!student.paidMonths) student.paidMonths = new Map();
+    for (const alloc of submission.feeAllocations) {
+      if (alloc.feeType === 'admission') {
+        student.admissionPaid = submission.paymentDate.slice(0, 7);
+      } else {
+        if (student.paidMonths.set) {
+          student.paidMonths.set(alloc.feeMonth, true);
+        } else {
+          student.paidMonths[alloc.feeMonth] = true;
+        }
+      }
+    }
+    await student.save();
+
+    // 4. Send approval notification to student
+    await Notification.create({
+      title: 'Payment Approved',
+      message: `Your payment of ₹${submission.totalAmount.toLocaleString('en-IN')} has been approved! Receipt #${receiptNumber} generated.`,
+      type: 'general',
+      targetUser: String(submission.studentId),
+      branch: submission.branch,
+      batch: submission.batch,
+      sender: req.user.username
+    });
+
+    res.json({
+      success: true,
+      message: `Payment approved successfully. Receipt #${receiptNumber} generated.`,
+      receiptNumber,
+      feePayment
+    });
+  } catch (err) {
+    console.error('Payment approval error:', err);
+    res.status(500).json({ error: 'Failed to approve payment: ' + err.message });
+  }
+});
+
+// 3. Reject Payment Submission (Admin)
+app.post('/api/admin/payment-submissions/:id/reject', authenticateSession, async (req, res) => {
+  try {
+    const { rejectionReason } = req.body;
+    if (!rejectionReason || !rejectionReason.trim()) {
+      return res.status(400).json({ error: 'Rejection reason is required' });
+    }
+
+    const submission = await StudentPaymentSubmission.findOne({ submissionId: req.params.id });
+    if (!submission) {
+      return res.status(404).json({ error: 'Payment submission not found' });
+    }
+
+    if (submission.status === 'APPROVED') {
+      return res.status(400).json({ error: 'Cannot reject an already approved payment' });
+    }
+
+    if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
+      if (submission.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Unauthorized: cannot reject payment for another branch' });
+      }
+    }
+
+    submission.status = 'REJECTED';
+    submission.rejectionReason = rejectionReason.trim();
+    submission.rejectedAt = new Date();
+    submission.rejectedBy = req.user.username;
+    await submission.save();
+
+    // Send notification to student
+    await Notification.create({
+      title: 'Payment Verification Failed',
+      message: `Your payment submission of ₹${submission.totalAmount.toLocaleString('en-IN')} was rejected. Reason: ${rejectionReason.trim()}`,
+      type: 'warning',
+      targetUser: String(submission.studentId),
+      branch: submission.branch,
+      batch: submission.batch,
+      sender: req.user.username
+    });
+
+    res.json({
+      success: true,
+      message: 'Payment submission rejected. Student has been notified.'
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to reject payment: ' + err.message });
+  }
+});
+
+// 4. Reset Student MPIN (Admin)
+app.post('/api/admin/students/:id/reset-mpin', authenticateSession, async (req, res) => {
+  try {
+    const sId = Number(req.params.id);
+    const student = await Student.findOne({ id: sId });
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
+      if (student.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Unauthorized: cannot reset MPIN for student in another branch' });
+      }
+    }
+
+    const cleanMobile = String(decrypt(student.phone)).replace(/[^0-9]/g, '').slice(-10);
+    const temporaryMPIN = generateSecureMpin();
+    const mpinHash = await bcrypt.hash(temporaryMPIN, 10);
+
+    await StudentAuth.findOneAndUpdate(
+      { studentId: sId },
+      {
+        studentId: sId,
+        mobileNumber: cleanMobile,
+        mpinHash,
+        mustChangeMPIN: true,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        isActive: true
+      },
+      { upsert: true, new: true }
+    );
+
+    res.json({
+      success: true,
+      studentId: sId,
+      studentName: decrypt(student.name),
+      temporaryMPIN,
+      message: `Temporary MPIN generated successfully: ${temporaryMPIN}. Student must change this MPIN upon first login.`
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to reset MPIN: ' + err.message });
+  }
+});
+
+// 5. Get Student Login Status & Auth Details (Admin)
+app.get('/api/admin/students/:id/auth-status', authenticateSession, async (req, res) => {
+  try {
+    const sId = Number(req.params.id);
+    const auth = await StudentAuth.findOne({ studentId: sId }).lean();
+    if (!auth) {
+      return res.json({ exists: false, isActive: false });
+    }
+
+    res.json({
+      exists: true,
+      studentId: auth.studentId,
+      mobileNumber: auth.mobileNumber,
+      mustChangeMPIN: auth.mustChangeMPIN,
+      isActive: auth.isActive,
+      failedLoginAttempts: auth.failedLoginAttempts,
+      isLocked: !!(auth.lockedUntil && new Date(auth.lockedUntil) > new Date()),
+      lockedUntil: auth.lockedUntil,
+      lastLoginAt: auth.lastLoginAt
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. Toggle Student Login Access (Admin)
+app.post('/api/admin/students/:id/toggle-login', authenticateSession, async (req, res) => {
+  try {
+    const sId = Number(req.params.id);
+    const student = await Student.findOne({ id: sId });
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
+      if (student.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Unauthorized: cannot toggle login for student in another branch' });
+      }
+    }
+
+    const auth = await StudentAuth.findOne({ studentId: sId });
+    if (!auth) {
+      return res.status(404).json({ error: 'Student auth account not found. Please reset MPIN to create credentials.' });
+    }
+
+    auth.isActive = !auth.isActive;
+    await auth.save();
+
+    res.json({
+      success: true,
+      isActive: auth.isActive,
+      message: `Student portal access has been ${auth.isActive ? 'enabled' : 'disabled'}.`
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

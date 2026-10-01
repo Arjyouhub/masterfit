@@ -35,7 +35,15 @@ const feePaymentSchema = new mongoose.Schema({
   collectedBy: { type: String, default: 'Admin' },
   
   // Flags
-  needsReview: { type: Boolean, default: false }
+  needsReview: { type: Boolean, default: false },
+
+  // Fee-month breakdown (which fee months and types are covered by this payment)
+  breakdown: [{
+    feeMonth: { type: String, default: '' }, // e.g. "2026-08"
+    feeType: { type: String, enum: ['monthly', 'admission', 'custom'], default: 'monthly' },
+    amount: { type: Number, required: true },
+    description: { type: String, default: '' } // e.g. "August Fee", "September Fee"
+  }]
 }, { timestamps: true });
 
 // Compound indexes for optimal aggregation performance
