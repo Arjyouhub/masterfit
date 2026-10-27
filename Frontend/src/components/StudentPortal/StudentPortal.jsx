@@ -263,12 +263,13 @@ _Submitted via Masterfit Student Portal_ 🙏`;
 
   const handleShareOfficialPayment = (payment) => {
     if (!payment) return;
+    const portalBatch = payment.batchName || (student.batch && !/^batch[_\d]/i.test(student.batch) ? student.batch : '');
     const text = `🥋 *MASTERFIT ACADEMY - OFFICIAL RECEIPT*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 🧾 *Receipt No:* ${payment.receiptNumber || 'N/A'}
 👤 *Student:* ${student.name || profileData?.student?.name || payment.studentName || 'Student'}
 🏢 *Branch:* ${student.branch || payment.branch || ''}
-📅 *Date:* ${payment.paymentDate}
+${portalBatch ? `🥋 *Batch:* ${portalBatch}\n` : ''}📅 *Payment Date:* ${payment.paymentDate}
 💳 *Method:* ${payment.paymentMethod || 'Cash'}
 💰 *Amount Paid:* ₹${Number(payment.amountPaid || 0).toLocaleString('en-IN')}
 📋 *Fee Month:* ${payment.feeMonth || 'N/A'}

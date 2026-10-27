@@ -5,6 +5,7 @@ const feePaymentSchema = new mongoose.Schema({
   studentName: { type: String, default: '' },
   branch: { type: String, required: true, index: true },
   batch: { type: String, default: '', index: true },
+  batchName: { type: String, default: '' },
   
   // Fee classification
   feeType: { type: String, enum: ['monthly', 'admission', 'custom'], default: 'monthly' },

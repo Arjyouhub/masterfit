@@ -4408,6 +4408,75 @@ function App() {
     return `${fullMonths[monthIdx] || parts[1]} ${year}`;
   };
 
+  const resolveBatchName = (rawBatch) => {
+    if (!rawBatch) return '';
+    const cleanRaw = String(rawBatch).trim();
+    if (!cleanRaw) return '';
+
+    if (cleanRaw.includes(',')) {
+      const parts = cleanRaw.split(',').map(p => resolveBatchName(p)).filter(Boolean);
+      return parts.join(', ');
+    }
+
+    const cleanLower = cleanRaw.toLowerCase();
+
+    // 1. Search in batchOptions
+    const opt = (batchOptions || []).find(b =>
+      (b.id && String(b.id).trim().toLowerCase() === cleanLower) ||
+      (b.code && String(b.code).trim().toLowerCase() === cleanLower) ||
+      (b._id && String(b._id).trim().toLowerCase() === cleanLower) ||
+      (b.name && String(b.name).trim().toLowerCase() === cleanLower)
+    );
+
+    if (opt && opt.name) {
+      return opt.name;
+    }
+
+    // 2. Search in customBatches or modalBatches
+    const customList = (customBatches || []).concat(modalBatches || []);
+    const customOpt = customList.find(b =>
+      (b.id && String(b.id).trim().toLowerCase() === cleanLower) ||
+      (b.code && String(b.code).trim().toLowerCase() === cleanLower) ||
+      (b._id && String(b._id).trim().toLowerCase() === cleanLower) ||
+      (b.name && String(b.name).trim().toLowerCase() === cleanLower)
+    );
+
+    if (customOpt && customOpt.name) {
+      return customOpt.name;
+    }
+
+    // 3. If it's already a clean readable name (doesn't start with batch_ or mongo ObjectId)
+    if (!/^batch[_\d]/i.test(cleanRaw) && !/^[0-9a-f]{24}$/i.test(cleanRaw)) {
+      return cleanRaw;
+    }
+
+    return '';
+  };
+
+  const getReceiptBatchName = (receipt) => {
+    if (!receipt) return '';
+    if (receipt.batchName && !/^batch[_\d]/i.test(String(receipt.batchName).trim())) {
+      return receipt.batchName;
+    }
+    if (receipt.batch) {
+      const resolved = resolveBatchName(receipt.batch);
+      if (resolved) return resolved;
+    }
+    const sIdNum = Number(receipt.studentId);
+    const sIdStr = String(receipt.studentId || '').trim();
+    const studentObj = (Array.isArray(students) ? students.find(s =>
+      (s.id != null && (Number(s.id) === sIdNum || String(s.id).trim() === sIdStr)) ||
+      (s.name && receipt.studentName && s.name.trim().toLowerCase() === receipt.studentName.trim().toLowerCase())
+    ) : null);
+
+    if (studentObj && studentObj.batch) {
+      const resolved = resolveBatchName(studentObj.batch);
+      if (resolved) return resolved;
+    }
+
+    return '';
+  };
+
   const generateReceiptShareText = (receipt) => {
     if (!receipt) return '';
     const breakdown = Array.isArray(receipt.breakdown) && receipt.breakdown.length > 0
@@ -4419,7 +4488,7 @@ function App() {
           description: receipt.feeType === 'admission' ? 'Admission Fee' : (receipt.feeMonth ? `${formatReceiptFeeMonth(receipt.feeMonth)} Fee` : 'Monthly Fee')
         }];
 
-    // Determine the fee months covered (strictly Fee Month, no batch ID)
+    // Determine the fee months covered (strictly Fee Month)
     const feeMonthList = breakdown
       .filter(item => item.feeMonth)
       .map(item => formatReceiptFeeMonth(item.feeMonth));
@@ -4427,6 +4496,8 @@ function App() {
     const feeMonthDisplay = uniqueFeeMonths.length > 0
       ? uniqueFeeMonths.join(', ')
       : (receipt.feeMonth ? formatReceiptFeeMonth(receipt.feeMonth) : (receipt.revenueMonth ? formatReceiptFeeMonth(receipt.revenueMonth) : (receipt.paymentDate ? formatReceiptFeeMonth(receipt.paymentDate.slice(0, 7)) : '')));
+
+    const batchName = getReceiptBatchName(receipt);
 
     const breakdownLines = breakdown.map(item => {
       const desc = item.description || (item.feeType === 'admission' ? 'Admission Fee' : (item.feeMonth ? `${formatReceiptFeeMonth(item.feeMonth)} Fee` : 'Monthly Fee'));
@@ -4438,7 +4509,7 @@ function App() {
 🧾 *Receipt No:* ${receipt.receiptNumber || 'N/A'}
 👤 *Student:* ${receipt.studentName || 'Student'}
 ${feeMonthDisplay ? `📅 *Fee Month:* ${feeMonthDisplay}\n` : ''}🏢 *Branch:* ${receipt.branch || ''}
-📅 *Payment Date:* ${receipt.paymentDate}
+${batchName ? `🥋 *Batch:* ${batchName}\n` : ''}📅 *Payment Date:* ${receipt.paymentDate}
 💳 *Payment Mode:* ${receipt.paymentMethod || 'Cash'}${receipt.transactionRef ? `\n🔖 *Txn Ref / UTR:* ${receipt.transactionRef}` : ''}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 📋 *Fee Items:*
@@ -20884,6 +20955,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
         const modalFeeMonthDisplay = uniqueModalFeeMonths.length > 0
           ? uniqueModalFeeMonths.join(', ')
           : (activeReceipt.feeMonth ? formatReceiptFeeMonth(activeReceipt.feeMonth) : (activeReceipt.revenueMonth ? formatReceiptFeeMonth(activeReceipt.revenueMonth) : (activeReceipt.paymentDate ? formatReceiptFeeMonth(activeReceipt.paymentDate.slice(0, 7)) : '')));
+        const modalBatchName = getReceiptBatchName(activeReceipt);
 
         return (
           <div className="modal-overlay" style={{ zIndex: 11500 }}>
@@ -20962,6 +21034,12 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                       <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Branch:</td>
                       <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff' }}>{activeReceipt.branch}</td>
                     </tr>
+                    {modalBatchName && (
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                        <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Batch:</td>
+                        <td style={{ padding: '8px 0', textAlign: 'right', color: '#a78bfa', fontWeight: 600 }}>{modalBatchName}</td>
+                      </tr>
+                    )}
                     <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                       <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Payment Mode:</td>
                       <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff' }}>{activeReceipt.paymentMethod}</td>

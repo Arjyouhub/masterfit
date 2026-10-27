@@ -2646,11 +2646,14 @@ app.post('/api/payments/record', authenticateSession, async (req, res) => {
     const decrypted = decryptStudent(student);
     const studentName = decrypted.name || `Student #${student.id}`;
 
+    const resolvedBatchName = await resolveBatchDisplayName(student.batch, student.branch);
+
     const newPayment = new FeePayment({
       studentId: Number(studentId),
       studentName,
       branch: student.branch,
       batch: student.batch,
+      batchName: resolvedBatchName,
       feeType,
       feeMonth: primaryFeeMonth,
       feeYear,
@@ -8118,11 +8121,14 @@ app.post('/api/admin/payment-submissions/:id/approve', authenticateSession, asyn
     const targetFeeMonth = submission.feeAllocations[0]?.feeMonth || payMonth;
     const targetFeeYear = parseInt(targetFeeMonth.split('-')[0], 10);
 
+    const resolvedBatchName = await resolveBatchDisplayName(submission.batch, submission.branch);
+
     const feePayment = new FeePayment({
       studentId: submission.studentId,
       studentName: submission.studentName,
       branch: submission.branch,
       batch: submission.batch,
+      batchName: resolvedBatchName,
       receiptNumber,
       receiptNo: receiptNumber,
       feeMonth: targetFeeMonth,
