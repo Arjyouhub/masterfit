@@ -9595,7 +9595,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
         return sum + Math.max(0, rateToUse - discountAmount);
       }, 0);
 
-    if (feeCardDetailType) {
+    if (feeCardDetailType && feeCardDetailType !== 'pending') {
       // 1. Raw Monthly Paid List
       const rawMonthlyPaid = filteredFeeStudents
         .filter(s => isPaid(s))
@@ -9692,34 +9692,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
         }
       });
 
-      // 3. Raw Pending List
-      const rawPendingList = filteredFeeStudents
-        .filter(s => !isPaid(s))
-        .map(s => {
-          const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null ? s.customMonthlyRate : monthlyFeeRate;
-          const discount = getStudentDiscountForMonth(s, rateToUse, feeMonth);
-          const dueAmount = Math.max(0, rateToUse - discount);
-
-          const paymentsInMonth = feePaymentsList.filter(p =>
-            Number(p.studentId) === Number(s.id) &&
-            ((p.paymentDate && p.paymentDate.startsWith(paymentMonth)) || p.revenueMonth === paymentMonth) &&
-            p.amountPaid > 0
-          );
-          const recentPay = paymentsInMonth[paymentsInMonth.length - 1];
-
-          return {
-            studentId: s.id,
-            studentName: s.name || s.studentName,
-            batch: s.batch,
-            branch: s.branch,
-            phone: s.phone || s.parentPhone || '',
-            amountDue: dueAmount,
-            recentPay,
-            studentObj: s
-          };
-        });
-
-      // 4. Raw Total Payments List (all target receipts received in paymentMonth)
+      // 3. Raw Total Payments List (all target receipts received in paymentMonth)
       const rawTotalPaymentsList = targetPayments.map(p => {
         const matchedStudent = (Array.isArray(students) ? students.find(s => Number(s.id) === Number(p.studentId)) : null);
         let feeMonthLabel = '';
@@ -9767,7 +9740,6 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
 
       const displayedMonthly = filterByQuery(rawMonthlyPaid);
       const displayedAdmission = filterByQuery(rawAdmissionPaid);
-      const displayedPending = filterByQuery(rawPendingList);
       const displayedTotal = filterByQuery(rawTotalPaymentsList);
 
       const getHeaderInfo = () => {
@@ -9797,19 +9769,6 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
               rawTotalCount: rawAdmissionPaid.length,
               count: displayedAdmission.length,
               footerNote: `Total ₹${(feeMonthAdmissionCollected > 0 ? feeMonthAdmissionCollected : paymentMonthAdmission).toLocaleString()} admission revenue from ${rawAdmissionPaid.length} admissions`
-            };
-          case 'pending':
-            return {
-              tag: 'Pending Fees',
-              badgeTitle: 'Pending Fees',
-              title: `Pending / Unpaid Fees for ${formatMonthName(feeMonth)}`,
-              subtitle: `Active students who have not yet paid their monthly fees for ${formatMonthName(feeMonth)}`,
-              color: '#ff6b6b',
-              tableHeading: `Pending Students List (${formatMonthName(feeMonth)})`,
-              totalAmount: pendingFeesTotal,
-              rawTotalCount: rawPendingList.length,
-              count: displayedPending.length,
-              footerNote: `Total ₹${pendingFeesTotal.toLocaleString()} pending from ${rawPendingList.length} students for ${formatMonthName(feeMonth)}`
             };
           case 'total':
           default:
@@ -9998,26 +9957,6 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                 onClick={() => setFeeCardDetailType('admission')}
               >
                 <span>🎓</span> Admission Fees ({rawAdmissionPaid.length}) • ₹{(feeMonthAdmissionCollected > 0 ? feeMonthAdmissionCollected : paymentMonthAdmission).toLocaleString()}
-              </button>
-              <button
-                type="button"
-                className="btn-small"
-                style={{
-                  background: feeCardDetailType === 'pending' ? '#ff6b6b' : 'rgba(255,255,255,0.04)',
-                  color: feeCardDetailType === 'pending' ? '#fff' : '#fff',
-                  fontWeight: 700,
-                  border: feeCardDetailType === 'pending' ? '1px solid #ff6b6b' : '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: '8px',
-                  padding: '8px 14px',
-                  cursor: 'pointer',
-                  fontSize: '0.85rem',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-                onClick={() => setFeeCardDetailType('pending')}
-              >
-                <span>⏳</span> Pending Fees ({rawPendingList.length}) • ₹{pendingFeesTotal.toLocaleString()}
               </button>
               <button
                 type="button"
@@ -10214,97 +10153,6 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                             ) : (
                               <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Recorded</span>
                             )}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              )}
-
-              {/* TAB 3: PENDING STUDENTS */}
-              {feeCardDetailType === 'pending' && (
-                <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
-                  <thead>
-                    <tr style={{ background: 'rgba(255, 107, 107, 0.08)' }}>
-                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>#</th>
-                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Student</th>
-                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Batch Name</th>
-                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Branch</th>
-                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Phone</th>
-                      <th style={{ padding: '12px 14px', textAlign: 'right' }}>Amount Due</th>
-                      <th style={{ padding: '12px 14px', textAlign: 'center' }}>Recent Activity</th>
-                      <th style={{ padding: '12px 14px', textAlign: 'center' }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {displayedPending.length === 0 ? (
-                      <tr><td colSpan={8} style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>No pending students found! All fees cleared for this month.</td></tr>
-                    ) : (
-                      displayedPending.map((item, idx) => (
-                        <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                          <td style={{ padding: '12px 14px', color: 'var(--color-text-muted)' }}>{idx + 1}</td>
-                          <td style={{ padding: '12px 14px', fontWeight: 600, color: '#fff' }}>
-                            <span
-                              style={{ cursor: 'pointer', color: '#ff6b6b', textDecoration: 'underline' }}
-                              onClick={() => {
-                                handleSelectStudent(item.studentObj);
-                              }}
-                              title="Click to view student profile"
-                            >
-                              {item.studentName}
-                            </span>
-                          </td>
-                          <td style={{ padding: '12px 14px', color: '#a78bfa' }}>{resolveBatchName(item.batch) || 'Regular'}</td>
-                          <td style={{ padding: '12px 14px', color: 'var(--color-text-muted)' }}>{item.branch}</td>
-                          <td style={{ padding: '12px 14px', color: '#38bdf8' }}>{item.phone || 'N/A'}</td>
-                          <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700, color: '#ff6b6b' }}>₹{Number(item.amountDue || 0).toLocaleString()}</td>
-                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                            {item.recentPay ? (
-                              <span style={{ fontSize: '0.74rem', color: '#FFD700', background: 'rgba(255, 215, 0, 0.12)', padding: '2px 8px', borderRadius: '4px' }}>
-                                Paid {formatMonthName(item.recentPay.feeMonth)} on {item.recentPay.paymentDate}
-                              </span>
-                            ) : (
-                              <span style={{ fontSize: '0.74rem', color: '#ff6b6b' }}>No Payment</span>
-                            )}
-                          </td>
-                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                            <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
-                              {item.phone && (
-                                <a
-                                  href={`https://api.whatsapp.com/send?phone=91${String(item.phone).replace(/\D/g, '').slice(-10)}&text=${encodeURIComponent(
-                                    `🥋 *MASTERFIT ACADEMY - FEE REMINDER*\n\nDear ${item.studentName},\nThis is a friendly reminder that your monthly fee for *${formatMonthName(feeMonth)}* (₹${item.amountDue}) is currently pending.\n\nPlease arrange payment at the earliest. If already paid, kindly share the receipt.\n\nThank you! 🙏`
-                                  )}`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="btn-small"
-                                  style={{ background: '#25D366', color: '#fff', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 10px', borderRadius: '6px', fontSize: '0.76rem', fontWeight: 600 }}
-                                  title="Send WhatsApp Reminder"
-                                >
-                                  <MessageCircle size={13} /> WhatsApp
-                                </a>
-                              )}
-                              <button
-                                className="btn-primary btn-small"
-                                style={{ padding: '4px 10px', fontSize: '0.76rem' }}
-                                onClick={() => {
-                                  setPaymentFormData(prev => ({
-                                    ...prev,
-                                    studentId: item.studentId,
-                                    studentName: item.studentName,
-                                    branch: item.branch,
-                                    batch: item.batch,
-                                    amountDue: item.amountDue,
-                                    amountPaid: item.amountDue,
-                                    feeMonth: feeMonth,
-                                    feeType: 'monthly'
-                                  }));
-                                  setIsRecordPaymentModalOpen(true);
-                                }}
-                              >
-                                + Pay
-                              </button>
-                            </div>
                           </td>
                         </tr>
                       ))
@@ -10557,24 +10405,11 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
           <div
             className="stat-card"
             style={{
-              borderLeft: '4px solid #ff6b6b',
-              cursor: 'pointer',
-              transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-              position: 'relative'
+              borderLeft: '4px solid #ff6b6b'
             }}
-            onClick={() => {
-              setFeeCardDetailType('pending');
-              setFeeCardModalSearch('');
-            }}
-            title="Click to view full page of pending students"
           >
             <div className="stat-details">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <h3 style={{ color: '#ff6b6b', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Pending Fees</h3>
-                <span style={{ fontSize: '0.72rem', color: '#ff6b6b', background: 'rgba(255, 107, 107, 0.15)', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
-                  Full Page ↗
-                </span>
-              </div>
+              <h3 style={{ color: '#ff6b6b', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Pending Fees</h3>
               <p className="stat-value" style={{ color: '#ff6b6b', margin: 0 }}>₹{pendingFeesTotal.toLocaleString()}</p>
               <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
                 {totalUnpaid} student{totalUnpaid === 1 ? '' : 's'} unpaid for {formatMonthName(feeMonth)}
