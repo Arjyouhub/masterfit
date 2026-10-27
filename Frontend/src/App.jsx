@@ -4398,6 +4398,16 @@ function App() {
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [copiedReceipt, setCopiedReceipt] = useState(false);
 
+  const formatReceiptFeeMonth = (monthStr) => {
+    if (!monthStr) return '';
+    const parts = String(monthStr).split('-');
+    if (parts.length !== 2) return monthStr;
+    const year = parts[0];
+    const monthIdx = parseInt(parts[1], 10) - 1;
+    const fullMonths = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    return `${fullMonths[monthIdx] || parts[1]} ${year}`;
+  };
+
   const generateReceiptShareText = (receipt) => {
     if (!receipt) return '';
     const breakdown = Array.isArray(receipt.breakdown) && receipt.breakdown.length > 0
@@ -4406,11 +4416,20 @@ function App() {
           feeMonth: receipt.feeMonth || '',
           feeType: receipt.feeType || 'monthly',
           amount: receipt.amountPaid,
-          description: receipt.feeType === 'admission' ? 'Admission Fee' : (receipt.feeMonth ? `${formatMonthName(receipt.feeMonth)} Fee` : 'Monthly Fee')
+          description: receipt.feeType === 'admission' ? 'Admission Fee' : (receipt.feeMonth ? `${formatReceiptFeeMonth(receipt.feeMonth)} Fee` : 'Monthly Fee')
         }];
 
+    // Determine the fee months covered (strictly Fee Month, no batch ID)
+    const feeMonthList = breakdown
+      .filter(item => item.feeMonth)
+      .map(item => formatReceiptFeeMonth(item.feeMonth));
+    const uniqueFeeMonths = Array.from(new Set(feeMonthList));
+    const feeMonthDisplay = uniqueFeeMonths.length > 0
+      ? uniqueFeeMonths.join(', ')
+      : (receipt.feeMonth ? formatReceiptFeeMonth(receipt.feeMonth) : (receipt.revenueMonth ? formatReceiptFeeMonth(receipt.revenueMonth) : (receipt.paymentDate ? formatReceiptFeeMonth(receipt.paymentDate.slice(0, 7)) : '')));
+
     const breakdownLines = breakdown.map(item => {
-      const desc = item.description || (item.feeType === 'admission' ? 'Admission Fee' : (item.feeMonth ? `${formatMonthName(item.feeMonth)} Fee` : 'Monthly Fee'));
+      const desc = item.description || (item.feeType === 'admission' ? 'Admission Fee' : (item.feeMonth ? `${formatReceiptFeeMonth(item.feeMonth)} Fee` : 'Monthly Fee'));
       return `  • ${desc}: ₹${Number(item.amount || 0).toLocaleString('en-IN')}`;
     }).join('\n');
 
@@ -4418,7 +4437,7 @@ function App() {
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 🧾 *Receipt No:* ${receipt.receiptNumber || 'N/A'}
 👤 *Student:* ${receipt.studentName || 'Student'}
-🏢 *Branch:* ${receipt.branch || ''} • ${receipt.batch || 'Regular'}
+${feeMonthDisplay ? `📅 *Fee Month:* ${feeMonthDisplay}\n` : ''}🏢 *Branch:* ${receipt.branch || ''}
 📅 *Payment Date:* ${receipt.paymentDate}
 💳 *Payment Mode:* ${receipt.paymentMethod || 'Cash'}${receipt.transactionRef ? `\n🔖 *Txn Ref / UTR:* ${receipt.transactionRef}` : ''}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -4435,26 +4454,67 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
   const handleShareReceipt = async (receipt) => {
     if (!receipt) return;
     const text = generateReceiptShareText(receipt);
-    const studentObj = searchedStudents.find(s => s.id === receipt.studentId) || (Array.isArray(students) ? students.find(s => s.id === receipt.studentId) : null);
-    const rawPhone = studentObj ? (studentObj.phone || studentObj.parentPhone || '') : '';
-    const cleanPhone = String(rawPhone).replace(/\D/g, '');
-    const phoneParam = cleanPhone.length === 10 ? `91${cleanPhone}` : (cleanPhone.length > 10 ? cleanPhone : '');
 
-    if (typeof navigator !== 'undefined' && navigator.share) {
+    // Direct student number resolution (send directly to student's phone number on WhatsApp)
+    const sIdNum = Number(receipt.studentId);
+    const sIdStr = String(receipt.studentId || '').trim();
+
+    const matchStudent = (s) => {
+      if (!s) return false;
+      const idNum = Number(s.id);
+      if (!isNaN(idNum) && !isNaN(sIdNum) && idNum === sIdNum && idNum > 0) return true;
+      if (s.id != null && String(s.id).trim() === sIdStr && sIdStr) return true;
+      if (s._id && receipt.studentMongoId && String(s._id) === String(receipt.studentMongoId)) return true;
+      if (s.name && receipt.studentName && s.name.trim().toLowerCase() === receipt.studentName.trim().toLowerCase()) return true;
+      return false;
+    };
+
+    let studentObj = (Array.isArray(students) ? students.find(matchStudent) : null)
+      || (Array.isArray(searchedStudents) ? searchedStudents.find(matchStudent) : null);
+
+    let rawPhone = receipt.phone || receipt.parentPhone || receipt.studentPhone || (studentObj ? (studentObj.phone || studentObj.parentPhone) : '') || '';
+
+    // If phone not yet found in memory, attempt quick lookup by studentId
+    if (!rawPhone && receipt.studentId) {
       try {
-        await navigator.share({
-          title: `Fee Receipt #${receipt.receiptNumber} - ${receipt.studentName}`,
-          text: text
+        const token = getSessionToken();
+        const res = await fetch(`${API_BASE_URL}/students/${receipt.studentId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
         });
-        return;
-      } catch (err) {
-        if (err.name === 'AbortError') return;
+        if (res.ok) {
+          const fetched = await res.json();
+          if (fetched) {
+            rawPhone = fetched.phone || fetched.parentPhone || '';
+          }
+        }
+      } catch (e) {
+        console.warn('Student phone fetch failed:', e);
       }
     }
 
+    let cleanPhone = String(rawPhone || '').replace(/\D/g, '');
+    let phoneParam = '';
+    if (cleanPhone.length === 10) {
+      phoneParam = `91${cleanPhone}`;
+    } else if (cleanPhone.length === 12 && cleanPhone.startsWith('91')) {
+      phoneParam = cleanPhone;
+    } else if (cleanPhone.length > 10) {
+      phoneParam = cleanPhone;
+    }
+
+    if (!phoneParam) {
+      const manualPhone = window.prompt(`WhatsApp phone number for ${receipt.studentName || 'student'}:\nPlease enter 10-digit number:`);
+      if (manualPhone) {
+        const cleaned = manualPhone.replace(/\D/g, '');
+        phoneParam = cleaned.length === 10 ? `91${cleaned}` : cleaned;
+      }
+    }
+
+    // Direct WhatsApp send to student's phone number
     const waUrl = phoneParam
       ? `https://api.whatsapp.com/send?phone=${phoneParam}&text=${encodeURIComponent(text)}`
       : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+
     window.open(waUrl, '_blank');
   };
 
@@ -4851,7 +4911,13 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
       fetchPaymentSubmissions();
       reloadAllAppData();
       if (data.feePayment) {
-        setActiveReceipt(data.feePayment);
+        const approvedSub = paymentSubmissions.find(s => s._id === approvingSubId);
+        const subStudent = (Array.isArray(students) ? students.find(s => Number(s.id) === Number(approvedSub?.studentId || data.feePayment?.studentId)) : null);
+        setActiveReceipt({
+          ...data.feePayment,
+          studentName: data.feePayment.studentName || approvedSub?.studentName || subStudent?.name,
+          phone: subStudent?.phone || subStudent?.parentPhone || ''
+        });
         setIsReceiptModalOpen(true);
       }
     } catch (err) {
@@ -5474,11 +5540,16 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
           return;
         }
         setIsRecordPaymentModalOpen(false);
-        setActiveReceipt(data.payment);
+        const targetId = Number(paymentFormData.studentId);
+        const matchedStudent = (Array.isArray(students) ? students.find(s => Number(s.id) === targetId) : null);
+        setActiveReceipt({
+          ...data.payment,
+          studentName: data.payment?.studentName || matchedStudent?.name || paymentFormData.studentName,
+          phone: matchedStudent?.phone || matchedStudent?.parentPhone || ''
+        });
         setIsReceiptModalOpen(true);
 
         // Update student local state
-        const targetId = Number(paymentFormData.studentId);
         const updatedList = students.map(s => {
           if (s.id === targetId) {
             const updated = { ...s };
@@ -9719,7 +9790,11 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                                 <button
                                   className="btn-small btn-receipt-badge"
                                   onClick={() => {
-                                    setActiveReceipt(pRec);
+                                    setActiveReceipt({
+                                      ...pRec,
+                                      studentName: pRec.studentName || student.name,
+                                      phone: student.phone || student.parentPhone || ''
+                                    });
                                     setIsReceiptModalOpen(true);
                                   }}
                                 >
@@ -9983,7 +10058,11 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                             type="button"
                             className="btn-small btn-receipt-badge"
                             onClick={() => {
-                              setActiveReceipt(pRec);
+                              setActiveReceipt({
+                                ...pRec,
+                                studentName: pRec.studentName || student.name,
+                                phone: student.phone || student.parentPhone || ''
+                              });
                               setIsReceiptModalOpen(true);
                             }}
                           >
@@ -15526,8 +15605,13 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                                   (p.notes && p.notes.includes(sub.submissionId)) ||
                                   (p.paymentDate === sub.paymentDate && p.amountPaid === sub.totalAmount)
                                 ));
+                                const subStudent = (Array.isArray(students) ? students.find(s => Number(s.id) === Number(sub.studentId)) : null);
                                 if (matched) {
-                                  setActiveReceipt(matched);
+                                  setActiveReceipt({
+                                    ...matched,
+                                    studentName: matched.studentName || sub.studentName || subStudent?.name,
+                                    phone: subStudent?.phone || subStudent?.parentPhone || ''
+                                  });
                                   setIsReceiptModalOpen(true);
                                 } else {
                                   try {
@@ -15538,7 +15622,11 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                                     const rData = await rRes.json();
                                     const targetP = rData.payments?.find(p => p.notes?.includes(sub.submissionId)) || rData.payments?.[0];
                                     if (targetP) {
-                                      setActiveReceipt(targetP);
+                                      setActiveReceipt({
+                                        ...targetP,
+                                        studentName: targetP.studentName || sub.studentName || subStudent?.name,
+                                        phone: subStudent?.phone || subStudent?.parentPhone || ''
+                                      });
                                       setIsReceiptModalOpen(true);
                                     } else {
                                       alert('Receipt record not found.');
@@ -15625,8 +15713,13 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                         (p.notes && p.notes.includes(sub.submissionId)) ||
                         (p.paymentDate === sub.paymentDate && p.amountPaid === sub.totalAmount)
                       ));
+                      const subStudent = (Array.isArray(students) ? students.find(s => Number(s.id) === Number(sub.studentId)) : null);
                       if (matched) {
-                        setActiveReceipt(matched);
+                        setActiveReceipt({
+                          ...matched,
+                          studentName: matched.studentName || sub.studentName || subStudent?.name,
+                          phone: subStudent?.phone || subStudent?.parentPhone || ''
+                        });
                         setIsReceiptModalOpen(true);
                       } else {
                         try {
@@ -15637,7 +15730,11 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                           const rData = await rRes.json();
                           const targetP = rData.payments?.find(p => p.notes?.includes(sub.submissionId)) || rData.payments?.[0];
                           if (targetP) {
-                            setActiveReceipt(targetP);
+                            setActiveReceipt({
+                              ...targetP,
+                              studentName: targetP.studentName || sub.studentName || subStudent?.name,
+                              phone: subStudent?.phone || subStudent?.parentPhone || ''
+                            });
                             setIsReceiptModalOpen(true);
                           }
                         } catch (e) {}
@@ -20777,8 +20874,16 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
               feeMonth: activeReceipt.feeMonth || '',
               feeType: activeReceipt.feeType || 'monthly',
               amount: activeReceipt.amountPaid,
-              description: activeReceipt.feeType === 'admission' ? 'Admission Fee' : (activeReceipt.feeMonth ? `${formatMonthName(activeReceipt.feeMonth)} Fee` : 'Monthly Fee')
+              description: activeReceipt.feeType === 'admission' ? 'Admission Fee' : (activeReceipt.feeMonth ? `${formatReceiptFeeMonth(activeReceipt.feeMonth)} Fee` : 'Monthly Fee')
             }];
+
+        const modalFeeMonths = receiptBreakdown
+          .filter(item => item.feeMonth)
+          .map(item => formatReceiptFeeMonth(item.feeMonth));
+        const uniqueModalFeeMonths = Array.from(new Set(modalFeeMonths));
+        const modalFeeMonthDisplay = uniqueModalFeeMonths.length > 0
+          ? uniqueModalFeeMonths.join(', ')
+          : (activeReceipt.feeMonth ? formatReceiptFeeMonth(activeReceipt.feeMonth) : (activeReceipt.revenueMonth ? formatReceiptFeeMonth(activeReceipt.revenueMonth) : (activeReceipt.paymentDate ? formatReceiptFeeMonth(activeReceipt.paymentDate.slice(0, 7)) : '')));
 
         return (
           <div className="modal-overlay" style={{ zIndex: 11500 }}>
@@ -20823,11 +20928,11 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                       <tr key={idx} style={{ borderBottom: idx < receiptBreakdown.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
                         <td style={{ padding: '6px 0', color: '#fff' }}>
                           <span style={{ fontWeight: 600 }}>
-                            {item.description || (item.feeType === 'admission' ? 'Admission Fee' : (item.feeMonth ? `${formatMonthName(item.feeMonth)} Fee` : 'Monthly Fee'))}
+                            {item.description || (item.feeType === 'admission' ? 'Admission Fee' : (item.feeMonth ? `${formatReceiptFeeMonth(item.feeMonth)} Fee` : 'Monthly Fee'))}
                           </span>
                           {item.feeMonth && item.feeType === 'monthly' && (
                             <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginLeft: '6px' }}>
-                              ({item.feeMonth})
+                              ({formatReceiptFeeMonth(item.feeMonth)})
                             </span>
                           )}
                         </td>
@@ -20847,9 +20952,15 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                       <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Student Name:</td>
                       <td style={{ padding: '8px 0', textAlign: 'right', fontWeight: 700, color: '#fff' }}>{activeReceipt.studentName}</td>
                     </tr>
+                    {modalFeeMonthDisplay && (
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                        <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Fee Month:</td>
+                        <td style={{ padding: '8px 0', textAlign: 'right', fontWeight: 700, color: '#38bdf8' }}>{modalFeeMonthDisplay}</td>
+                      </tr>
+                    )}
                     <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                      <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Branch / Batch:</td>
-                      <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff' }}>{activeReceipt.branch} • {activeReceipt.batch || 'Regular'}</td>
+                      <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Branch:</td>
+                      <td style={{ padding: '8px 0', textAlign: 'right', color: '#fff' }}>{activeReceipt.branch}</td>
                     </tr>
                     <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                       <td style={{ padding: '8px 0', color: 'var(--color-text-muted)' }}>Payment Mode:</td>
