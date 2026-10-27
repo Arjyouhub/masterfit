@@ -10051,11 +10051,6 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
                 <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
                   Fee Month: <strong>{formatMonthName(feeMonth)}</strong>
                 </span>
-                {feeBatchFilter !== 'All' && (
-                  <span className="badge" style={{ background: 'rgba(75, 192, 192, 0.15)', color: '#4BC0C0', border: '1px solid rgba(75, 192, 192, 0.3)', fontSize: '0.74rem' }}>
-                    Slot: {feeBatchFilter}
-                  </span>
-                )}
                 {isAdminUser(loggedInUser) && branchFilter !== 'All' && (
                   <span className="badge" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', fontSize: '0.74rem' }}>
                     Branch: {branchFilter}
@@ -10166,36 +10161,25 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
               </button>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', flex: '1', justifyContent: 'flex-end' }}>
-              {/* Quick Slot Filter in Full Page */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.04)', padding: '2px 6px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                <span style={{ color: 'var(--color-text-muted)', fontSize: '0.78rem', marginRight: '4px', fontWeight: 600 }}>Slot:</span>
-                <button type="button" className={`btn-small ${feeBatchFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('All')} style={{ padding: '3px 8px', fontSize: '0.76rem' }}>All</button>
-                <button type="button" className={`btn-small ${feeBatchFilter === 'Morning' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Morning')} style={{ padding: '3px 8px', fontSize: '0.76rem' }}>Morning</button>
-                <button type="button" className={`btn-small ${feeBatchFilter === 'Evening' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Evening')} style={{ padding: '3px 8px', fontSize: '0.76rem' }}>Evening</button>
-                <button type="button" className={`btn-small ${feeBatchFilter === 'Night' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Night')} style={{ padding: '3px 8px', fontSize: '0.76rem' }}>Night</button>
-              </div>
-
-              <div style={{ position: 'relative', minWidth: '220px', maxWidth: '340px', flex: '1' }}>
-                <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Search student, batch, phone, receipt..."
-                  value={feeCardModalSearch}
-                  onChange={e => setFeeCardModalSearch(e.target.value)}
-                  style={{ paddingLeft: '36px', height: '36px', fontSize: '0.84rem', width: '100%', borderRadius: '8px' }}
-                />
-                {feeCardModalSearch && (
-                  <button
-                    type="button"
-                    onClick={() => setFeeCardModalSearch('')}
-                    style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer' }}
-                  >
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
+            <div style={{ position: 'relative', minWidth: '260px', flex: '1', maxWidth: '380px' }}>
+              <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Search student, batch, phone, receipt..."
+                value={feeCardModalSearch}
+                onChange={e => setFeeCardModalSearch(e.target.value)}
+                style={{ paddingLeft: '36px', height: '36px', fontSize: '0.84rem', width: '100%', borderRadius: '8px' }}
+              />
+              {feeCardModalSearch && (
+                <button
+                  type="button"
+                  onClick={() => setFeeCardModalSearch('')}
+                  style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer' }}
+                >
+                  <X size={14} />
+                </button>
+              )}
             </div>
           </div>
 
