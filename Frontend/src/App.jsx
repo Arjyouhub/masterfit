@@ -9595,6 +9595,822 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
         return sum + Math.max(0, rateToUse - discountAmount);
       }, 0);
 
+    if (feeCardDetailType) {
+      // 1. Raw Monthly Paid List
+      const rawMonthlyPaid = filteredFeeStudents
+        .filter(s => isPaid(s))
+        .map(s => {
+          const pRec = feePaymentsList.find(p => Number(p.studentId) === Number(s.id) && (
+            p.feeMonth === feeMonth ||
+            (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))
+          ) && p.feeType === 'monthly');
+
+          let amt = 0;
+          if (pRec) {
+            if (Array.isArray(pRec.breakdown) && pRec.breakdown.length > 0) {
+              const item = pRec.breakdown.find(b => b.feeMonth === feeMonth && b.feeType === 'monthly');
+              amt = item ? Number(item.amount || 0) : Number(pRec.amountPaid || 0);
+            } else {
+              amt = Number(pRec.amountPaid || 0);
+            }
+          } else {
+            const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null ? s.customMonthlyRate : monthlyFeeRate;
+            const discount = getStudentDiscountForMonth(s, rateToUse, feeMonth);
+            amt = Math.max(0, rateToUse - discount);
+          }
+
+          return {
+            studentId: s.id,
+            studentName: s.name || s.studentName,
+            batch: s.batch,
+            branch: s.branch,
+            phone: s.phone || s.parentPhone || '',
+            amount: amt,
+            paymentDate: pRec?.paymentDate || 'Recorded',
+            paymentMethod: pRec?.paymentMethod || 'Cash',
+            receiptNumber: pRec?.receiptNumber || '',
+            pRec: pRec ? {
+              ...pRec,
+              studentName: pRec.studentName || s.name,
+              batchName: resolveBatchName(pRec.batch || s.batch),
+              phone: s.phone || s.parentPhone || ''
+            } : null
+          };
+        });
+
+      // 2. Raw Admission Paid List
+      const rawAdmissionPaid = [];
+      filteredFeeStudents.forEach(s => {
+        const pRec = feePaymentsList.find(p => Number(p.studentId) === Number(s.id) && (
+          (p.feeMonth === feeMonth && p.feeType === 'admission') ||
+          (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth && b.feeType === 'admission'))
+        ));
+        if (pRec) {
+          let amt = 0;
+          if (Array.isArray(pRec.breakdown) && pRec.breakdown.length > 0) {
+            const item = pRec.breakdown.find(b => b.feeMonth === feeMonth && b.feeType === 'admission');
+            amt = item ? Number(item.amount || 0) : Number(pRec.amountPaid || 0);
+          } else {
+            amt = Number(pRec.amountPaid || 0);
+          }
+          rawAdmissionPaid.push({
+            studentId: s.id,
+            studentName: s.name || s.studentName,
+            batch: s.batch,
+            branch: s.branch,
+            phone: s.phone || s.parentPhone || '',
+            amount: amt,
+            paymentDate: pRec.paymentDate || 'Recorded',
+            paymentMethod: pRec.paymentMethod || 'Cash',
+            receiptNumber: pRec.receiptNumber || '',
+            pRec: {
+              ...pRec,
+              studentName: pRec.studentName || s.name,
+              batchName: resolveBatchName(pRec.batch || s.batch),
+              phone: s.phone || s.parentPhone || ''
+            }
+          });
+        } else if (s.admissionPaid && (s.admissionPaid === feeMonth || (s.admissionPaid === true && s.joinDate && s.joinDate.slice(0, 7) === feeMonth))) {
+          const rateAdmission = s.customAdmissionRate !== undefined && s.customAdmissionRate !== null ? s.customAdmissionRate : admissionFeeRate;
+          const admissionCoupon = resolveCouponCode(s.appliedAdmissionCoupon);
+          let discount = 0;
+          if (admissionCoupon) {
+            discount = admissionCoupon.type === 'percentage' ? Math.round(rateAdmission * admissionCoupon.value / 100) : admissionCoupon.value;
+          }
+          rawAdmissionPaid.push({
+            studentId: s.id,
+            studentName: s.name || s.studentName,
+            batch: s.batch,
+            branch: s.branch,
+            phone: s.phone || s.parentPhone || '',
+            amount: Math.max(0, rateAdmission - discount),
+            paymentDate: s.joinDate || 'Recorded',
+            paymentMethod: 'Cash',
+            receiptNumber: '',
+            pRec: null
+          });
+        }
+      });
+
+      // 3. Raw Pending List
+      const rawPendingList = filteredFeeStudents
+        .filter(s => !isPaid(s))
+        .map(s => {
+          const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null ? s.customMonthlyRate : monthlyFeeRate;
+          const discount = getStudentDiscountForMonth(s, rateToUse, feeMonth);
+          const dueAmount = Math.max(0, rateToUse - discount);
+
+          const paymentsInMonth = feePaymentsList.filter(p =>
+            Number(p.studentId) === Number(s.id) &&
+            ((p.paymentDate && p.paymentDate.startsWith(paymentMonth)) || p.revenueMonth === paymentMonth) &&
+            p.amountPaid > 0
+          );
+          const recentPay = paymentsInMonth[paymentsInMonth.length - 1];
+
+          return {
+            studentId: s.id,
+            studentName: s.name || s.studentName,
+            batch: s.batch,
+            branch: s.branch,
+            phone: s.phone || s.parentPhone || '',
+            amountDue: dueAmount,
+            recentPay,
+            studentObj: s
+          };
+        });
+
+      // 4. Raw Total Payments List (all target receipts received in paymentMonth)
+      const rawTotalPaymentsList = targetPayments.map(p => {
+        const matchedStudent = (Array.isArray(students) ? students.find(s => Number(s.id) === Number(p.studentId)) : null);
+        let feeMonthLabel = '';
+        if (Array.isArray(p.breakdown) && p.breakdown.length > 0) {
+          feeMonthLabel = p.breakdown.map(b => `${formatReceiptFeeMonth(b.feeMonth)} (${b.feeType === 'admission' ? 'Admission' : 'Monthly'})`).join(', ');
+        } else if (p.feeType === 'admission') {
+          feeMonthLabel = 'Admission Fee';
+        } else if (p.feeMonth) {
+          feeMonthLabel = `${formatReceiptFeeMonth(p.feeMonth)} Fee`;
+        }
+
+        return {
+          receiptNumber: p.receiptNumber || 'N/A',
+          paymentDate: p.paymentDate,
+          studentName: p.studentName || matchedStudent?.name || `Student #${p.studentId}`,
+          studentId: p.studentId,
+          batch: p.batch || matchedStudent?.batch,
+          branch: p.branch,
+          amountPaid: p.amountPaid,
+          paymentMethod: p.paymentMethod || 'Cash',
+          transactionRef: p.transactionRef || '',
+          feeMonthLabel,
+          pRec: {
+            ...p,
+            studentName: p.studentName || matchedStudent?.name,
+            batchName: resolveBatchName(p.batch || matchedStudent?.batch),
+            phone: matchedStudent?.phone || matchedStudent?.parentPhone || ''
+          }
+        };
+      });
+
+      // Live search filter across active list
+      const q = (feeCardModalSearch || '').toLowerCase().trim();
+      const filterByQuery = (list) => {
+        if (!q) return list;
+        return list.filter(item =>
+          (item.studentName && item.studentName.toLowerCase().includes(q)) ||
+          (item.phone && String(item.phone).includes(q)) ||
+          (item.receiptNumber && item.receiptNumber.toLowerCase().includes(q)) ||
+          (item.branch && item.branch.toLowerCase().includes(q)) ||
+          (item.batch && resolveBatchName(item.batch).toLowerCase().includes(q)) ||
+          (item.feeMonthLabel && item.feeMonthLabel.toLowerCase().includes(q))
+        );
+      };
+
+      const displayedMonthly = filterByQuery(rawMonthlyPaid);
+      const displayedAdmission = filterByQuery(rawAdmissionPaid);
+      const displayedPending = filterByQuery(rawPendingList);
+      const displayedTotal = filterByQuery(rawTotalPaymentsList);
+
+      const getHeaderInfo = () => {
+        switch (feeCardDetailType) {
+          case 'monthly':
+            return {
+              tag: 'Monthly Fees',
+              badgeTitle: 'Monthly Fees Paid',
+              title: `Monthly Fees Collected for ${formatMonthName(feeMonth)}`,
+              subtitle: `All students who have cleared their monthly tuition fee for ${formatMonthName(feeMonth)}`,
+              color: '#38bdf8',
+              tableHeading: `Paid Students List (${formatMonthName(feeMonth)})`,
+              totalAmount: feeMonthMonthlyCollected,
+              rawTotalCount: rawMonthlyPaid.length,
+              count: displayedMonthly.length,
+              footerNote: `Total ₹${feeMonthMonthlyCollected.toLocaleString()} collected from ${rawMonthlyPaid.length} students for ${formatMonthName(feeMonth)}`
+            };
+          case 'admission':
+            return {
+              tag: 'Admission Fees',
+              badgeTitle: 'Admission Fees',
+              title: `Admission Fees for ${formatMonthName(feeMonth)}`,
+              subtitle: `New student registrations and admission fee collections recorded for ${formatMonthName(feeMonth)}`,
+              color: '#FFD700',
+              tableHeading: `Admission Payments List (${formatMonthName(feeMonth)})`,
+              totalAmount: feeMonthAdmissionCollected > 0 ? feeMonthAdmissionCollected : paymentMonthAdmission,
+              rawTotalCount: rawAdmissionPaid.length,
+              count: displayedAdmission.length,
+              footerNote: `Total ₹${(feeMonthAdmissionCollected > 0 ? feeMonthAdmissionCollected : paymentMonthAdmission).toLocaleString()} admission revenue from ${rawAdmissionPaid.length} admissions`
+            };
+          case 'pending':
+            return {
+              tag: 'Pending Fees',
+              badgeTitle: 'Pending Fees',
+              title: `Pending / Unpaid Fees for ${formatMonthName(feeMonth)}`,
+              subtitle: `Active students who have not yet paid their monthly fees for ${formatMonthName(feeMonth)}`,
+              color: '#ff6b6b',
+              tableHeading: `Pending Students List (${formatMonthName(feeMonth)})`,
+              totalAmount: pendingFeesTotal,
+              rawTotalCount: rawPendingList.length,
+              count: displayedPending.length,
+              footerNote: `Total ₹${pendingFeesTotal.toLocaleString()} pending from ${rawPendingList.length} students for ${formatMonthName(feeMonth)}`
+            };
+          case 'total':
+          default:
+            return {
+              tag: 'All Transactions',
+              badgeTitle: 'All Transactions',
+              title: `All Payment Transactions Received in ${formatMonthName(paymentMonth)}`,
+              subtitle: `Complete receipt audit log for all cash, UPI, and bank collections received between 1st & 31st of ${formatMonthName(paymentMonth)}`,
+              color: '#c084fc',
+              tableHeading: `Receipt Audit Log (${formatMonthName(paymentMonth)})`,
+              totalAmount: paymentMonthRevenue,
+              rawTotalCount: rawTotalPaymentsList.length,
+              count: displayedTotal.length,
+              footerNote: `Total ₹${paymentMonthRevenue.toLocaleString()} cash received across ${rawTotalPaymentsList.length} receipts in ${formatMonthName(paymentMonth)}`
+            };
+        }
+      };
+
+      const headerInfo = getHeaderInfo();
+
+      return (
+        <div className="fees-container fee-details-fullpage">
+          {/* Top Navigation & Actions Bar */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setFeeCardDetailType(null)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '0.5rem 1rem',
+                  fontSize: '0.88rem',
+                  fontWeight: 600,
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.3)'
+                }}
+              >
+                <ChevronLeft size={18} /> Back to Fees Overview
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                <span>Fees Management</span>
+                <span>/</span>
+                <span style={{ color: headerInfo.color, fontWeight: 600 }}>{headerInfo.badgeTitle}</span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <div className="fees-month-box" style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--glass-border)', padding: '4px 10px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>📅 Fee Month:</span>
+                <input
+                  type="month"
+                  className="form-control"
+                  value={feeMonth}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFeeMonth(val);
+                    setPaymentMonth(val);
+                  }}
+                  style={{ height: '30px', fontSize: '0.82rem', padding: '2px 8px' }}
+                />
+              </div>
+
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => window.print()}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '0.5rem 0.9rem', fontSize: '0.85rem', borderRadius: '6px' }}
+              >
+                <Printer size={15} /> Print Report
+              </button>
+            </div>
+          </div>
+
+          {/* Hero Header / Metric Banner */}
+          <div
+            className="panel"
+            style={{
+              borderLeft: `5px solid ${headerInfo.color}`,
+              background: 'linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(20,20,30,0.6) 100%)',
+              boxShadow: `0 10px 30px rgba(0,0,0,0.4), inset 0 0 20px ${headerInfo.color}10`,
+              padding: '1.25rem 1.5rem',
+              marginBottom: '1.25rem',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '1rem'
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                <span style={{
+                  background: `${headerInfo.color}25`,
+                  color: headerInfo.color,
+                  padding: '3px 10px',
+                  borderRadius: '20px',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  {headerInfo.tag}
+                </span>
+                <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                  Fee Month: <strong>{formatMonthName(feeMonth)}</strong>
+                </span>
+              </div>
+              <h1 style={{ margin: '4px 0', fontSize: '1.5rem', color: '#fff', fontWeight: 800 }}>
+                {headerInfo.title}
+              </h1>
+              <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: '0.88rem' }}>
+                {headerInfo.subtitle}
+              </p>
+            </div>
+
+            <div style={{ textAlign: 'right', display: 'flex', gap: '1.25rem', alignItems: 'center' }}>
+              <div style={{ background: 'rgba(0,0,0,0.35)', padding: '0.75rem 1.25rem', borderRadius: '10px', border: `1px solid ${headerInfo.color}35` }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Total Amount</div>
+                <div style={{ fontSize: '1.65rem', fontWeight: 800, color: headerInfo.color, margin: '2px 0 0 0' }}>
+                  ₹{headerInfo.totalAmount.toLocaleString()}
+                </div>
+              </div>
+              <div style={{ background: 'rgba(0,0,0,0.35)', padding: '0.75rem 1.25rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Total Records</div>
+                <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#fff', margin: '2px 0 0 0' }}>
+                  {headerInfo.rawTotalCount}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Switcher Navigation Tabs & Search Toolbar */}
+          <div
+            className="panel"
+            style={{
+              padding: '0.75rem 1rem',
+              marginBottom: '1.25rem',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '12px'
+            }}
+          >
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn-small"
+                style={{
+                  background: feeCardDetailType === 'monthly' ? '#38bdf8' : 'rgba(255,255,255,0.04)',
+                  color: feeCardDetailType === 'monthly' ? '#000' : '#fff',
+                  fontWeight: 700,
+                  border: feeCardDetailType === 'monthly' ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '8px',
+                  padding: '8px 14px',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+                onClick={() => setFeeCardDetailType('monthly')}
+              >
+                <span>💳</span> Monthly Fees Paid ({rawMonthlyPaid.length}) • ₹{feeMonthMonthlyCollected.toLocaleString()}
+              </button>
+              <button
+                type="button"
+                className="btn-small"
+                style={{
+                  background: feeCardDetailType === 'admission' ? '#FFD700' : 'rgba(255,255,255,0.04)',
+                  color: feeCardDetailType === 'admission' ? '#000' : '#fff',
+                  fontWeight: 700,
+                  border: feeCardDetailType === 'admission' ? '1px solid #FFD700' : '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '8px',
+                  padding: '8px 14px',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+                onClick={() => setFeeCardDetailType('admission')}
+              >
+                <span>🎓</span> Admission Fees ({rawAdmissionPaid.length}) • ₹{(feeMonthAdmissionCollected > 0 ? feeMonthAdmissionCollected : paymentMonthAdmission).toLocaleString()}
+              </button>
+              <button
+                type="button"
+                className="btn-small"
+                style={{
+                  background: feeCardDetailType === 'pending' ? '#ff6b6b' : 'rgba(255,255,255,0.04)',
+                  color: feeCardDetailType === 'pending' ? '#fff' : '#fff',
+                  fontWeight: 700,
+                  border: feeCardDetailType === 'pending' ? '1px solid #ff6b6b' : '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '8px',
+                  padding: '8px 14px',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+                onClick={() => setFeeCardDetailType('pending')}
+              >
+                <span>⏳</span> Pending Fees ({rawPendingList.length}) • ₹{pendingFeesTotal.toLocaleString()}
+              </button>
+              <button
+                type="button"
+                className="btn-small"
+                style={{
+                  background: feeCardDetailType === 'total' ? '#c084fc' : 'rgba(255,255,255,0.04)',
+                  color: feeCardDetailType === 'total' ? '#000' : '#fff',
+                  fontWeight: 700,
+                  border: feeCardDetailType === 'total' ? '1px solid #c084fc' : '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '8px',
+                  padding: '8px 14px',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+                onClick={() => setFeeCardDetailType('total')}
+              >
+                <span>🧾</span> All Transactions ({rawTotalPaymentsList.length}) • ₹{paymentMonthRevenue.toLocaleString()}
+              </button>
+            </div>
+
+            <div style={{ position: 'relative', minWidth: '260px', flex: '1', maxWidth: '380px' }}>
+              <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Search student, batch, phone, receipt..."
+                value={feeCardModalSearch}
+                onChange={e => setFeeCardModalSearch(e.target.value)}
+                style={{ paddingLeft: '36px', height: '36px', fontSize: '0.84rem', width: '100%', borderRadius: '8px' }}
+              />
+              {feeCardModalSearch && (
+                <button
+                  type="button"
+                  onClick={() => setFeeCardModalSearch('')}
+                  style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer' }}
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Main Full-Width Data Table Panel */}
+          <div className="panel" style={{ padding: 0, overflow: 'hidden', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontWeight: 600, color: '#fff', fontSize: '0.95rem' }}>
+                {headerInfo.tableHeading}
+              </div>
+              <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
+                Showing <strong>{headerInfo.count}</strong> of {headerInfo.rawTotalCount} records
+              </div>
+            </div>
+
+            <div className="table-responsive" style={{ overflowX: 'auto' }}>
+              {/* TAB 1: MONTHLY FEES PAID */}
+              {feeCardDetailType === 'monthly' && (
+                <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
+                  <thead>
+                    <tr style={{ background: 'rgba(56, 189, 248, 0.08)' }}>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>#</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Student</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Batch Name</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Branch</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Phone</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'center' }}>Payment Date</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'right' }}>Amount Paid</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'center' }}>Mode</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'center' }}>Receipt & WhatsApp</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayedMonthly.length === 0 ? (
+                      <tr><td colSpan={9} style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>No monthly fee payments found matching search.</td></tr>
+                    ) : (
+                      displayedMonthly.map((item, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                          <td style={{ padding: '12px 14px', color: 'var(--color-text-muted)' }}>{idx + 1}</td>
+                          <td style={{ padding: '12px 14px', fontWeight: 600, color: '#fff' }}>
+                            <span
+                              style={{ cursor: 'pointer', color: '#38bdf8', textDecoration: 'underline' }}
+                              onClick={() => {
+                                const st = students.find(s => Number(s.id) === Number(item.studentId));
+                                if (st) handleSelectStudent(st);
+                              }}
+                              title="Click to view student profile"
+                            >
+                              {item.studentName}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 14px', color: '#a78bfa' }}>{resolveBatchName(item.batch) || 'Regular'}</td>
+                          <td style={{ padding: '12px 14px', color: 'var(--color-text-muted)' }}>{item.branch}</td>
+                          <td style={{ padding: '12px 14px', color: 'var(--color-text-muted)' }}>{item.phone || 'N/A'}</td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center', color: '#38bdf8' }}>{item.paymentDate}</td>
+                          <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700, color: '#51CF66' }}>₹{Number(item.amount || 0).toLocaleString()}</td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center', color: 'var(--color-text-muted)' }}>{item.paymentMethod}</td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                            {item.pRec ? (
+                              <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+                                <button
+                                  className="btn-small btn-receipt-badge"
+                                  onClick={() => {
+                                    setActiveReceipt(item.pRec);
+                                    setIsReceiptModalOpen(true);
+                                  }}
+                                  title="View Official Receipt"
+                                >
+                                  Receipt #{item.receiptNumber?.slice(-5) || 'View'}
+                                </button>
+                                <button
+                                  className="btn-small"
+                                  style={{ background: '#25D366', color: '#fff', border: 'none', borderRadius: '4px', padding: '3px 8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.74rem' }}
+                                  onClick={() => handleShareReceipt(item.pRec)}
+                                  title="Share Receipt on WhatsApp"
+                                >
+                                  <Share2 size={12} /> WhatsApp
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Recorded</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              )}
+
+              {/* TAB 2: ADMISSION FEES PAID */}
+              {feeCardDetailType === 'admission' && (
+                <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
+                  <thead>
+                    <tr style={{ background: 'rgba(255, 215, 0, 0.08)' }}>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>#</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Student</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Batch Name</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Branch</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Phone</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'center' }}>Payment / Join Date</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'right' }}>Admission Fee</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'center' }}>Mode</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'center' }}>Receipt & WhatsApp</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayedAdmission.length === 0 ? (
+                      <tr><td colSpan={9} style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>No admission fee records found for this month.</td></tr>
+                    ) : (
+                      displayedAdmission.map((item, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                          <td style={{ padding: '12px 14px', color: 'var(--color-text-muted)' }}>{idx + 1}</td>
+                          <td style={{ padding: '12px 14px', fontWeight: 600, color: '#fff' }}>
+                            <span
+                              style={{ cursor: 'pointer', color: '#FFD700', textDecoration: 'underline' }}
+                              onClick={() => {
+                                const st = students.find(s => Number(s.id) === Number(item.studentId));
+                                if (st) handleSelectStudent(st);
+                              }}
+                              title="Click to view student profile"
+                            >
+                              {item.studentName}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 14px', color: '#a78bfa' }}>{resolveBatchName(item.batch) || 'Regular'}</td>
+                          <td style={{ padding: '12px 14px', color: 'var(--color-text-muted)' }}>{item.branch}</td>
+                          <td style={{ padding: '12px 14px', color: 'var(--color-text-muted)' }}>{item.phone || 'N/A'}</td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center', color: '#FFD700' }}>{item.paymentDate}</td>
+                          <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700, color: '#FFD700' }}>₹{Number(item.amount || 0).toLocaleString()}</td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center', color: 'var(--color-text-muted)' }}>{item.paymentMethod}</td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                            {item.pRec ? (
+                              <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+                                <button
+                                  className="btn-small btn-receipt-badge"
+                                  onClick={() => {
+                                    setActiveReceipt(item.pRec);
+                                    setIsReceiptModalOpen(true);
+                                  }}
+                                >
+                                  Receipt #{item.receiptNumber?.slice(-5) || 'View'}
+                                </button>
+                                <button
+                                  className="btn-small"
+                                  style={{ background: '#25D366', color: '#fff', border: 'none', borderRadius: '4px', padding: '3px 8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.74rem' }}
+                                  onClick={() => handleShareReceipt(item.pRec)}
+                                  title="Share on WhatsApp"
+                                >
+                                  <Share2 size={12} /> WhatsApp
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Recorded</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              )}
+
+              {/* TAB 3: PENDING STUDENTS */}
+              {feeCardDetailType === 'pending' && (
+                <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
+                  <thead>
+                    <tr style={{ background: 'rgba(255, 107, 107, 0.08)' }}>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>#</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Student</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Batch Name</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Branch</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Phone</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'right' }}>Amount Due</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'center' }}>Recent Activity</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'center' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayedPending.length === 0 ? (
+                      <tr><td colSpan={8} style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>No pending students found! All fees cleared for this month.</td></tr>
+                    ) : (
+                      displayedPending.map((item, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                          <td style={{ padding: '12px 14px', color: 'var(--color-text-muted)' }}>{idx + 1}</td>
+                          <td style={{ padding: '12px 14px', fontWeight: 600, color: '#fff' }}>
+                            <span
+                              style={{ cursor: 'pointer', color: '#ff6b6b', textDecoration: 'underline' }}
+                              onClick={() => {
+                                handleSelectStudent(item.studentObj);
+                              }}
+                              title="Click to view student profile"
+                            >
+                              {item.studentName}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 14px', color: '#a78bfa' }}>{resolveBatchName(item.batch) || 'Regular'}</td>
+                          <td style={{ padding: '12px 14px', color: 'var(--color-text-muted)' }}>{item.branch}</td>
+                          <td style={{ padding: '12px 14px', color: '#38bdf8' }}>{item.phone || 'N/A'}</td>
+                          <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700, color: '#ff6b6b' }}>₹{Number(item.amountDue || 0).toLocaleString()}</td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                            {item.recentPay ? (
+                              <span style={{ fontSize: '0.74rem', color: '#FFD700', background: 'rgba(255, 215, 0, 0.12)', padding: '2px 8px', borderRadius: '4px' }}>
+                                Paid {formatMonthName(item.recentPay.feeMonth)} on {item.recentPay.paymentDate}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '0.74rem', color: '#ff6b6b' }}>No Payment</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                            <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+                              {item.phone && (
+                                <a
+                                  href={`https://api.whatsapp.com/send?phone=91${String(item.phone).replace(/\D/g, '').slice(-10)}&text=${encodeURIComponent(
+                                    `🥋 *MASTERFIT ACADEMY - FEE REMINDER*\n\nDear ${item.studentName},\nThis is a friendly reminder that your monthly fee for *${formatMonthName(feeMonth)}* (₹${item.amountDue}) is currently pending.\n\nPlease arrange payment at the earliest. If already paid, kindly share the receipt.\n\nThank you! 🙏`
+                                  )}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="btn-small"
+                                  style={{ background: '#25D366', color: '#fff', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 10px', borderRadius: '6px', fontSize: '0.76rem', fontWeight: 600 }}
+                                  title="Send WhatsApp Reminder"
+                                >
+                                  <MessageCircle size={13} /> WhatsApp
+                                </a>
+                              )}
+                              <button
+                                className="btn-primary btn-small"
+                                style={{ padding: '4px 10px', fontSize: '0.76rem' }}
+                                onClick={() => {
+                                  setPaymentFormData(prev => ({
+                                    ...prev,
+                                    studentId: item.studentId,
+                                    studentName: item.studentName,
+                                    branch: item.branch,
+                                    batch: item.batch,
+                                    amountDue: item.amountDue,
+                                    amountPaid: item.amountDue,
+                                    feeMonth: feeMonth,
+                                    feeType: 'monthly'
+                                  }));
+                                  setIsRecordPaymentModalOpen(true);
+                                }}
+                              >
+                                + Pay
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              )}
+
+              {/* TAB 4: ALL TRANSACTIONS (TOTAL PAYMENTS) */}
+              {feeCardDetailType === 'total' && (
+                <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
+                  <thead>
+                    <tr style={{ background: 'rgba(192, 132, 252, 0.08)' }}>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>#</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Receipt No</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'center' }}>Date</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Student</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Batch Name</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Branch</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Covered Fee Month(s)</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'right' }}>Amount Paid</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'center' }}>Mode</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'center' }}>Receipt & WhatsApp</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayedTotal.length === 0 ? (
+                      <tr><td colSpan={10} style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>No payment transactions found in this month.</td></tr>
+                    ) : (
+                      displayedTotal.map((item, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                          <td style={{ padding: '12px 14px', color: 'var(--color-text-muted)' }}>{idx + 1}</td>
+                          <td style={{ padding: '12px 14px', fontWeight: 700, color: '#FFD700', fontFamily: 'monospace' }}>
+                            #{item.receiptNumber.slice(-6)}
+                          </td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center', color: '#38bdf8' }}>{item.paymentDate}</td>
+                          <td style={{ padding: '12px 14px', fontWeight: 600, color: '#fff' }}>
+                            <span
+                              style={{ cursor: 'pointer', color: '#c084fc', textDecoration: 'underline' }}
+                              onClick={() => {
+                                const st = students.find(s => Number(s.id) === Number(item.studentId));
+                                if (st) handleSelectStudent(st);
+                              }}
+                              title="Click to view student profile"
+                            >
+                              {item.studentName}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 14px', color: '#a78bfa' }}>{resolveBatchName(item.batch) || 'Regular'}</td>
+                          <td style={{ padding: '12px 14px', color: 'var(--color-text-muted)' }}>{item.branch}</td>
+                          <td style={{ padding: '12px 14px', color: item.feeMonthLabel.includes('Admission') ? '#FFD700' : '#e2e8f0' }}>
+                            {item.feeMonthLabel || 'Fee'}
+                          </td>
+                          <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700, color: '#51CF66' }}>
+                            ₹{Number(item.amountPaid || 0).toLocaleString()}
+                          </td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center', color: 'var(--color-text-muted)' }}>{item.paymentMethod}</td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                            <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+                              <button
+                                className="btn-small btn-receipt-badge"
+                                onClick={() => {
+                                  setActiveReceipt(item.pRec);
+                                  setIsReceiptModalOpen(true);
+                                }}
+                                title="View Official Receipt"
+                              >
+                                Receipt #{item.receiptNumber?.slice(-5) || 'View'}
+                              </button>
+                              <button
+                                className="btn-small"
+                                style={{ background: '#25D366', color: '#fff', border: 'none', borderRadius: '4px', padding: '3px 8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.74rem' }}
+                                onClick={() => handleShareReceipt(item.pRec)}
+                                title="Send Receipt via WhatsApp"
+                              >
+                                <Share2 size={12} /> WhatsApp
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Full Page Table Footer */}
+            <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.01)', flexWrap: 'wrap', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setFeeCardDetailType(null)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', padding: '0.45rem 0.9rem' }}
+              >
+                <ChevronLeft size={16} /> Back to Fees Overview
+              </button>
+              <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+                {headerInfo.footerNote}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="fees-container">
         {/* Month Selectors Header */}
@@ -9673,7 +10489,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
           </div>
         )}
 
-        {/* Dashboard Revenue & Fee Cards (Clickable for Full Details) */}
+        {/* Dashboard Revenue & Fee Cards (Clickable for Full Page Details) */}
         <div className="stats-grid fees-stats-grid">
           <div
             className="stat-card"
@@ -9687,15 +10503,15 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
               setFeeCardDetailType('monthly');
               setFeeCardModalSearch('');
             }}
-            title="Click to view full list of students who paid monthly fees"
+            title="Click to view full page of students who paid monthly fees"
           >
             <div className="stat-details">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <h3 style={{ color: '#38bdf8', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>
                   Monthly Fees Collected for {formatMonthName(feeMonth)}
                 </h3>
-                <span style={{ fontSize: '0.7rem', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.15)', padding: '2px 7px', borderRadius: '4px', fontWeight: 600 }}>
-                  View List ↗
+                <span style={{ fontSize: '0.72rem', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.15)', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
+                  Full Page ↗
                 </span>
               </div>
               <p className="stat-value" style={{ color: '#fff', margin: 0 }}>₹{feeMonthMonthlyCollected.toLocaleString()}</p>
@@ -9722,13 +10538,13 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
               setFeeCardDetailType('admission');
               setFeeCardModalSearch('');
             }}
-            title="Click to view full list of admission fee payments"
+            title="Click to view full page of admission fee payments"
           >
             <div className="stat-details">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <h3 style={{ color: '#FFD700', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Admission Fees</h3>
-                <span style={{ fontSize: '0.7rem', color: '#FFD700', background: 'rgba(255, 215, 0, 0.15)', padding: '2px 7px', borderRadius: '4px', fontWeight: 600 }}>
-                  View List ↗
+                <span style={{ fontSize: '0.72rem', color: '#FFD700', background: 'rgba(255, 215, 0, 0.15)', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
+                  Full Page ↗
                 </span>
               </div>
               <p className="stat-value" style={{ color: '#FFD700', margin: 0 }}>₹{(feeMonthAdmissionCollected > 0 ? feeMonthAdmissionCollected : paymentMonthAdmission).toLocaleString()}</p>
@@ -9750,13 +10566,13 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
               setFeeCardDetailType('pending');
               setFeeCardModalSearch('');
             }}
-            title="Click to view full list of pending students"
+            title="Click to view full page of pending students"
           >
             <div className="stat-details">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <h3 style={{ color: '#ff6b6b', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Pending Fees</h3>
-                <span style={{ fontSize: '0.7rem', color: '#ff6b6b', background: 'rgba(255, 107, 107, 0.15)', padding: '2px 7px', borderRadius: '4px', fontWeight: 600 }}>
-                  View List ↗
+                <span style={{ fontSize: '0.72rem', color: '#ff6b6b', background: 'rgba(255, 107, 107, 0.15)', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
+                  Full Page ↗
                 </span>
               </div>
               <p className="stat-value" style={{ color: '#ff6b6b', margin: 0 }}>₹{pendingFeesTotal.toLocaleString()}</p>
@@ -9778,13 +10594,13 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
               setFeeCardDetailType('total');
               setFeeCardModalSearch('');
             }}
-            title="Click to view all receipts and transactions received in this month"
+            title="Click to view full page of all receipts and transactions"
           >
             <div className="stat-details">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <h3 style={{ color: '#c084fc', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Total Payments</h3>
-                <span style={{ fontSize: '0.7rem', color: '#c084fc', background: 'rgba(192, 132, 252, 0.15)', padding: '2px 7px', borderRadius: '4px', fontWeight: 600 }}>
-                  View All Receipts ↗
+                <span style={{ fontSize: '0.72rem', color: '#c084fc', background: 'rgba(192, 132, 252, 0.15)', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
+                  Full Page ↗
                 </span>
               </div>
               <p className="stat-value" style={{ color: '#fff', margin: 0 }}>{paymentCount}</p>
@@ -9794,666 +10610,6 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
             </div>
           </div>
         </div>
-
-        {/* Interactive Full Details Modal for Selected Stat Card */}
-        {feeCardDetailType && (() => {
-          // 1. Raw Monthly Paid List
-          const rawMonthlyPaid = filteredFeeStudents
-            .filter(s => isPaid(s))
-            .map(s => {
-              const pRec = feePaymentsList.find(p => Number(p.studentId) === Number(s.id) && (
-                p.feeMonth === feeMonth ||
-                (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))
-              ) && p.feeType === 'monthly');
-
-              let amt = 0;
-              if (pRec) {
-                if (Array.isArray(pRec.breakdown) && pRec.breakdown.length > 0) {
-                  const item = pRec.breakdown.find(b => b.feeMonth === feeMonth && b.feeType === 'monthly');
-                  amt = item ? Number(item.amount || 0) : Number(pRec.amountPaid || 0);
-                } else {
-                  amt = Number(pRec.amountPaid || 0);
-                }
-              } else {
-                const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null ? s.customMonthlyRate : monthlyFeeRate;
-                const discount = getStudentDiscountForMonth(s, rateToUse, feeMonth);
-                amt = Math.max(0, rateToUse - discount);
-              }
-
-              return {
-                studentId: s.id,
-                studentName: s.name || s.studentName,
-                batch: s.batch,
-                branch: s.branch,
-                phone: s.phone || s.parentPhone || '',
-                amount: amt,
-                paymentDate: pRec?.paymentDate || 'Recorded',
-                paymentMethod: pRec?.paymentMethod || 'Cash',
-                receiptNumber: pRec?.receiptNumber || '',
-                pRec: pRec ? {
-                  ...pRec,
-                  studentName: pRec.studentName || s.name,
-                  batchName: resolveBatchName(pRec.batch || s.batch),
-                  phone: s.phone || s.parentPhone || ''
-                } : null
-              };
-            });
-
-          // 2. Raw Admission Paid List
-          const rawAdmissionPaid = [];
-          filteredFeeStudents.forEach(s => {
-            const pRec = feePaymentsList.find(p => Number(p.studentId) === Number(s.id) && (
-              (p.feeMonth === feeMonth && p.feeType === 'admission') ||
-              (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth && b.feeType === 'admission'))
-            ));
-            if (pRec) {
-              let amt = 0;
-              if (Array.isArray(pRec.breakdown) && pRec.breakdown.length > 0) {
-                const item = pRec.breakdown.find(b => b.feeMonth === feeMonth && b.feeType === 'admission');
-                amt = item ? Number(item.amount || 0) : Number(pRec.amountPaid || 0);
-              } else {
-                amt = Number(pRec.amountPaid || 0);
-              }
-              rawAdmissionPaid.push({
-                studentId: s.id,
-                studentName: s.name || s.studentName,
-                batch: s.batch,
-                branch: s.branch,
-                phone: s.phone || s.parentPhone || '',
-                amount: amt,
-                paymentDate: pRec.paymentDate || 'Recorded',
-                paymentMethod: pRec.paymentMethod || 'Cash',
-                receiptNumber: pRec.receiptNumber || '',
-                pRec: {
-                  ...pRec,
-                  studentName: pRec.studentName || s.name,
-                  batchName: resolveBatchName(pRec.batch || s.batch),
-                  phone: s.phone || s.parentPhone || ''
-                }
-              });
-            } else if (s.admissionPaid && (s.admissionPaid === feeMonth || (s.admissionPaid === true && s.joinDate && s.joinDate.slice(0, 7) === feeMonth))) {
-              const rateAdmission = s.customAdmissionRate !== undefined && s.customAdmissionRate !== null ? s.customAdmissionRate : admissionFeeRate;
-              const admissionCoupon = resolveCouponCode(s.appliedAdmissionCoupon);
-              let discount = 0;
-              if (admissionCoupon) {
-                discount = admissionCoupon.type === 'percentage' ? Math.round(rateAdmission * admissionCoupon.value / 100) : admissionCoupon.value;
-              }
-              rawAdmissionPaid.push({
-                studentId: s.id,
-                studentName: s.name || s.studentName,
-                batch: s.batch,
-                branch: s.branch,
-                phone: s.phone || s.parentPhone || '',
-                amount: Math.max(0, rateAdmission - discount),
-                paymentDate: s.joinDate || 'Recorded',
-                paymentMethod: 'Cash',
-                receiptNumber: '',
-                pRec: null
-              });
-            }
-          });
-
-          // 3. Raw Pending List
-          const rawPendingList = filteredFeeStudents
-            .filter(s => !isPaid(s))
-            .map(s => {
-              const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null ? s.customMonthlyRate : monthlyFeeRate;
-              const discount = getStudentDiscountForMonth(s, rateToUse, feeMonth);
-              const dueAmount = Math.max(0, rateToUse - discount);
-
-              const paymentsInMonth = feePaymentsList.filter(p =>
-                Number(p.studentId) === Number(s.id) &&
-                ((p.paymentDate && p.paymentDate.startsWith(paymentMonth)) || p.revenueMonth === paymentMonth) &&
-                p.amountPaid > 0
-              );
-              const recentPay = paymentsInMonth[paymentsInMonth.length - 1];
-
-              return {
-                studentId: s.id,
-                studentName: s.name || s.studentName,
-                batch: s.batch,
-                branch: s.branch,
-                phone: s.phone || s.parentPhone || '',
-                amountDue: dueAmount,
-                recentPay,
-                studentObj: s
-              };
-            });
-
-          // 4. Raw Total Payments List (all target receipts received in paymentMonth)
-          const rawTotalPaymentsList = targetPayments.map(p => {
-            const matchedStudent = (Array.isArray(students) ? students.find(s => Number(s.id) === Number(p.studentId)) : null);
-            let feeMonthLabel = '';
-            if (Array.isArray(p.breakdown) && p.breakdown.length > 0) {
-              feeMonthLabel = p.breakdown.map(b => `${formatReceiptFeeMonth(b.feeMonth)} (${b.feeType === 'admission' ? 'Admission' : 'Monthly'})`).join(', ');
-            } else if (p.feeType === 'admission') {
-              feeMonthLabel = 'Admission Fee';
-            } else if (p.feeMonth) {
-              feeMonthLabel = `${formatReceiptFeeMonth(p.feeMonth)} Fee`;
-            }
-
-            return {
-              receiptNumber: p.receiptNumber || 'N/A',
-              paymentDate: p.paymentDate,
-              studentName: p.studentName || matchedStudent?.name || `Student #${p.studentId}`,
-              studentId: p.studentId,
-              batch: p.batch || matchedStudent?.batch,
-              branch: p.branch,
-              amountPaid: p.amountPaid,
-              paymentMethod: p.paymentMethod || 'Cash',
-              transactionRef: p.transactionRef || '',
-              feeMonthLabel,
-              pRec: {
-                ...p,
-                studentName: p.studentName || matchedStudent?.name,
-                batchName: resolveBatchName(p.batch || matchedStudent?.batch),
-                phone: matchedStudent?.phone || matchedStudent?.parentPhone || ''
-              }
-            };
-          });
-
-          // Search query filter
-          const q = (feeCardModalSearch || '').toLowerCase().trim();
-          const filterByQuery = (list) => {
-            if (!q) return list;
-            return list.filter(item =>
-              (item.studentName && item.studentName.toLowerCase().includes(q)) ||
-              (item.phone && String(item.phone).includes(q)) ||
-              (item.receiptNumber && item.receiptNumber.toLowerCase().includes(q)) ||
-              (item.branch && item.branch.toLowerCase().includes(q)) ||
-              (item.batch && resolveBatchName(item.batch).toLowerCase().includes(q)) ||
-              (item.feeMonthLabel && item.feeMonthLabel.toLowerCase().includes(q))
-            );
-          };
-
-          const displayedMonthly = filterByQuery(rawMonthlyPaid);
-          const displayedAdmission = filterByQuery(rawAdmissionPaid);
-          const displayedPending = filterByQuery(rawPendingList);
-          const displayedTotal = filterByQuery(rawTotalPaymentsList);
-
-          const getHeaderInfo = () => {
-            switch (feeCardDetailType) {
-              case 'monthly':
-                return {
-                  title: `Monthly Fees Collected for ${formatMonthName(feeMonth)}`,
-                  color: '#38bdf8',
-                  summary: `₹${feeMonthMonthlyCollected.toLocaleString()} Total • ${rawMonthlyPaid.length} Students Paid`,
-                  count: displayedMonthly.length
-                };
-              case 'admission':
-                return {
-                  title: `Admission Fees for ${formatMonthName(feeMonth)}`,
-                  color: '#FFD700',
-                  summary: `₹${(feeMonthAdmissionCollected > 0 ? feeMonthAdmissionCollected : paymentMonthAdmission).toLocaleString()} Total • ${rawAdmissionPaid.length} New Admissions`,
-                  count: displayedAdmission.length
-                };
-              case 'pending':
-                return {
-                  title: `Pending / Unpaid Fees for ${formatMonthName(feeMonth)}`,
-                  color: '#ff6b6b',
-                  summary: `₹${pendingFeesTotal.toLocaleString()} Pending • ${rawPendingList.length} Students Unpaid`,
-                  count: displayedPending.length
-                };
-              case 'total':
-              default:
-                return {
-                  title: `All Payment Transactions Received in ${formatMonthName(paymentMonth)}`,
-                  color: '#c084fc',
-                  summary: `₹${paymentMonthRevenue.toLocaleString()} Total Cash Received • ${rawTotalPaymentsList.length} Receipts`,
-                  count: displayedTotal.length
-                };
-            }
-          };
-
-          const headerInfo = getHeaderInfo();
-
-          return (
-            <div className="modal-overlay" style={{ zIndex: 11600 }} onClick={() => setFeeCardDetailType(null)}>
-              <div
-                className="modal-content glass-panel"
-                style={{
-                  maxWidth: '1050px',
-                  width: '95%',
-                  maxHeight: '90vh',
-                  borderRadius: '16px',
-                  background: '#0d0e15',
-                  border: `1px solid ${headerInfo.color}40`,
-                  boxShadow: `0 30px 80px rgba(0,0,0,0.9), 0 0 30px ${headerInfo.color}20`,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  padding: '1.5rem',
-                  overflow: 'hidden'
-                }}
-                onClick={e => e.stopPropagation()}
-              >
-                {/* Modal Header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '1rem', marginBottom: '1rem' }}>
-                  <div>
-                    <h2 style={{ margin: 0, fontSize: '1.35rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ color: headerInfo.color }}>●</span> {headerInfo.title}
-                    </h2>
-                    <p style={{ margin: '4px 0 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
-                      {headerInfo.summary}
-                    </p>
-                  </div>
-                  <button className="btn-icon" onClick={() => setFeeCardDetailType(null)} title="Close">
-                    <X size={20} />
-                  </button>
-                </div>
-
-                {/* View Switcher Tabs & Search Toolbar */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '1rem' }}>
-                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      className="btn-small"
-                      style={{
-                        background: feeCardDetailType === 'monthly' ? '#38bdf8' : 'rgba(255,255,255,0.04)',
-                        color: feeCardDetailType === 'monthly' ? '#000' : '#fff',
-                        fontWeight: 700,
-                        border: '1px solid rgba(56, 189, 248, 0.3)',
-                        borderRadius: '6px',
-                        padding: '6px 12px',
-                        cursor: 'pointer'
-                      }}
-                      onClick={() => setFeeCardDetailType('monthly')}
-                    >
-                      Monthly Fees ({rawMonthlyPaid.length})
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-small"
-                      style={{
-                        background: feeCardDetailType === 'admission' ? '#FFD700' : 'rgba(255,255,255,0.04)',
-                        color: feeCardDetailType === 'admission' ? '#000' : '#fff',
-                        fontWeight: 700,
-                        border: '1px solid rgba(255, 215, 0, 0.3)',
-                        borderRadius: '6px',
-                        padding: '6px 12px',
-                        cursor: 'pointer'
-                      }}
-                      onClick={() => setFeeCardDetailType('admission')}
-                    >
-                      Admission Fees ({rawAdmissionPaid.length})
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-small"
-                      style={{
-                        background: feeCardDetailType === 'pending' ? '#ff6b6b' : 'rgba(255,255,255,0.04)',
-                        color: feeCardDetailType === 'pending' ? '#fff' : '#fff',
-                        fontWeight: 700,
-                        border: '1px solid rgba(255, 107, 107, 0.3)',
-                        borderRadius: '6px',
-                        padding: '6px 12px',
-                        cursor: 'pointer'
-                      }}
-                      onClick={() => setFeeCardDetailType('pending')}
-                    >
-                      Pending Fees ({rawPendingList.length})
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-small"
-                      style={{
-                        background: feeCardDetailType === 'total' ? '#c084fc' : 'rgba(255,255,255,0.04)',
-                        color: feeCardDetailType === 'total' ? '#000' : '#fff',
-                        fontWeight: 700,
-                        border: '1px solid rgba(192, 132, 252, 0.3)',
-                        borderRadius: '6px',
-                        padding: '6px 12px',
-                        cursor: 'pointer'
-                      }}
-                      onClick={() => setFeeCardDetailType('total')}
-                    >
-                      All Transactions ({rawTotalPaymentsList.length})
-                    </button>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <div style={{ position: 'relative', width: '220px' }}>
-                      <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
-                      <input
-                        type="text"
-                        className="form-control"
-                        placeholder="Search list..."
-                        value={feeCardModalSearch}
-                        onChange={e => setFeeCardModalSearch(e.target.value)}
-                        style={{ paddingLeft: '32px', height: '34px', fontSize: '0.82rem' }}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      className="btn-secondary btn-small"
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', height: '34px' }}
-                      onClick={() => window.print()}
-                      title="Print this list"
-                    >
-                      <Printer size={14} /> Print
-                    </button>
-                  </div>
-                </div>
-
-                {/* Table Content Container */}
-                <div style={{ flex: 1, overflowY: 'auto', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '10px', background: 'rgba(255,255,255,0.01)' }}>
-                  {/* TAB 1: MONTHLY FEES PAID */}
-                  {feeCardDetailType === 'monthly' && (
-                    <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
-                      <thead>
-                        <tr style={{ background: 'rgba(56, 189, 248, 0.08)', position: 'sticky', top: 0, zIndex: 1 }}>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>#</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>Student</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>Batch Name</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>Branch</th>
-                          <th style={{ padding: '10px', textAlign: 'center' }}>Payment Date</th>
-                          <th style={{ padding: '10px', textAlign: 'right' }}>Amount Paid</th>
-                          <th style={{ padding: '10px', textAlign: 'center' }}>Mode</th>
-                          <th style={{ padding: '10px', textAlign: 'center' }}>Receipt & Share</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {displayedMonthly.length === 0 ? (
-                          <tr><td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No monthly fee payments found matching criteria.</td></tr>
-                        ) : (
-                          displayedMonthly.map((item, idx) => (
-                            <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                              <td style={{ padding: '10px', color: 'var(--color-text-muted)' }}>{idx + 1}</td>
-                              <td style={{ padding: '10px', fontWeight: 600, color: '#fff' }}>
-                                <span
-                                  style={{ cursor: 'pointer', color: '#38bdf8', textDecoration: 'underline' }}
-                                  onClick={() => {
-                                    const st = students.find(s => Number(s.id) === Number(item.studentId));
-                                    if (st) {
-                                      setFeeCardDetailType(null);
-                                      handleSelectStudent(st);
-                                    }
-                                  }}
-                                >
-                                  {item.studentName}
-                                </span>
-                              </td>
-                              <td style={{ padding: '10px', color: '#a78bfa' }}>{resolveBatchName(item.batch) || 'Regular'}</td>
-                              <td style={{ padding: '10px', color: 'var(--color-text-muted)' }}>{item.branch}</td>
-                              <td style={{ padding: '10px', textAlign: 'center', color: '#38bdf8' }}>{item.paymentDate}</td>
-                              <td style={{ padding: '10px', textAlign: 'right', fontWeight: 700, color: '#51CF66' }}>₹{Number(item.amount || 0).toLocaleString()}</td>
-                              <td style={{ padding: '10px', textAlign: 'center', color: 'var(--color-text-muted)' }}>{item.paymentMethod}</td>
-                              <td style={{ padding: '10px', textAlign: 'center' }}>
-                                {item.pRec ? (
-                                  <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
-                                    <button
-                                      className="btn-small btn-receipt-badge"
-                                      onClick={() => {
-                                        setActiveReceipt(item.pRec);
-                                        setIsReceiptModalOpen(true);
-                                      }}
-                                      title="View Receipt"
-                                    >
-                                      Receipt #{item.receiptNumber?.slice(-5) || 'View'}
-                                    </button>
-                                    <button
-                                      className="btn-small"
-                                      style={{ background: '#25D366', color: '#fff', border: 'none', borderRadius: '4px', padding: '3px 7px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
-                                      onClick={() => handleShareReceipt(item.pRec)}
-                                      title="Share Receipt via WhatsApp"
-                                    >
-                                      <Share2 size={12} /> WhatsApp
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Recorded</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  )}
-
-                  {/* TAB 2: ADMISSION FEES PAID */}
-                  {feeCardDetailType === 'admission' && (
-                    <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
-                      <thead>
-                        <tr style={{ background: 'rgba(255, 215, 0, 0.08)', position: 'sticky', top: 0, zIndex: 1 }}>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>#</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>Student</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>Batch Name</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>Branch</th>
-                          <th style={{ padding: '10px', textAlign: 'center' }}>Payment / Join Date</th>
-                          <th style={{ padding: '10px', textAlign: 'right' }}>Admission Fee</th>
-                          <th style={{ padding: '10px', textAlign: 'center' }}>Mode</th>
-                          <th style={{ padding: '10px', textAlign: 'center' }}>Receipt</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {displayedAdmission.length === 0 ? (
-                          <tr><td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No admission fee records found for this month.</td></tr>
-                        ) : (
-                          displayedAdmission.map((item, idx) => (
-                            <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                              <td style={{ padding: '10px', color: 'var(--color-text-muted)' }}>{idx + 1}</td>
-                              <td style={{ padding: '10px', fontWeight: 600, color: '#fff' }}>
-                                <span
-                                  style={{ cursor: 'pointer', color: '#FFD700', textDecoration: 'underline' }}
-                                  onClick={() => {
-                                    const st = students.find(s => Number(s.id) === Number(item.studentId));
-                                    if (st) {
-                                      setFeeCardDetailType(null);
-                                      handleSelectStudent(st);
-                                    }
-                                  }}
-                                >
-                                  {item.studentName}
-                                </span>
-                              </td>
-                              <td style={{ padding: '10px', color: '#a78bfa' }}>{resolveBatchName(item.batch) || 'Regular'}</td>
-                              <td style={{ padding: '10px', color: 'var(--color-text-muted)' }}>{item.branch}</td>
-                              <td style={{ padding: '10px', textAlign: 'center', color: '#FFD700' }}>{item.paymentDate}</td>
-                              <td style={{ padding: '10px', textAlign: 'right', fontWeight: 700, color: '#FFD700' }}>₹{Number(item.amount || 0).toLocaleString()}</td>
-                              <td style={{ padding: '10px', textAlign: 'center', color: 'var(--color-text-muted)' }}>{item.paymentMethod}</td>
-                              <td style={{ padding: '10px', textAlign: 'center' }}>
-                                {item.pRec ? (
-                                  <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
-                                    <button
-                                      className="btn-small btn-receipt-badge"
-                                      onClick={() => {
-                                        setActiveReceipt(item.pRec);
-                                        setIsReceiptModalOpen(true);
-                                      }}
-                                    >
-                                      Receipt #{item.receiptNumber?.slice(-5) || 'View'}
-                                    </button>
-                                    <button
-                                      className="btn-small"
-                                      style={{ background: '#25D366', color: '#fff', border: 'none', borderRadius: '4px', padding: '3px 7px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
-                                      onClick={() => handleShareReceipt(item.pRec)}
-                                    >
-                                      <Share2 size={12} /> WhatsApp
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Recorded</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  )}
-
-                  {/* TAB 3: PENDING STUDENTS */}
-                  {feeCardDetailType === 'pending' && (
-                    <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
-                      <thead>
-                        <tr style={{ background: 'rgba(255, 107, 107, 0.08)', position: 'sticky', top: 0, zIndex: 1 }}>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>#</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>Student</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>Batch Name</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>Branch</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>Phone</th>
-                          <th style={{ padding: '10px', textAlign: 'right' }}>Amount Due</th>
-                          <th style={{ padding: '10px', textAlign: 'center' }}>Recent Activity</th>
-                          <th style={{ padding: '10px', textAlign: 'center' }}>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {displayedPending.length === 0 ? (
-                          <tr><td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No pending students found! All caught up.</td></tr>
-                        ) : (
-                          displayedPending.map((item, idx) => (
-                            <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                              <td style={{ padding: '10px', color: 'var(--color-text-muted)' }}>{idx + 1}</td>
-                              <td style={{ padding: '10px', fontWeight: 600, color: '#fff' }}>
-                                <span
-                                  style={{ cursor: 'pointer', color: '#ff6b6b', textDecoration: 'underline' }}
-                                  onClick={() => {
-                                    setFeeCardDetailType(null);
-                                    handleSelectStudent(item.studentObj);
-                                  }}
-                                >
-                                  {item.studentName}
-                                </span>
-                              </td>
-                              <td style={{ padding: '10px', color: '#a78bfa' }}>{resolveBatchName(item.batch) || 'Regular'}</td>
-                              <td style={{ padding: '10px', color: 'var(--color-text-muted)' }}>{item.branch}</td>
-                              <td style={{ padding: '10px', color: '#38bdf8' }}>{item.phone || 'N/A'}</td>
-                              <td style={{ padding: '10px', textAlign: 'right', fontWeight: 700, color: '#ff6b6b' }}>₹{Number(item.amountDue || 0).toLocaleString()}</td>
-                              <td style={{ padding: '10px', textAlign: 'center' }}>
-                                {item.recentPay ? (
-                                  <span style={{ fontSize: '0.72rem', color: '#FFD700', background: 'rgba(255, 215, 0, 0.1)', padding: '2px 6px', borderRadius: '4px' }}>
-                                    Paid {formatMonthName(item.recentPay.feeMonth)} on {item.recentPay.paymentDate}
-                                  </span>
-                                ) : (
-                                  <span style={{ fontSize: '0.74rem', color: '#ff6b6b' }}>No Payment</span>
-                                )}
-                              </td>
-                              <td style={{ padding: '10px', textAlign: 'center' }}>
-                                <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
-                                  {item.phone && (
-                                    <a
-                                      href={`https://api.whatsapp.com/send?phone=91${String(item.phone).replace(/\D/g, '').slice(-10)}&text=${encodeURIComponent(
-                                        `🥋 *MASTERFIT ACADEMY - FEE REMINDER*\n\nDear ${item.studentName},\nThis is a friendly reminder that your monthly fee for *${formatMonthName(feeMonth)}* (₹${item.amountDue}) is currently pending.\n\nPlease arrange payment at the earliest. If already paid, kindly share the receipt.\n\nThank you! 🙏`
-                                      )}`}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="btn-small"
-                                      style={{ background: '#25D366', color: '#fff', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 8px', borderRadius: '6px', fontSize: '0.74rem', fontWeight: 600 }}
-                                      title="Send WhatsApp Reminder"
-                                    >
-                                      <MessageCircle size={13} /> WhatsApp
-                                    </a>
-                                  )}
-                                  <button
-                                    className="btn-primary btn-small"
-                                    style={{ padding: '4px 8px', fontSize: '0.74rem' }}
-                                    onClick={() => {
-                                      setFeeCardDetailType(null);
-                                      setPaymentFormData(prev => ({
-                                        ...prev,
-                                        studentId: item.studentId,
-                                        studentName: item.studentName,
-                                        branch: item.branch,
-                                        batch: item.batch,
-                                        amountDue: item.amountDue,
-                                        amountPaid: item.amountDue,
-                                        feeMonth: feeMonth,
-                                        feeType: 'monthly'
-                                      }));
-                                      setIsRecordPaymentModalOpen(true);
-                                    }}
-                                  >
-                                    + Pay
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  )}
-
-                  {/* TAB 4: ALL TRANSACTIONS (TOTAL PAYMENTS) */}
-                  {feeCardDetailType === 'total' && (
-                    <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
-                      <thead>
-                        <tr style={{ background: 'rgba(192, 132, 252, 0.08)', position: 'sticky', top: 0, zIndex: 1 }}>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>#</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>Receipt No</th>
-                          <th style={{ padding: '10px', textAlign: 'center' }}>Date</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>Student</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>Batch Name</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>Branch</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>Covered Fee Month(s)</th>
-                          <th style={{ padding: '10px', textAlign: 'right' }}>Amount Paid</th>
-                          <th style={{ padding: '10px', textAlign: 'center' }}>Mode</th>
-                          <th style={{ padding: '10px', textAlign: 'center' }}>Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {displayedTotal.length === 0 ? (
-                          <tr><td colSpan={10} style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No payment transactions found in this month.</td></tr>
-                        ) : (
-                          displayedTotal.map((item, idx) => (
-                            <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                              <td style={{ padding: '10px', color: 'var(--color-text-muted)' }}>{idx + 1}</td>
-                              <td style={{ padding: '10px', fontWeight: 700, color: '#FFD700', fontFamily: 'monospace' }}>
-                                #{item.receiptNumber.slice(-6)}
-                              </td>
-                              <td style={{ padding: '10px', textAlign: 'center', color: '#38bdf8' }}>{item.paymentDate}</td>
-                              <td style={{ padding: '10px', fontWeight: 600, color: '#fff' }}>{item.studentName}</td>
-                              <td style={{ padding: '10px', color: '#a78bfa' }}>{resolveBatchName(item.batch) || 'Regular'}</td>
-                              <td style={{ padding: '10px', color: 'var(--color-text-muted)' }}>{item.branch}</td>
-                              <td style={{ padding: '10px', color: item.feeMonthLabel.includes('Admission') ? '#FFD700' : '#e2e8f0' }}>
-                                {item.feeMonthLabel || 'Fee'}
-                              </td>
-                              <td style={{ padding: '10px', textAlign: 'right', fontWeight: 700, color: '#51CF66' }}>
-                                ₹{Number(item.amountPaid || 0).toLocaleString()}
-                              </td>
-                              <td style={{ padding: '10px', textAlign: 'center', color: 'var(--color-text-muted)' }}>{item.paymentMethod}</td>
-                              <td style={{ padding: '10px', textAlign: 'center' }}>
-                                <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
-                                  <button
-                                    className="btn-small btn-receipt-badge"
-                                    onClick={() => {
-                                      setActiveReceipt(item.pRec);
-                                      setIsReceiptModalOpen(true);
-                                    }}
-                                  >
-                                    View Receipt
-                                  </button>
-                                  <button
-                                    className="btn-small"
-                                    style={{ background: '#25D366', color: '#fff', border: 'none', borderRadius: '4px', padding: '3px 7px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
-                                    onClick={() => handleShareReceipt(item.pRec)}
-                                    title="Send Receipt via WhatsApp"
-                                  >
-                                    <Share2 size={12} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-
-                {/* Modal Footer */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', marginTop: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
-                    Showing <strong>{headerInfo.count}</strong> record{headerInfo.count === 1 ? '' : 's'}
-                  </div>
-                  <button className="btn-secondary" onClick={() => setFeeCardDetailType(null)}>
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
 
         {/* Student Fee Roster Panel */}
         <div className="panel">
