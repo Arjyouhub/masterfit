@@ -11202,6 +11202,16 @@ _Thank you for your payment! Please keep this receipt for future reference._ ğŸ™
     }
   };
 
+  const getStudentExamResult = (s) => {
+    if (!s) return '';
+    if (s.lastGradingResult && s.lastGradingResult !== 'N/A') return s.lastGradingResult;
+    if (Array.isArray(s.gradingHistory) && s.gradingHistory.length > 0) {
+      const latest = s.gradingHistory[s.gradingHistory.length - 1];
+      return latest.result || '';
+    }
+    return '';
+  };
+
   const getFilteredGradingStudents = () => {
     if (!Array.isArray(gradingStudents)) return [];
     const isTrainer = userRole === 'trainer';
@@ -11273,27 +11283,33 @@ _Thank you for your payment! Please keep this receipt for future reference._ ğŸ™
       }
 
       let matchesResult = true;
+      const resVal = getStudentExamResult(student);
       if (gradingFilterResult !== 'All') {
         if (gradingFilterResult === 'No History') {
-          matchesResult = !student.lastGradingResult || student.lastGradingResult === 'N/A';
+          matchesResult = !resVal || resVal === 'N/A';
         } else {
-          matchesResult = student.lastGradingResult === gradingFilterResult;
-        }
-      }
-
-      // In Admin page (Super Admin, Branch Admin, Developer): ONLY show trainer-approved students!
-      if (!isTrainer) {
-        if (!student.trainerApprovedForGrading) {
-          return false;
+          matchesResult = resVal === gradingFilterResult;
         }
       }
 
       let matchesTrainerApproval = true;
-      if (isTrainer) {
-        if (gradingFilterTrainerApproval === 'Approved') {
-          matchesTrainerApproval = !!student.trainerApprovedForGrading;
+      if (gradingFilterTrainerApproval === 'Approved') {
+        matchesTrainerApproval = !!student.trainerApprovedForGrading;
+      } else if (gradingFilterTrainerApproval === 'Pending') {
+        matchesTrainerApproval = !student.trainerApprovedForGrading;
+      }
+
+      // In Admin page (Super Admin, Branch Admin, Developer):
+      // When Admin is viewing 'Pass', 'Fail', or 'No History', allow viewing all relevant students.
+      // If Admin explicitly filters by 'Approved', require trainerApprovedForGrading.
+      // If Admin explicitly filters by 'Pending', require !trainerApprovedForGrading.
+      if (!isTrainer) {
+        if (gradingFilterResult === 'Pass' || gradingFilterResult === 'Fail' || gradingFilterResult === 'No History') {
+          // Allow viewing exam results without trainerApprovedForGrading restriction
+        } else if (gradingFilterTrainerApproval === 'Approved') {
+          if (!student.trainerApprovedForGrading) return false;
         } else if (gradingFilterTrainerApproval === 'Pending') {
-          matchesTrainerApproval = !student.trainerApprovedForGrading;
+          if (student.trainerApprovedForGrading) return false;
         }
       }
 
@@ -11882,13 +11898,58 @@ _Thank you for your payment! Please keep this receipt for future reference._ ğŸ™
       const isSuper = isAdminUser(loggedInUser);
       const isTrainer = userRole === 'trainer';
       const isBranchAdm = userRole === 'branchadmin';
+      const activeBranchLower = (userBranch || '').toLowerCase().trim();
+      const allowedTrainerBatches = (userBatch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+      const safeBatchOptions = Array.isArray(batchOptions) ? batchOptions : [];
+
+      const scopedCandidates = Array.isArray(gradingStudents) ? gradingStudents.filter(student => {
+        if (!student) return false;
+        if (isTrainer) {
+          if (activeBranchLower && (student.branch || '').toLowerCase().trim() !== activeBranchLower) return false;
+          if (allowedTrainerBatches.length > 0) {
+            const studentBatchLower = (student.batch || '').toLowerCase().trim();
+            if (!allowedTrainerBatches.includes(studentBatchLower)) {
+              const batchNameMatch = allowedTrainerBatches.some(b => {
+                const opt = safeBatchOptions.find(o => o && (o.id || o.code || '').toLowerCase() === b);
+                return (opt && opt.name && opt.name.toLowerCase().trim() === studentBatchLower) ||
+                  (opt && schedulesMatch(opt.schedule, student.schedule));
+              });
+              if (!batchNameMatch) return false;
+            }
+          }
+        } else if (isBranchAdm) {
+          if (activeBranchLower && (student.branch || '').toLowerCase().trim() !== activeBranchLower) return false;
+        } else if (isSuper) {
+          if (gradingFilterBranch !== 'All') {
+            if ((student.branch || '').toLowerCase().trim() !== gradingFilterBranch.toLowerCase().trim()) return false;
+          }
+        }
+
+        if (gradingFilterBatch !== 'All') {
+          const studentBatchLower = (student.batch || '').toLowerCase().trim();
+          const filterBatchLower = gradingFilterBatch.toLowerCase().trim();
+          let matchesBatch = studentBatchLower === filterBatchLower;
+          if (!matchesBatch) {
+            const opt = safeBatchOptions.find(o => o && (o.id || o.code || '').toLowerCase() === filterBatchLower);
+            if (opt) {
+              matchesBatch = (opt.name && opt.name.toLowerCase().trim() === studentBatchLower) ||
+                schedulesMatch(opt.schedule, student.schedule);
+            }
+          }
+          if (!matchesBatch) return false;
+        }
+        return true;
+      }) : [];
+
       const filtered = getFilteredGradingStudents();
 
-      // Stats calculations
-      const totalCount = filtered.length;
-      const eligibleCount = filtered.filter(s => s.eligibilityStatus === 'Eligible').length;
-      const passedCount = filtered.filter(s => s.lastGradingResult === 'Pass').length;
-      const failedCount = filtered.filter(s => s.lastGradingResult === 'Fail').length;
+      // Stats calculations based on scoped candidates
+      const totalCandidatesCount = scopedCandidates.length;
+      const eligibleCount = scopedCandidates.filter(s => s.eligibilityStatus === 'Eligible').length;
+      const trainerApprovedCount = scopedCandidates.filter(s => !!s.trainerApprovedForGrading).length;
+      const pendingApprovalCount = scopedCandidates.filter(s => !s.trainerApprovedForGrading).length;
+      const passedCount = scopedCandidates.filter(s => getStudentExamResult(s) === 'Pass').length;
+      const failedCount = scopedCandidates.filter(s => getStudentExamResult(s) === 'Fail').length;
 
       const beltCounts = {
         White: 0,
@@ -11956,17 +12017,49 @@ _Thank you for your payment! Please keep this receipt for future reference._ ğŸ™
 
           {/* Dashboard Stats Cards */}
           <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.85rem' }}>
-            <div className="stat-card glow-card-blue" style={{ background: 'linear-gradient(145deg, rgba(20, 24, 38, 0.7) 0%, rgba(15, 17, 26, 0.8) 100%)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+            <div
+              className={`stat-card glow-card-blue ${gradingFilterResult === 'All' && gradingFilterTrainerApproval === 'All' && gradingFilterEligibility === 'All' ? 'active-glow' : ''}`}
+              style={{
+                background: 'linear-gradient(145deg, rgba(20, 24, 38, 0.7) 0%, rgba(15, 17, 26, 0.8) 100%)',
+                border: gradingFilterResult === 'All' && gradingFilterTrainerApproval === 'All' && gradingFilterEligibility === 'All' ? '2px solid #38bdf8' : '1px solid rgba(56, 189, 248, 0.2)',
+                borderRadius: '14px',
+                padding: '1rem 1.25rem',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+              onClick={() => {
+                setGradingFilterResult('All');
+                setGradingFilterTrainerApproval('All');
+                setGradingFilterEligibility('All');
+              }}
+              title="Click to view all candidates"
+            >
               <div className="stat-icon-wrapper" style={{ background: 'rgba(56, 189, 248, 0.12)', width: '38px', height: '38px', borderRadius: '8px' }}>
                 <Users className="stat-icon" style={{ color: '#38bdf8' }} size={18} />
               </div>
               <div className="stat-details">
                 <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text-muted)', fontSize: '0.72rem', fontWeight: 600 }}>Total Students</h3>
-                <p className="stat-value" style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem', color: '#fff' }}>{totalCount}</p>
+                <p className="stat-value" style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem', color: '#fff' }}>{totalCandidatesCount}</p>
               </div>
             </div>
 
-            <div className="stat-card glow-card-green" style={{ background: 'linear-gradient(145deg, rgba(16, 32, 24, 0.7) 0%, rgba(12, 22, 18, 0.8) 100%)', border: '1px solid rgba(34, 197, 94, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+            <div
+              className={`stat-card glow-card-green ${gradingFilterEligibility === 'Eligible' && gradingFilterResult === 'All' ? 'active-glow' : ''}`}
+              style={{
+                background: 'linear-gradient(145deg, rgba(16, 32, 24, 0.7) 0%, rgba(12, 22, 18, 0.8) 100%)',
+                border: gradingFilterEligibility === 'Eligible' && gradingFilterResult === 'All' ? '2px solid #4ade80' : '1px solid rgba(34, 197, 94, 0.25)',
+                borderRadius: '14px',
+                padding: '1rem 1.25rem',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+              onClick={() => {
+                setGradingFilterResult('All');
+                setGradingFilterTrainerApproval('All');
+                setGradingFilterEligibility(gradingFilterEligibility === 'Eligible' ? 'All' : 'Eligible');
+              }}
+              title="Click to view students ready for test"
+            >
               <div className="stat-icon-wrapper" style={{ background: 'rgba(34, 197, 94, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
                 <CheckCircle className="stat-icon" style={{ color: '#4ade80' }} size={18} />
               </div>
@@ -11976,17 +12069,49 @@ _Thank you for your payment! Please keep this receipt for future reference._ ğŸ™
               </div>
             </div>
 
-            <div className="stat-card glow-card-blue" style={{ background: 'linear-gradient(145deg, rgba(18, 28, 45, 0.7) 0%, rgba(13, 19, 32, 0.8) 100%)', border: '1px solid rgba(59, 130, 246, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+            <div
+              className={`stat-card glow-card-blue ${gradingFilterResult === 'Pass' ? 'active-glow' : ''}`}
+              style={{
+                background: 'linear-gradient(145deg, rgba(18, 28, 45, 0.7) 0%, rgba(13, 19, 32, 0.8) 100%)',
+                border: gradingFilterResult === 'Pass' ? '2px solid #60a5fa' : '1px solid rgba(59, 130, 246, 0.25)',
+                borderRadius: '14px',
+                padding: '1rem 1.25rem',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+              onClick={() => {
+                setGradingFilterEligibility('All');
+                setGradingFilterTrainerApproval('All');
+                setGradingFilterResult(gradingFilterResult === 'Pass' ? 'All' : 'Pass');
+              }}
+              title="Click to view all passed students"
+            >
               <div className="stat-icon-wrapper" style={{ background: 'rgba(59, 130, 246, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
                 <Award className="stat-icon" style={{ color: '#60a5fa' }} size={18} />
               </div>
               <div className="stat-details">
-                <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#93c5fd', fontSize: '0.72rem', fontWeight: 600 }}>Passed</h3>
+                <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#93c5fd', fontSize: '0.72rem', fontWeight: 600 }}>Passed Students</h3>
                 <p className="stat-value" style={{ color: '#60a5fa', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{passedCount}</p>
               </div>
             </div>
 
-            <div className="stat-card glow-card-red" style={{ background: 'linear-gradient(145deg, rgba(38, 16, 20, 0.7) 0%, rgba(24, 12, 14, 0.8) 100%)', border: '1px solid rgba(244, 63, 94, 0.25)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
+            <div
+              className={`stat-card glow-card-red ${gradingFilterResult === 'Fail' ? 'active-glow' : ''}`}
+              style={{
+                background: 'linear-gradient(145deg, rgba(38, 16, 20, 0.7) 0%, rgba(24, 12, 14, 0.8) 100%)',
+                border: gradingFilterResult === 'Fail' ? '2px solid #fb7185' : '1px solid rgba(244, 63, 94, 0.25)',
+                borderRadius: '14px',
+                padding: '1rem 1.25rem',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+              onClick={() => {
+                setGradingFilterEligibility('All');
+                setGradingFilterTrainerApproval('All');
+                setGradingFilterResult(gradingFilterResult === 'Fail' ? 'All' : 'Fail');
+              }}
+              title="Click to view failed / retest students"
+            >
               <div className="stat-icon-wrapper" style={{ background: 'rgba(244, 63, 94, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
                 <XCircle className="stat-icon" style={{ color: '#fb7185' }} size={18} />
               </div>
@@ -12031,7 +12156,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ğŸ™
                 value={gradingFilterBelt}
                 onChange={(e) => setGradingFilterBelt(e.target.value)}
               >
-                <option value="All">All Belts ({totalCount})</option>
+                <option value="All">All Belts ({filtered.length})</option>
                 {Object.entries(beltCounts).map(([beltName, count]) => (
                   <option key={beltName} value={beltName}>
                     {beltName} Belt ({count})
@@ -12047,35 +12172,70 @@ _Thank you for your payment! Please keep this receipt for future reference._ ğŸ™
             <div className="grading-quick-chips" style={{ marginBottom: '0.85rem', paddingBottom: '0.65rem' }}>
               <button
                 type="button"
-                className={`quick-chip ${gradingFilterEligibility === 'All' && gradingFilterTrainerApproval === 'All' && gradingFilterBelt === 'All' ? 'active' : ''}`}
+                className={`quick-chip ${gradingFilterEligibility === 'All' && gradingFilterTrainerApproval === 'All' && gradingFilterResult === 'All' && gradingFilterBelt === 'All' ? 'active' : ''}`}
                 onClick={() => {
                   setGradingFilterEligibility('All');
                   setGradingFilterTrainerApproval('All');
                   setGradingFilterBelt('All');
+                  setGradingFilterResult('All');
                 }}
               >
-                All Candidates ({Array.isArray(gradingStudents) ? gradingStudents.length : totalCount})
+                All Candidates ({totalCandidatesCount})
               </button>
               <button
                 type="button"
-                className={`quick-chip ${gradingFilterEligibility === 'Eligible' ? 'active-eligible' : ''}`}
-                onClick={() => setGradingFilterEligibility(gradingFilterEligibility === 'Eligible' ? 'All' : 'Eligible')}
+                className={`quick-chip ${gradingFilterEligibility === 'Eligible' && gradingFilterResult === 'All' ? 'active-eligible' : ''}`}
+                onClick={() => {
+                  setGradingFilterResult('All');
+                  setGradingFilterTrainerApproval('All');
+                  setGradingFilterEligibility(gradingFilterEligibility === 'Eligible' ? 'All' : 'Eligible');
+                }}
               >
-                âš¡ Ready for Test ({Array.isArray(gradingStudents) ? gradingStudents.filter(s => s.eligibilityStatus === 'Eligible').length : eligibleCount})
+                âš¡ Ready for Test ({eligibleCount})
               </button>
               <button
                 type="button"
-                className={`quick-chip ${gradingFilterTrainerApproval === 'Approved' ? 'active-eligible' : ''}`}
-                onClick={() => setGradingFilterTrainerApproval(gradingFilterTrainerApproval === 'Approved' ? 'All' : 'Approved')}
+                className={`quick-chip ${gradingFilterTrainerApproval === 'Approved' && gradingFilterResult === 'All' ? 'active-eligible' : ''}`}
+                onClick={() => {
+                  setGradingFilterResult('All');
+                  setGradingFilterEligibility('All');
+                  setGradingFilterTrainerApproval(gradingFilterTrainerApproval === 'Approved' ? 'All' : 'Approved');
+                }}
               >
-                âœ“ Trainer Approved ({Array.isArray(gradingStudents) ? gradingStudents.filter(s => !!s.trainerApprovedForGrading).length : 0})
+                âœ“ Trainer Approved ({trainerApprovedCount})
               </button>
               <button
                 type="button"
-                className={`quick-chip ${gradingFilterTrainerApproval === 'Pending' ? 'active-fail' : ''}`}
-                onClick={() => setGradingFilterTrainerApproval(gradingFilterTrainerApproval === 'Pending' ? 'All' : 'Pending')}
+                className={`quick-chip ${gradingFilterTrainerApproval === 'Pending' && gradingFilterResult === 'All' ? 'active-fail' : ''}`}
+                onClick={() => {
+                  setGradingFilterResult('All');
+                  setGradingFilterEligibility('All');
+                  setGradingFilterTrainerApproval(gradingFilterTrainerApproval === 'Pending' ? 'All' : 'Pending');
+                }}
               >
-                â³ Pending Approval ({Array.isArray(gradingStudents) ? gradingStudents.filter(s => !s.trainerApprovedForGrading).length : 0})
+                â³ Pending Approval ({pendingApprovalCount})
+              </button>
+              <button
+                type="button"
+                className={`quick-chip ${gradingFilterResult === 'Pass' ? 'active-pass' : ''}`}
+                onClick={() => {
+                  setGradingFilterEligibility('All');
+                  setGradingFilterTrainerApproval('All');
+                  setGradingFilterResult(gradingFilterResult === 'Pass' ? 'All' : 'Pass');
+                }}
+              >
+                ğŸ† Passed Students ({passedCount})
+              </button>
+              <button
+                type="button"
+                className={`quick-chip ${gradingFilterResult === 'Fail' ? 'active-fail' : ''}`}
+                onClick={() => {
+                  setGradingFilterEligibility('All');
+                  setGradingFilterTrainerApproval('All');
+                  setGradingFilterResult(gradingFilterResult === 'Fail' ? 'All' : 'Fail');
+                }}
+              >
+                âŒ Failed / Retest ({failedCount})
               </button>
             </div>
 
@@ -12131,6 +12291,27 @@ _Thank you for your payment! Please keep this receipt for future reference._ ğŸ™
                 </select>
               </div>
 
+              {/* Exam Result Filter */}
+              <div style={{ minWidth: '150px', flex: '1 1 150px' }}>
+                <select
+                  className="form-control"
+                  style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
+                  value={gradingFilterResult}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setGradingFilterResult(val);
+                    if (val === 'Pass' || val === 'Fail') {
+                      setGradingFilterTrainerApproval('All');
+                    }
+                  }}
+                >
+                  <option value="All">All Exam Statuses</option>
+                  <option value="Pass">ğŸ† Passed Students ({passedCount})</option>
+                  <option value="Fail">âŒ Failed / Retest ({failedCount})</option>
+                  <option value="No History">â³ Not Graded Yet</option>
+                </select>
+              </div>
+
               {/* Reset Button */}
               <button
                 className="btn-secondary"
@@ -12167,6 +12348,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ğŸ™
                       <th>Present Belt / Level</th>
                       {isTrainer && <th>Trainer Status & Suggestion</th>}
                       {!isTrainer && <th>Trainer Suggested Belt</th>}
+                      <th>Exam Result</th>
                       <th style={{ textAlign: 'center' }}>Actions</th>
                     </tr>
                   </thead>
@@ -12237,6 +12419,44 @@ _Thank you for your payment! Please keep this receipt for future reference._ ğŸ™
                               )}
                             </td>
                           )}
+                          <td data-label="Exam Result">
+                            {(() => {
+                              const res = getStudentExamResult(student);
+                              if (res === 'Pass') {
+                                return (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    <span className="badge badge-green" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', padding: '3px 8px', borderRadius: '6px', fontSize: '0.74rem', fontWeight: 600, width: 'fit-content' }}>
+                                      ğŸ† Passed {student.lastGradeLetter ? `(${student.lastGradeLetter})` : ''}
+                                    </span>
+                                    {student.lastGradingDate && (
+                                      <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
+                                        {student.lastGradingDate}
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              }
+                              if (res === 'Fail') {
+                                return (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    <span className="badge badge-red" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#fb7185', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '3px 8px', borderRadius: '6px', fontSize: '0.74rem', fontWeight: 600, width: 'fit-content' }}>
+                                      âŒ Failed / Retest
+                                    </span>
+                                    {student.lastGradingDate && (
+                                      <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
+                                        {student.lastGradingDate}
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              }
+                              return (
+                                <span style={{ color: 'var(--color-text-muted)', fontSize: '0.74rem' }}>
+                                  Not Graded Yet
+                                </span>
+                              );
+                            })()}
+                          </td>
                           <td data-label="Actions" style={{ whiteSpace: 'nowrap' }}>
                             <div style={{ display: 'inline-flex', justifyContent: 'center', gap: '6px', alignItems: 'center', flexWrap: 'nowrap' }}>
                               {isTrainer && (
