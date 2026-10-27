@@ -3,7 +3,7 @@ import {
   LayoutDashboard, CreditCard, CalendarCheck, History, Bell, User, LogOut,
   CheckCircle2, Clock, AlertTriangle, XCircle, ChevronRight, UploadCloud,
   FileText, ArrowRight, Shield, Award, MapPin, Calendar, Smartphone, RefreshCw,
-  ExternalLink, Eye, ChevronLeft, AlertCircle, Sparkles, Check, Copy, Users, ShieldCheck
+  ExternalLink, Eye, ChevronLeft, AlertCircle, Sparkles, Check, Copy, Users, ShieldCheck, Share2, Printer
 } from 'lucide-react';
 import FirstLoginMpinModal from './FirstLoginMpinModal.jsx';
 
@@ -229,6 +229,65 @@ export default function StudentPortal({ apiBaseUrl, initialStudent, token, sessi
     } finally {
       setPaySubmitting(false);
     }
+  };
+
+  const handleShareSubmissionSlip = (sub) => {
+    if (!sub) return;
+    const text = `🥋 *MASTERFIT ACADEMY - PAYMENT SUBMISSION SLIP*
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔖 *Submission ID:* ${sub.submissionId}
+👤 *Student:* ${student.name || profileData?.student?.name || sub.studentName || 'Student'}
+🏢 *Branch:* ${student.branch || sub.branch || ''}
+📅 *Date:* ${sub.paymentDate}
+💰 *Amount:* ₹${Number(sub.totalAmount || 0).toLocaleString('en-IN')}
+💳 *Method:* ${sub.paymentMethod}
+🏷️ *Txn Ref / UTR:* ${sub.transactionId || 'N/A'}
+📋 *Months:* ${sub.feeAllocations?.map(a => a.feeMonth).join(', ')}
+⏳ *Status:* ${sub.status}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+_Submitted via Masterfit Student Portal_ 🙏`;
+
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      navigator.share({
+        title: `Payment Submission Slip - ${sub.submissionId}`,
+        text
+      }).catch(err => {
+        if (err.name !== 'AbortError') {
+          window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
+        }
+      });
+      return;
+    }
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
+  const handleShareOfficialPayment = (payment) => {
+    if (!payment) return;
+    const text = `🥋 *MASTERFIT ACADEMY - OFFICIAL RECEIPT*
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🧾 *Receipt No:* ${payment.receiptNumber || 'N/A'}
+👤 *Student:* ${student.name || profileData?.student?.name || payment.studentName || 'Student'}
+🏢 *Branch:* ${student.branch || payment.branch || ''}
+📅 *Date:* ${payment.paymentDate}
+💳 *Method:* ${payment.paymentMethod || 'Cash'}
+💰 *Amount Paid:* ₹${Number(payment.amountPaid || 0).toLocaleString('en-IN')}
+📋 *Fee Month:* ${payment.feeMonth || 'N/A'}
+✅ *Status:* Approved & Recorded
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+_Masterfit Academy Student Portal Verification_ 🙏`;
+
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      navigator.share({
+        title: `Fee Receipt #${payment.receiptNumber}`,
+        text
+      }).catch(err => {
+        if (err.name !== 'AbortError') {
+          window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
+        }
+      });
+      return;
+    }
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
   const handleMarkNotifRead = async (id) => {
@@ -780,7 +839,7 @@ export default function StudentPortal({ apiBaseUrl, initialStudent, token, sessi
                         )}
                       </div>
 
-                      <div className="record-footer">
+                      <div className="record-footer" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                         {sub.proofImage ? (
                           <button
                             onClick={() => setViewProofModal(sub)}
@@ -792,11 +851,75 @@ export default function StudentPortal({ apiBaseUrl, initialStudent, token, sessi
                         ) : (
                           <span className="no-proof-txt">No image attached</span>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => handleShareSubmissionSlip(sub)}
+                          className="view-proof-btn"
+                          style={{ background: 'rgba(37, 211, 102, 0.15)', borderColor: 'rgba(37, 211, 102, 0.3)', color: '#25D366' }}
+                        >
+                          <Share2 size={15} />
+                          <span>Share Details</span>
+                        </button>
                       </div>
                     </div>
                   ))
                 )}
               </div>
+
+              {paymentHistory.officialPayments && paymentHistory.officialPayments.length > 0 && (
+                <div style={{ marginTop: '2.5rem' }}>
+                  <div style={{ marginBottom: '1rem' }}>
+                    <h3 style={{ fontSize: '1.25rem', color: '#fff', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <FileText size={20} color="#FFD700" /> Official Fee Receipts
+                    </h3>
+                    <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', margin: '4px 0 0' }}>
+                      Approved and finalized payment receipts issued by the academy
+                    </p>
+                  </div>
+
+                  <div className="submissions-grid">
+                    {paymentHistory.officialPayments.map(p => (
+                      <div key={p._id || p.receiptNumber} className="payment-record-card" style={{ borderLeft: '4px solid #51CF66' }}>
+                        <div className="record-header">
+                          <div className="record-title-group">
+                            <span className="record-id" style={{ color: '#FFD700', fontFamily: 'monospace' }}>{p.receiptNumber}</span>
+                            <span className="record-date">{p.paymentDate}</span>
+                          </div>
+                          <span className="status-pill status-approved">
+                            PAID ✓
+                          </span>
+                        </div>
+
+                        <div className="record-body">
+                          <div className="record-amount-strip">
+                            <span className="amt-label">Total Amount Paid</span>
+                            <span className="amt-val" style={{ color: '#51CF66' }}>₹{p.amountPaid?.toLocaleString('en-IN')}</span>
+                          </div>
+
+                          <div className="record-info-grid">
+                            <div><strong>Fee Month:</strong> {p.feeMonth}</div>
+                            <div><strong>Payment Mode:</strong> {p.paymentMethod || 'Cash'}</div>
+                            <div><strong>Collected By:</strong> {p.collectedBy || 'Admin'}</div>
+                            {p.transactionRef && <div><strong>UTR / Ref:</strong> {p.transactionRef}</div>}
+                          </div>
+                        </div>
+
+                        <div className="record-footer">
+                          <button
+                            type="button"
+                            onClick={() => handleShareOfficialPayment(p)}
+                            className="view-proof-btn"
+                            style={{ background: '#25D366', color: '#fff', border: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                          >
+                            <Share2 size={15} />
+                            <span>Share Receipt via WhatsApp</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

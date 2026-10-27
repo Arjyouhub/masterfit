@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, CheckCircle, XCircle, MessageCircle, MessageSquare,
   Search, Phone, Trash2, ArrowRight, Activity, MapPin, TrendingUp, Award, Menu,
   Shield, ShieldCheck, Lock, Unlock, FileDown, FileUp, Database, Terminal, Cpu, HardDrive, Key, History,
-  Eye, EyeOff, Star, Megaphone, Send, Camera
+  Eye, EyeOff, Star, Megaphone, Send, Camera, Share2, Printer, Copy, Check
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import './index.css';
@@ -4396,6 +4396,77 @@ function App() {
 
   const [activeReceipt, setActiveReceipt] = useState(null);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [copiedReceipt, setCopiedReceipt] = useState(false);
+
+  const generateReceiptShareText = (receipt) => {
+    if (!receipt) return '';
+    const breakdown = Array.isArray(receipt.breakdown) && receipt.breakdown.length > 0
+      ? receipt.breakdown
+      : [{
+          feeMonth: receipt.feeMonth || '',
+          feeType: receipt.feeType || 'monthly',
+          amount: receipt.amountPaid,
+          description: receipt.feeType === 'admission' ? 'Admission Fee' : (receipt.feeMonth ? `${formatMonthName(receipt.feeMonth)} Fee` : 'Monthly Fee')
+        }];
+
+    const breakdownLines = breakdown.map(item => {
+      const desc = item.description || (item.feeType === 'admission' ? 'Admission Fee' : (item.feeMonth ? `${formatMonthName(item.feeMonth)} Fee` : 'Monthly Fee'));
+      return `  • ${desc}: ₹${Number(item.amount || 0).toLocaleString('en-IN')}`;
+    }).join('\n');
+
+    return `🥋 *MASTERFIT ACADEMY - OFFICIAL RECEIPT*
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🧾 *Receipt No:* ${receipt.receiptNumber || 'N/A'}
+👤 *Student:* ${receipt.studentName || 'Student'}
+🏢 *Branch:* ${receipt.branch || ''} • ${receipt.batch || 'Regular'}
+📅 *Payment Date:* ${receipt.paymentDate}
+💳 *Payment Mode:* ${receipt.paymentMethod || 'Cash'}${receipt.transactionRef ? `\n🔖 *Txn Ref / UTR:* ${receipt.transactionRef}` : ''}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 *Fee Items:*
+${breakdownLines}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 *Total Amount Paid:* ₹${Number(receipt.amountPaid || 0).toLocaleString('en-IN')}${receipt.balance > 0 ? `\n⚠️ *Balance Remaining:* ₹${Number(receipt.balance).toLocaleString('en-IN')}` : ''}
+✅ *Status:* Paid
+👤 *Issued By:* ${receipt.collectedBy || 'Academy Admin'}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+_Thank you for your payment! Please keep this receipt for future reference._ 🙏`;
+  };
+
+  const handleShareReceipt = async (receipt) => {
+    if (!receipt) return;
+    const text = generateReceiptShareText(receipt);
+    const studentObj = searchedStudents.find(s => s.id === receipt.studentId) || (Array.isArray(students) ? students.find(s => s.id === receipt.studentId) : null);
+    const rawPhone = studentObj ? (studentObj.phone || studentObj.parentPhone || '') : '';
+    const cleanPhone = String(rawPhone).replace(/\D/g, '');
+    const phoneParam = cleanPhone.length === 10 ? `91${cleanPhone}` : (cleanPhone.length > 10 ? cleanPhone : '');
+
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: `Fee Receipt #${receipt.receiptNumber} - ${receipt.studentName}`,
+          text: text
+        });
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+      }
+    }
+
+    const waUrl = phoneParam
+      ? `https://api.whatsapp.com/send?phone=${phoneParam}&text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, '_blank');
+  };
+
+  const handleCopyReceiptText = (receipt) => {
+    if (!receipt) return;
+    const text = generateReceiptShareText(receipt);
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedReceipt(true);
+      setTimeout(() => setCopiedReceipt(false), 2500);
+    }
+  };
 
   const fetchRevenueAndPayments = () => {
     const token = getSessionToken();
@@ -4779,6 +4850,10 @@ function App() {
       setApprovalFeedbackMsg(`Payment approved! Receipt #${data.receiptNumber} generated.`);
       fetchPaymentSubmissions();
       reloadAllAppData();
+      if (data.feePayment) {
+        setActiveReceipt(data.feePayment);
+        setIsReceiptModalOpen(true);
+      }
     } catch (err) {
       setApprovalErrorMsg(err.message);
     } finally {
@@ -9232,7 +9307,11 @@ function App() {
   };
 
   const renderFees = () => {
-    const isPaid = (student) => student.paidMonths && student.paidMonths[feeMonth];
+    const isPaid = (student) => {
+      if (student.paidMonths && (student.paidMonths instanceof Map ? student.paidMonths.get(feeMonth) : student.paidMonths[feeMonth])) return true;
+      const pRec = feePaymentsList.find(p => p.studentId === student.id && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
+      return !!(pRec && pRec.status === 'Paid');
+    };
 
     const baseFeeStudents = searchedStudents.filter(s => (s.status || 'Active') !== 'Inactive');
 
@@ -9307,6 +9386,52 @@ function App() {
       paymentCount = targetPayments.length;
     }
 
+    // Fees collected strictly for the selected feeMonth (matching paid students in the table)
+    const feeMonthMonthlyCollected = filteredFeeStudents
+      .filter(s => isPaid(s))
+      .reduce((sum, s) => {
+        const pRec = feePaymentsList.find(p => p.studentId === s.id && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
+        if (pRec) {
+          if (Array.isArray(pRec.breakdown) && pRec.breakdown.length > 0) {
+            const item = pRec.breakdown.find(b => b.feeMonth === feeMonth && b.feeType === 'monthly');
+            if (item && item.amount !== undefined) return sum + Number(item.amount);
+          }
+          if (pRec.amountPaid !== undefined && (!pRec.breakdown || pRec.breakdown.length === 0)) {
+            return sum + Number(pRec.amountPaid);
+          }
+        }
+        const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null ? s.customMonthlyRate : monthlyFeeRate;
+        const discountAmount = getStudentDiscountForMonth(s, rateToUse, feeMonth);
+        return sum + Math.max(0, rateToUse - discountAmount);
+      }, 0);
+
+    const feeMonthAdmissionCollected = filteredFeeStudents
+      .reduce((sum, s) => {
+        const pRec = feePaymentsList.find(p => p.studentId === s.id && (
+          (p.feeMonth === feeMonth && p.feeType === 'admission') ||
+          (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth && b.feeType === 'admission'))
+        ));
+        if (pRec) {
+          if (Array.isArray(pRec.breakdown) && pRec.breakdown.length > 0) {
+            const item = pRec.breakdown.find(b => b.feeMonth === feeMonth && b.feeType === 'admission');
+            if (item && item.amount !== undefined) return sum + Number(item.amount);
+          }
+          return sum + (Number(pRec.amountPaid) || 0);
+        }
+        if (s.admissionPaid && (s.admissionPaid === feeMonth || (s.admissionPaid === true && s.joinDate && s.joinDate.slice(0, 7) === feeMonth))) {
+          const rateAdmission = s.customAdmissionRate !== undefined && s.customAdmissionRate !== null ? s.customAdmissionRate : admissionFeeRate;
+          const admissionCoupon = resolveCouponCode(s.appliedAdmissionCoupon);
+          let admissionDiscountAmount = 0;
+          if (admissionCoupon) {
+            admissionDiscountAmount = admissionCoupon.type === 'percentage' ? Math.round(rateAdmission * admissionCoupon.value / 100) : admissionCoupon.value;
+          }
+          return sum + Math.max(0, rateAdmission - admissionDiscountAmount);
+        }
+        return sum;
+      }, 0);
+
+    const feeMonthTotalCollected = feeMonthMonthlyCollected + feeMonthAdmissionCollected;
+
     // Pending Fees for selected feeMonth (unpaid students for feeMonth)
     const pendingFeesTotal = filteredFeeStudents
       .filter(s => !isPaid(s))
@@ -9332,25 +9457,17 @@ function App() {
           </div>
 
           <div className="fees-month-selectors">
-            {/* Revenue / Collection Month */}
-            <div className="fees-month-box revenue-month-box">
-              <span className="fees-month-label">💰 Revenue Month:</span>
-              <input
-                type="month"
-                className="form-control fees-month-input"
-                value={paymentMonth}
-                onChange={(e) => setPaymentMonth(e.target.value)}
-              />
-            </div>
-
-            {/* Fee Due Month */}
-            <div className="fees-month-box due-month-box">
-              <span className="fees-month-label">📅 Fee Due Month:</span>
+            <div className="fees-month-box due-month-box" style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--glass-border)' }}>
+              <span className="fees-month-label" style={{ color: 'var(--color-text-light)' }}>📅 Select Month:</span>
               <input
                 type="month"
                 className="form-control fees-month-input"
                 value={feeMonth}
-                onChange={(e) => setFeeMonth(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setFeeMonth(val);
+                  setPaymentMonth(val);
+                }}
               />
             </div>
           </div>
@@ -9407,20 +9524,25 @@ function App() {
           <div className="stat-card" style={{ borderLeft: '4px solid #38bdf8' }}>
             <div className="stat-details">
               <h3 style={{ color: '#38bdf8', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>
-                Revenue Received in {formatMonthName(paymentMonth)}
+                Monthly Fees Collected for {formatMonthName(feeMonth)}
               </h3>
-              <p className="stat-value" style={{ color: '#fff', margin: 0 }}>₹{paymentMonthRevenue.toLocaleString()}</p>
-              <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
-                Strictly based on payment date
-              </span>
+              <p className="stat-value" style={{ color: '#fff', margin: 0 }}>₹{feeMonthMonthlyCollected.toLocaleString()}</p>
+              <div style={{ marginTop: '5px' }}>
+                <span className="stat-subtext" style={{ color: '#38bdf8', display: 'block', fontWeight: 600 }}>
+                  {totalPaid} student{totalPaid === 1 ? '' : 's'} paid for {formatMonthName(feeMonth)}
+                </span>
+                <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', display: 'block', marginTop: '2px', fontSize: '0.74rem' }}>
+                  Total cash received in {formatMonthName(paymentMonth)}: ₹{paymentMonthRevenue.toLocaleString()}
+                </span>
+              </div>
             </div>
           </div>
           <div className="stat-card" style={{ borderLeft: '4px solid #FFD700' }}>
             <div className="stat-details">
               <h3 style={{ color: '#FFD700', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Admission Fees</h3>
-              <p className="stat-value" style={{ color: '#FFD700', margin: 0 }}>₹{paymentMonthAdmission.toLocaleString()}</p>
+              <p className="stat-value" style={{ color: '#FFD700', margin: 0 }}>₹{(feeMonthAdmissionCollected > 0 ? feeMonthAdmissionCollected : paymentMonthAdmission).toLocaleString()}</p>
               <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
-                Received in {formatMonthName(paymentMonth)}
+                {feeMonthAdmissionCollected > 0 ? `For ${formatMonthName(feeMonth)}` : `Received in ${formatMonthName(paymentMonth)}`}
               </span>
             </div>
           </div>
@@ -15378,8 +15500,57 @@ function App() {
                           </div>
                         )}
                         {isApproved && (
-                          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                            Approved by {sub.approvedBy || 'Admin'}
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+                              Approved by {sub.approvedBy || 'Admin'}
+                            </span>
+                            <button
+                              type="button"
+                              className="btn-small"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                background: '#25D366',
+                                color: '#fff',
+                                border: 'none',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                fontSize: '0.75rem',
+                                fontWeight: 600,
+                                cursor: 'pointer'
+                              }}
+                              onClick={async () => {
+                                const matched = feePaymentsList.find(p => p.studentId === sub.studentId && (
+                                  p.transactionRef === sub.transactionId ||
+                                  (p.notes && p.notes.includes(sub.submissionId)) ||
+                                  (p.paymentDate === sub.paymentDate && p.amountPaid === sub.totalAmount)
+                                ));
+                                if (matched) {
+                                  setActiveReceipt(matched);
+                                  setIsReceiptModalOpen(true);
+                                } else {
+                                  try {
+                                    const token = getSessionToken();
+                                    const rRes = await fetch(`${API_BASE_URL}/payments?studentId=${sub.studentId}&limit=10`, {
+                                      headers: { 'Authorization': `Bearer ${token}` }
+                                    });
+                                    const rData = await rRes.json();
+                                    const targetP = rData.payments?.find(p => p.notes?.includes(sub.submissionId)) || rData.payments?.[0];
+                                    if (targetP) {
+                                      setActiveReceipt(targetP);
+                                      setIsReceiptModalOpen(true);
+                                    } else {
+                                      alert('Receipt record not found.');
+                                    }
+                                  } catch (err) {
+                                    alert('Failed to load receipt.');
+                                  }
+                                }
+                              }}
+                            >
+                              <Share2 size={13} /> Share Receipt
+                            </button>
                           </div>
                         )}
                       </td>
@@ -15441,6 +15612,40 @@ function App() {
                       Approve Payment
                     </button>
                   </>
+                )}
+                {viewingProofSubmission.status === 'APPROVED' && (
+                  <button
+                    className="btn-primary"
+                    style={{ background: '#25D366', borderColor: '#25D366', display: 'flex', alignItems: 'center', gap: '6px' }}
+                    onClick={async () => {
+                      const sub = viewingProofSubmission;
+                      setViewingProofSubmission(null);
+                      const matched = feePaymentsList.find(p => p.studentId === sub.studentId && (
+                        p.transactionRef === sub.transactionId ||
+                        (p.notes && p.notes.includes(sub.submissionId)) ||
+                        (p.paymentDate === sub.paymentDate && p.amountPaid === sub.totalAmount)
+                      ));
+                      if (matched) {
+                        setActiveReceipt(matched);
+                        setIsReceiptModalOpen(true);
+                      } else {
+                        try {
+                          const token = getSessionToken();
+                          const rRes = await fetch(`${API_BASE_URL}/payments?studentId=${sub.studentId}&limit=10`, {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                          });
+                          const rData = await rRes.json();
+                          const targetP = rData.payments?.find(p => p.notes?.includes(sub.submissionId)) || rData.payments?.[0];
+                          if (targetP) {
+                            setActiveReceipt(targetP);
+                            setIsReceiptModalOpen(true);
+                          }
+                        } catch (e) {}
+                      }
+                    }}
+                  >
+                    <Share2 size={16} /> View & Share Receipt
+                  </button>
                 )}
               </div>
             </div>
@@ -20676,14 +20881,48 @@ function App() {
                 </table>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px dashed rgba(255,255,255,0.15)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px dashed rgba(255,255,255,0.15)', flexWrap: 'wrap', gap: '10px' }}>
                 <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
                   Recorded by: <strong>{activeReceipt.collectedBy || 'Admin'}</strong>
                 </div>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button className="btn-secondary" onClick={() => setIsReceiptModalOpen(false)}>Close</button>
-                  <button className="btn-primary" onClick={() => window.print()} style={{ background: '#38bdf8', borderColor: '#38bdf8', color: '#000', fontWeight: 700 }}>
-                    🖨️ Print Receipt
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button className="btn-secondary" onClick={() => setIsReceiptModalOpen(false)} style={{ padding: '0.45rem 0.9rem', fontSize: '0.85rem' }}>
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => handleCopyReceiptText(activeReceipt)}
+                    style={{ padding: '0.45rem 0.9rem', fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '5px', color: '#fff' }}
+                  >
+                    {copiedReceipt ? <Check size={14} color="#4CAF50" /> : <Copy size={14} />}
+                    {copiedReceipt ? 'Copied! ✓' : 'Copy'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => handleShareReceipt(activeReceipt)}
+                    style={{
+                      background: '#25D366',
+                      borderColor: '#25D366',
+                      color: '#fff',
+                      fontWeight: 700,
+                      padding: '0.45rem 1rem',
+                      fontSize: '0.85rem',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    <Share2 size={15} /> Share via WhatsApp
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => window.print()}
+                    style={{ background: '#38bdf8', borderColor: '#38bdf8', color: '#000', fontWeight: 700, padding: '0.45rem 0.9rem', fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                  >
+                    <Printer size={15} /> Print
                   </button>
                 </div>
               </div>

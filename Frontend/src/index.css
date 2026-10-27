@@ -42,6 +42,12 @@
   --status-info-bg: rgba(59, 130, 246, 0.15);
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   font-family: var(--font-main);
@@ -8167,6 +8173,9 @@ mark.search-highlight {
 
 .student-input-group {
   margin-bottom: 1.25rem;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .student-input-group.full-w {
@@ -8209,12 +8218,17 @@ mark.search-highlight {
   position: relative;
   display: flex;
   align-items: center;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .student-input-wrap input,
-.student-input-group input[type="date"],
+.student-input-group input,
 .student-input-group select {
-  width: 100%;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0;
   height: 48px;
   background: rgba(15, 23, 42, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -8226,8 +8240,23 @@ mark.search-highlight {
   transition: all 0.2s;
 }
 
+.student-input-group input[type="date"] {
+  color-scheme: dark;
+}
+
+.student-input-group select {
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 1rem center;
+  background-size: 16px;
+  padding-right: 2.5rem;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
 .student-input-wrap input:focus,
-.student-input-group input[type="date"]:focus,
+.student-input-group input:focus,
 .student-input-group select:focus {
   border-color: #e11d48;
   box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.2);
@@ -8660,9 +8689,11 @@ mark.search-highlight {
 
 .pay-fields-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
   margin-bottom: 1.5rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .file-upload-dropzone {
