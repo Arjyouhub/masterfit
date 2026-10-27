@@ -9453,64 +9453,92 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
   const renderFees = () => {
     const isPaid = (student) => {
       if (student.paidMonths && (student.paidMonths instanceof Map ? student.paidMonths.get(feeMonth) : student.paidMonths[feeMonth])) return true;
-      const pRec = feePaymentsList.find(p => p.studentId === student.id && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
-      return !!(pRec && pRec.status === 'Paid');
+      const pRec = feePaymentsList.find(p =>
+        (Number(p.studentId) === Number(student.id) || String(p.studentId) === String(student.id)) &&
+        (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) &&
+        p.feeType === 'monthly'
+      );
+      return !!(pRec && (String(pRec.status).toLowerCase() === 'paid'));
     };
 
-    const baseFeeStudents = searchedStudents.filter(s => (s.status || 'Active') !== 'Inactive');
-
-    const filteredFeeStudents = baseFeeStudents.filter(s => {
-      const matchBatch = feeBatchFilter === 'All' ||
-        s.batch === feeBatchFilter ||
-        (() => {
-          const batchObj = batchOptions.find(b => b.id.toLowerCase() === (s.batch || '').toLowerCase());
-          return batchObj && batchObj.slotType && batchObj.slotType.toLowerCase() === feeBatchFilter.toLowerCase();
-        })();
-      const matchSchedule = batchFilter === 'All' || (() => {
-        const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchFilter.toLowerCase());
-        if (!selectedBatchObj) return false;
-        const studentBatchLower = (s.batch || '').toLowerCase().trim();
-        const targetIdLower = selectedBatchObj.id.toLowerCase().trim();
-        const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
-        if (studentBatchLower === targetIdLower) return true;
-        if (studentBatchLower === targetNameLower) return true;
-        if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
-          return false;
+    // Base active students for current branch and batch filter (independent of table status/method/search filters)
+    const baseFeeStudents = (Array.isArray(students) ? students : [])
+      .filter(s => (s.status || 'Active') !== 'Inactive')
+      .filter(s => {
+        // Branch filter
+        if (isAdminUser(loggedInUser) && branchFilter !== 'All') {
+          if (s.branch && s.branch.toLowerCase().trim() !== branchFilter.toLowerCase().trim()) return false;
         }
-        return schedulesMatch(s.schedule, selectedBatchObj.schedule);
-      })();
+
+        // Batch filter
+        if (batchFilter !== 'All') {
+          const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchFilter.toLowerCase());
+          if (selectedBatchObj) {
+            const studentBatchLower = (s.batch || '').toLowerCase().trim();
+            const targetIdLower = selectedBatchObj.id.toLowerCase().trim();
+            const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
+            if (studentBatchLower === targetIdLower || studentBatchLower === targetNameLower) {
+              // matched
+            } else if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
+              return false;
+            } else if (!schedulesMatch(s.schedule, selectedBatchObj.schedule)) {
+              return false;
+            }
+          }
+        }
+
+        // Slot filter (Morning, Evening, Night)
+        if (feeBatchFilter !== 'All') {
+          if (s.batch !== feeBatchFilter) {
+            const batchObj = batchOptions.find(b => b.id.toLowerCase() === (s.batch || '').toLowerCase());
+            if (!batchObj || !batchObj.slotType || batchObj.slotType.toLowerCase() !== feeBatchFilter.toLowerCase()) {
+              return false;
+            }
+          }
+        }
+
+        return true;
+      });
+
+    // Overview Table Roster: strictly applies table dropdowns (status, method, global search)
+    const filteredFeeStudents = baseFeeStudents.filter(s => {
+      // Global search if typed
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchesName = (s.name || '').toLowerCase().includes(q);
+        const matchesPhone = String(s.phone || '').includes(q);
+        if (!matchesName && !matchesPhone) return false;
+      }
 
       // Status filter
-      let matchStatus = true;
       if (feeStatusFilter !== 'All') {
         if (feeStatusFilter === 'PaidInMonth') {
-          // Paid in this month (current month fee, arrears, or admission)
           const studentPaymentsInMonth = feePaymentsList.filter(p =>
-            Number(p.studentId) === Number(s.id) &&
+            (Number(p.studentId) === Number(s.id) || String(p.studentId) === String(s.id)) &&
             ((p.paymentDate && p.paymentDate.startsWith(paymentMonth)) || p.revenueMonth === paymentMonth) &&
             p.amountPaid > 0
           );
-          matchStatus = studentPaymentsInMonth.length > 0;
+          if (studentPaymentsInMonth.length === 0) return false;
         } else {
           const paidStatus = isPaid(s);
-          const pRec = feePaymentsList.find(p => Number(p.studentId) === Number(s.id) && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
+          const pRec = feePaymentsList.find(p => (Number(p.studentId) === Number(s.id) || String(p.studentId) === String(s.id)) && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
           const effectiveStatus = pRec ? pRec.status : (paidStatus ? 'Paid' : 'Pending');
-          matchStatus = effectiveStatus.toLowerCase() === feeStatusFilter.toLowerCase();
+          if (effectiveStatus.toLowerCase() !== feeStatusFilter.toLowerCase()) return false;
         }
       }
 
       // Method filter
-      let matchMethod = true;
       if (feeMethodFilter !== 'All') {
-        const pRec = feePaymentsList.find(p => Number(p.studentId) === Number(s.id) && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
-        matchMethod = pRec && pRec.paymentMethod && pRec.paymentMethod.toLowerCase() === feeMethodFilter.toLowerCase();
+        const pRec = feePaymentsList.find(p => (Number(p.studentId) === Number(s.id) || String(p.studentId) === String(s.id)) && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
+        if (!pRec || !pRec.paymentMethod || pRec.paymentMethod.toLowerCase() !== feeMethodFilter.toLowerCase()) return false;
       }
 
-      return matchBatch && matchSchedule && matchStatus && matchMethod;
+      return true;
     });
 
-    const totalUnpaid = filteredFeeStudents.filter(s => !isPaid(s)).length;
-    const totalPaid = filteredFeeStudents.filter(s => isPaid(s)).length;
+    // Counts & Stat Card figures calculated from baseFeeStudents so table filters don't zero them out
+    const totalUnpaid = baseFeeStudents.filter(s => !isPaid(s)).length;
+    const totalPaid = baseFeeStudents.filter(s => isPaid(s)).length;
 
     // Revenue strictly based on actual paymentDate (revenueMonth === paymentMonth)
     let paymentMonthRevenue = 0;
@@ -9540,11 +9568,11 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
       paymentCount = targetPayments.length;
     }
 
-    // Fees collected strictly for the selected feeMonth (matching paid students in the table)
-    const feeMonthMonthlyCollected = filteredFeeStudents
+    // Fees collected strictly for the selected feeMonth (matching paid students in the branch)
+    const feeMonthMonthlyCollected = baseFeeStudents
       .filter(s => isPaid(s))
       .reduce((sum, s) => {
-        const pRec = feePaymentsList.find(p => p.studentId === s.id && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
+        const pRec = feePaymentsList.find(p => (Number(p.studentId) === Number(s.id) || String(p.studentId) === String(s.id)) && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
         if (pRec) {
           if (Array.isArray(pRec.breakdown) && pRec.breakdown.length > 0) {
             const item = pRec.breakdown.find(b => b.feeMonth === feeMonth && b.feeType === 'monthly');
@@ -9559,9 +9587,9 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
         return sum + Math.max(0, rateToUse - discountAmount);
       }, 0);
 
-    const feeMonthAdmissionCollected = filteredFeeStudents
+    const feeMonthAdmissionCollected = baseFeeStudents
       .reduce((sum, s) => {
-        const pRec = feePaymentsList.find(p => p.studentId === s.id && (
+        const pRec = feePaymentsList.find(p => (Number(p.studentId) === Number(s.id) || String(p.studentId) === String(s.id)) && (
           (p.feeMonth === feeMonth && p.feeType === 'admission') ||
           (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth && b.feeType === 'admission'))
         ));
@@ -9587,7 +9615,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
     const feeMonthTotalCollected = feeMonthMonthlyCollected + feeMonthAdmissionCollected;
 
     // Pending Fees for selected feeMonth (unpaid students for feeMonth)
-    const pendingFeesTotal = filteredFeeStudents
+    const pendingFeesTotal = baseFeeStudents
       .filter(s => !isPaid(s))
       .reduce((sum, s) => {
         const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null ? s.customMonthlyRate : monthlyFeeRate;
@@ -9596,11 +9624,11 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
       }, 0);
 
     if (feeCardDetailType && feeCardDetailType !== 'pending') {
-      // 1. Raw Monthly Paid List
-      const rawMonthlyPaid = filteredFeeStudents
+      // 1. Raw Monthly Paid List (from baseFeeStudents so it is never 0 when table is filtered)
+      const rawMonthlyPaid = baseFeeStudents
         .filter(s => isPaid(s))
         .map(s => {
-          const pRec = feePaymentsList.find(p => Number(p.studentId) === Number(s.id) && (
+          const pRec = feePaymentsList.find(p => (Number(p.studentId) === Number(s.id) || String(p.studentId) === String(s.id)) && (
             p.feeMonth === feeMonth ||
             (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))
           ) && p.feeType === 'monthly');
@@ -9638,10 +9666,10 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
           };
         });
 
-      // 2. Raw Admission Paid List
+      // 2. Raw Admission Paid List (from baseFeeStudents)
       const rawAdmissionPaid = [];
-      filteredFeeStudents.forEach(s => {
-        const pRec = feePaymentsList.find(p => Number(p.studentId) === Number(s.id) && (
+      baseFeeStudents.forEach(s => {
+        const pRec = feePaymentsList.find(p => (Number(p.studentId) === Number(s.id) || String(p.studentId) === String(s.id)) && (
           (p.feeMonth === feeMonth && p.feeType === 'admission') ||
           (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth && b.feeType === 'admission'))
         ));
