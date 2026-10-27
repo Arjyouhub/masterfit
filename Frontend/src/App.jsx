@@ -9530,7 +9530,28 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
       return false;
     };
 
-    // Base active students for current branch, batch and slot filter
+    // Helper to match student payment status
+    const matchStudentStatus = (s, statusFilter) => {
+      if (!statusFilter || statusFilter === 'All') return true;
+      if (statusFilter === 'PaidInMonth') {
+        const studentPaymentsInMonth = feePaymentsList.filter(p =>
+          (Number(p.studentId) === Number(s.id) || String(p.studentId) === String(s.id)) &&
+          ((p.paymentDate && p.paymentDate.startsWith(paymentMonth)) || p.revenueMonth === paymentMonth) &&
+          p.amountPaid > 0
+        );
+        return studentPaymentsInMonth.length > 0;
+      }
+      const paidStatus = isPaid(s);
+      const pRec = feePaymentsList.find(p =>
+        (Number(p.studentId) === Number(s.id) || String(p.studentId) === String(s.id)) &&
+        (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) &&
+        p.feeType === 'monthly'
+      );
+      const effectiveStatus = pRec ? pRec.status : (paidStatus ? 'Paid' : 'Pending');
+      return String(effectiveStatus).toLowerCase().trim() === String(statusFilter).toLowerCase().trim();
+    };
+
+    // Base active students for current branch, batch, slot, AND status filter
     const baseFeeStudents = (Array.isArray(students) ? students : [])
       .filter(s => (s.status || 'Active') !== 'Inactive')
       .filter(s => {
@@ -9549,10 +9570,15 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
           if (!matchStudentTimeSlot(s, feeBatchFilter)) return false;
         }
 
+        // Status filter (Paid, Pending, Partial, PaidInMonth)
+        if (feeStatusFilter !== 'All') {
+          if (!matchStudentStatus(s, feeStatusFilter)) return false;
+        }
+
         return true;
       });
 
-    // Overview Table Roster: strictly applies table dropdowns (status, method, global search)
+    // Overview Table Roster: strictly applies table dropdowns (method, global search)
     const filteredFeeStudents = baseFeeStudents.filter(s => {
       // Global search if typed
       if (searchQuery) {
@@ -9560,23 +9586,6 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
         const matchesName = (s.name || '').toLowerCase().includes(q);
         const matchesPhone = String(s.phone || '').includes(q);
         if (!matchesName && !matchesPhone) return false;
-      }
-
-      // Status filter
-      if (feeStatusFilter !== 'All') {
-        if (feeStatusFilter === 'PaidInMonth') {
-          const studentPaymentsInMonth = feePaymentsList.filter(p =>
-            (Number(p.studentId) === Number(s.id) || String(p.studentId) === String(s.id)) &&
-            ((p.paymentDate && p.paymentDate.startsWith(paymentMonth)) || p.revenueMonth === paymentMonth) &&
-            p.amountPaid > 0
-          );
-          if (studentPaymentsInMonth.length === 0) return false;
-        } else {
-          const paidStatus = isPaid(s);
-          const pRec = feePaymentsList.find(p => (Number(p.studentId) === Number(s.id) || String(p.studentId) === String(s.id)) && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
-          const effectiveStatus = pRec ? pRec.status : (paidStatus ? 'Paid' : 'Pending');
-          if (effectiveStatus.toLowerCase() !== feeStatusFilter.toLowerCase()) return false;
-        }
       }
 
       // Method filter
@@ -9588,7 +9597,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
       return true;
     });
 
-    // Target payments received in selected paymentMonth matching active filters (Branch, Batch, Slot, Method)
+    // Target payments received in selected paymentMonth matching active filters (Branch, Batch, Slot, Status, Method)
     const targetPayments = feePaymentsList.filter(p => {
       // 1. Payment Month check (revenueMonth or paymentDate)
       const pMonth = p.revenueMonth || (p.paymentDate ? p.paymentDate.slice(0, 7) : '');
@@ -9641,7 +9650,16 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
         }
       }
 
-      // 5. Payment Method check
+      // 5. Status check on payments
+      if (feeStatusFilter !== 'All') {
+        if (matchedStudent) {
+          if (!matchStudentStatus(matchedStudent, feeStatusFilter)) return false;
+        } else if (feeStatusFilter === 'Pending') {
+          return false;
+        }
+      }
+
+      // 6. Payment Method check
       if (feeMethodFilter !== 'All') {
         if (!p.paymentMethod || p.paymentMethod.toLowerCase().trim() !== feeMethodFilter.toLowerCase().trim()) {
           return false;
@@ -9656,7 +9674,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
     const totalPaid = baseFeeStudents.filter(s => isPaid(s)).length;
 
     // Actual revenue figures strictly reflecting active filters
-    const isFilteredView = branchFilter !== 'All' || batchFilter !== 'All' || feeBatchFilter !== 'All' || feeMethodFilter !== 'All';
+    const isFilteredView = branchFilter !== 'All' || batchFilter !== 'All' || feeBatchFilter !== 'All' || feeStatusFilter !== 'All' || feeMethodFilter !== 'All';
     let paymentMonthRevenue = targetPayments.reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
     let paymentMonthAdmission = targetPayments.reduce((sum, p) => {
       if (Array.isArray(p.breakdown) && p.breakdown.length > 0) {
@@ -10517,7 +10535,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
         )}
 
         {/* Active Filters Indicator Bar */}
-        {(feeBatchFilter !== 'All' || (isAdminUser(loggedInUser) && branchFilter !== 'All') || batchFilter !== 'All' || feeMethodFilter !== 'All') && (
+        {(feeBatchFilter !== 'All' || (isAdminUser(loggedInUser) && branchFilter !== 'All') || batchFilter !== 'All' || feeStatusFilter !== 'All' || feeMethodFilter !== 'All') && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '0.85rem', flexWrap: 'wrap', padding: '6px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
             <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>Active Filters:</span>
             {isAdminUser(loggedInUser) && branchFilter !== 'All' && (
@@ -10535,6 +10553,11 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
                 Slot: {feeBatchFilter}
               </span>
             )}
+            {feeStatusFilter !== 'All' && (
+              <span className="badge" style={{ background: 'rgba(255, 107, 107, 0.15)', color: '#ff6b6b', border: '1px solid rgba(255, 107, 107, 0.3)', fontSize: '0.76rem' }}>
+                Status: {feeStatusFilter}
+              </span>
+            )}
             {feeMethodFilter !== 'All' && (
               <span className="badge" style={{ background: 'rgba(192, 132, 252, 0.15)', color: '#c084fc', border: '1px solid rgba(192, 132, 252, 0.3)', fontSize: '0.76rem' }}>
                 Method: {feeMethodFilter}
@@ -10545,6 +10568,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
               className="btn-small"
               onClick={() => {
                 setFeeBatchFilter('All');
+                setFeeStatusFilter('All');
                 setFeeMethodFilter('All');
                 setBatchFilter('All');
               }}
