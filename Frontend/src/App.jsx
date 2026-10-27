@@ -9481,16 +9481,26 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
       // Status filter
       let matchStatus = true;
       if (feeStatusFilter !== 'All') {
-        const paidStatus = isPaid(s);
-        const pRec = feePaymentsList.find(p => p.studentId === s.id && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
-        const effectiveStatus = pRec ? pRec.status : (paidStatus ? 'Paid' : 'Pending');
-        matchStatus = effectiveStatus.toLowerCase() === feeStatusFilter.toLowerCase();
+        if (feeStatusFilter === 'PaidInMonth') {
+          // Paid in this month (current month fee, arrears, or admission)
+          const studentPaymentsInMonth = feePaymentsList.filter(p =>
+            Number(p.studentId) === Number(s.id) &&
+            ((p.paymentDate && p.paymentDate.startsWith(paymentMonth)) || p.revenueMonth === paymentMonth) &&
+            p.amountPaid > 0
+          );
+          matchStatus = studentPaymentsInMonth.length > 0;
+        } else {
+          const paidStatus = isPaid(s);
+          const pRec = feePaymentsList.find(p => Number(p.studentId) === Number(s.id) && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
+          const effectiveStatus = pRec ? pRec.status : (paidStatus ? 'Paid' : 'Pending');
+          matchStatus = effectiveStatus.toLowerCase() === feeStatusFilter.toLowerCase();
+        }
       }
 
       // Method filter
       let matchMethod = true;
       if (feeMethodFilter !== 'All') {
-        const pRec = feePaymentsList.find(p => p.studentId === s.id && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
+        const pRec = feePaymentsList.find(p => Number(p.studentId) === Number(s.id) && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
         matchMethod = pRec && pRec.paymentMethod && pRec.paymentMethod.toLowerCase() === feeMethodFilter.toLowerCase();
       }
 
@@ -9739,6 +9749,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
                 <select className="form-control" value={feeStatusFilter} onChange={e => setFeeStatusFilter(e.target.value)}>
                   <option value="All">All Status</option>
                   <option value="Paid">Paid</option>
+                  <option value="PaidInMonth">Paid in this Month (Inc. Past Dues)</option>
                   <option value="Partial">Partial</option>
                   <option value="Pending">Pending</option>
                 </select>
@@ -9774,8 +9785,16 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
                 <tbody>
                   {filteredFeeStudents.map(student => {
                     const feeDetails = calculateStudentFees(student, feeMonth);
-                    const pRec = feePaymentsList.find(p => p.studentId === student.id && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
+                    const pRec = feePaymentsList.find(p => Number(p.studentId) === Number(student.id) && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
                     const paid = isPaid(student);
+
+                    // Check if this student made any payment in this paymentMonth (including past arrears or admission)
+                    const paymentsInSelectedMonth = feePaymentsList.filter(p =>
+                      Number(p.studentId) === Number(student.id) &&
+                      ((p.paymentDate && p.paymentDate.startsWith(paymentMonth)) || p.revenueMonth === paymentMonth) &&
+                      p.amountPaid > 0
+                    );
+                    const latestPaymentInMonth = paymentsInSelectedMonth[paymentsInSelectedMonth.length - 1];
 
                     return (
                       <tr key={student.id}>
@@ -9842,6 +9861,15 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
                             <span className="badge badge-green" style={{ padding: '4px 10px', fontSize: '0.8rem' }}>
                               Paid âœ“
                             </span>
+                          ) : latestPaymentInMonth ? (
+                            <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+                              <span className="badge badge-red" style={{ padding: '2px 8px', fontSize: '0.72rem' }}>
+                                {formatMonthName(feeMonth)} Pending
+                              </span>
+                              <span style={{ fontSize: '0.68rem', color: '#FFD700', fontWeight: 600, background: 'rgba(255, 215, 0, 0.1)', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(255, 215, 0, 0.25)' }}>
+                                Paid {latestPaymentInMonth.feeType === 'admission' ? 'Admission' : formatMonthName(latestPaymentInMonth.feeMonth)} in {formatMonthName(paymentMonth)}
+                              </span>
+                            </div>
                           ) : (
                             <span className="badge badge-red" style={{ padding: '4px 10px', fontSize: '0.8rem' }}>
                               Pending
@@ -9863,6 +9891,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
                                   onClick={() => {
                                     setActiveReceipt({
                                       ...pRec,
+                                      batchName: resolveBatchName(pRec.batch || student.batch),
                                       studentName: pRec.studentName || student.name,
                                       phone: student.phone || student.parentPhone || ''
                                     });
@@ -9870,6 +9899,32 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
                                   }}
                                 >
                                   Receipt #{pRec.receiptNumber.slice(-5)}
+                                </button>
+                              )}
+                            </div>
+                          ) : latestPaymentInMonth ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+                              <span style={{ fontSize: '0.78rem', color: '#FFD700', fontWeight: 600 }}>
+                                ðŸ“… {latestPaymentInMonth.paymentDate}
+                              </span>
+                              <span style={{ fontSize: '0.72rem', color: '#a78bfa', fontWeight: 600 }}>
+                                {latestPaymentInMonth.feeType === 'admission' ? 'Admission' : `${formatMonthName(latestPaymentInMonth.feeMonth)} Dues`} (â‚¹{latestPaymentInMonth.amountPaid})
+                              </span>
+                              {latestPaymentInMonth.receiptNumber && (
+                                <button
+                                  className="btn-small btn-receipt-badge"
+                                  style={{ borderColor: 'rgba(255, 215, 0, 0.4)', color: '#FFD700' }}
+                                  onClick={() => {
+                                    setActiveReceipt({
+                                      ...latestPaymentInMonth,
+                                      batchName: resolveBatchName(latestPaymentInMonth.batch || student.batch),
+                                      studentName: latestPaymentInMonth.studentName || student.name,
+                                      phone: student.phone || student.parentPhone || ''
+                                    });
+                                    setIsReceiptModalOpen(true);
+                                  }}
+                                >
+                                  Receipt #{latestPaymentInMonth.receiptNumber.slice(-5)}
                                 </button>
                               )}
                             </div>
