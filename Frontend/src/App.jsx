@@ -10519,7 +10519,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
         )}
 
         {/* Active Filters Indicator Bar */}
-        {(feeBatchFilter !== 'All' || (isAdminUser(loggedInUser) && branchFilter !== 'All') || batchFilter !== 'All' || feeStatusFilter !== 'All' || feeMethodFilter !== 'All') && (
+        {((isAdminUser(loggedInUser) && branchFilter !== 'All') || batchFilter !== 'All' || feeStatusFilter !== 'All' || feeMethodFilter !== 'All') && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '0.85rem', flexWrap: 'wrap', padding: '6px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
             <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>Active Filters:</span>
             {isAdminUser(loggedInUser) && branchFilter !== 'All' && (
@@ -10530,11 +10530,6 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
             {batchFilter !== 'All' && (
               <span className="badge" style={{ background: 'rgba(255, 215, 0, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', fontSize: '0.76rem' }}>
                 Batch: {resolveBatchName(batchFilter)}
-              </span>
-            )}
-            {feeBatchFilter !== 'All' && (
-              <span className="badge" style={{ background: 'rgba(75, 192, 192, 0.15)', color: '#4BC0C0', border: '1px solid rgba(75, 192, 192, 0.3)', fontSize: '0.76rem' }}>
-                Slot: {feeBatchFilter}
               </span>
             )}
             {feeStatusFilter !== 'All' && (
@@ -10580,14 +10575,9 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
             title="Click to view full page of students who paid monthly fees"
           >
             <div className="stat-details">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <h3 style={{ color: '#38bdf8', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>
-                  Monthly Fees Collected for {formatMonthName(feeMonth)}
-                </h3>
-                <span style={{ fontSize: '0.72rem', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.15)', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
-                  Full Page â†—
-                </span>
-              </div>
+              <h3 style={{ color: '#38bdf8', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>
+                Monthly Fees Collected for {formatMonthName(feeMonth)}
+              </h3>
               <p className="stat-value" style={{ color: '#fff', margin: 0 }}>â‚¹{feeMonthMonthlyCollected.toLocaleString()}</p>
               <div style={{ marginTop: '5px' }}>
                 <span className="stat-subtext" style={{ color: '#38bdf8', display: 'block', fontWeight: 600 }}>
@@ -10615,12 +10605,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
             title="Click to view full page of admission fee payments"
           >
             <div className="stat-details">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <h3 style={{ color: '#FFD700', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Admission Fees</h3>
-                <span style={{ fontSize: '0.72rem', color: '#FFD700', background: 'rgba(255, 215, 0, 0.15)', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
-                  Full Page â†—
-                </span>
-              </div>
+              <h3 style={{ color: '#FFD700', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Admission Fees</h3>
               <p className="stat-value" style={{ color: '#FFD700', margin: 0 }}>â‚¹{(feeMonthAdmissionCollected > 0 ? feeMonthAdmissionCollected : paymentMonthAdmission).toLocaleString()}</p>
               <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
                 {feeMonthAdmissionCollected > 0 ? `For ${formatMonthName(feeMonth)}` : `Received in ${formatMonthName(paymentMonth)}`}
@@ -10658,12 +10643,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
             title="Click to view full page of all receipts and transactions"
           >
             <div className="stat-details">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <h3 style={{ color: '#c084fc', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Total Payments</h3>
-                <span style={{ fontSize: '0.72rem', color: '#c084fc', background: 'rgba(192, 132, 252, 0.15)', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
-                  Full Page â†—
-                </span>
-              </div>
+              <h3 style={{ color: '#c084fc', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Total Payments</h3>
               <p className="stat-value" style={{ color: '#fff', margin: 0 }}>{paymentCount}</p>
               <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
                 Receipt transactions in {formatMonthName(paymentMonth)}
@@ -10689,14 +10669,6 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
 
           {/* Filter Row */}
           <div className="fees-filters-row">
-            <div className="fees-filter-group-time">
-              <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem', marginRight: '4px' }}>Time:</span>
-              <button className={`btn-small ${feeBatchFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('All')}>All</button>
-              <button className={`btn-small ${feeBatchFilter === 'Morning' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Morning')}>Morning</button>
-              <button className={`btn-small ${feeBatchFilter === 'Evening' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Evening')}>Evening</button>
-              <button className={`btn-small ${feeBatchFilter === 'Night' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Night')}>Night</button>
-            </div>
-
             <div className="fees-filter-dropdowns">
               <div className="fees-filter-select-wrapper">
                 <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>Status:</span>
