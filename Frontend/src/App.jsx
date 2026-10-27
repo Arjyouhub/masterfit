@@ -12044,10 +12044,10 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
             </div>
 
             <div
-              className={`stat-card glow-card-green ${gradingFilterEligibility === 'Eligible' && gradingFilterResult === 'All' ? 'active-glow' : ''}`}
+              className={`stat-card glow-card-green ${gradingFilterTrainerApproval === 'Approved' && gradingFilterResult === 'All' ? 'active-glow' : ''}`}
               style={{
                 background: 'linear-gradient(145deg, rgba(16, 32, 24, 0.7) 0%, rgba(12, 22, 18, 0.8) 100%)',
-                border: gradingFilterEligibility === 'Eligible' && gradingFilterResult === 'All' ? '2px solid #4ade80' : '1px solid rgba(34, 197, 94, 0.25)',
+                border: gradingFilterTrainerApproval === 'Approved' && gradingFilterResult === 'All' ? '2px solid #4ade80' : '1px solid rgba(34, 197, 94, 0.25)',
                 borderRadius: '14px',
                 padding: '1rem 1.25rem',
                 cursor: 'pointer',
@@ -12055,17 +12055,17 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
               }}
               onClick={() => {
                 setGradingFilterResult('All');
-                setGradingFilterTrainerApproval('All');
-                setGradingFilterEligibility(gradingFilterEligibility === 'Eligible' ? 'All' : 'Eligible');
+                setGradingFilterEligibility('All');
+                setGradingFilterTrainerApproval(gradingFilterTrainerApproval === 'Approved' ? 'All' : 'Approved');
               }}
-              title="Click to view students ready for test"
+              title="Click to view students approved by trainer"
             >
               <div className="stat-icon-wrapper" style={{ background: 'rgba(34, 197, 94, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
                 <CheckCircle className="stat-icon" style={{ color: '#4ade80' }} size={18} />
               </div>
               <div className="stat-details">
-                <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#86efac', fontSize: '0.72rem', fontWeight: 600 }}>Ready for Test</h3>
-                <p className="stat-value" style={{ color: '#4ade80', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{eligibleCount}</p>
+                <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#86efac', fontSize: '0.72rem', fontWeight: 600 }}>Trainer Approved</h3>
+                <p className="stat-value" style={{ color: '#4ade80', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{trainerApprovedCount}</p>
               </div>
             </div>
 
@@ -12170,29 +12170,6 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
           <div className="filters-wrapper-card" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
             {/* Quick Filter Chips */}
             <div className="grading-quick-chips" style={{ marginBottom: '0.85rem', paddingBottom: '0.65rem' }}>
-              <button
-                type="button"
-                className={`quick-chip ${gradingFilterEligibility === 'All' && gradingFilterTrainerApproval === 'All' && gradingFilterResult === 'All' && gradingFilterBelt === 'All' ? 'active' : ''}`}
-                onClick={() => {
-                  setGradingFilterEligibility('All');
-                  setGradingFilterTrainerApproval('All');
-                  setGradingFilterBelt('All');
-                  setGradingFilterResult('All');
-                }}
-              >
-                All Candidates ({totalCandidatesCount})
-              </button>
-              <button
-                type="button"
-                className={`quick-chip ${gradingFilterEligibility === 'Eligible' && gradingFilterResult === 'All' ? 'active-eligible' : ''}`}
-                onClick={() => {
-                  setGradingFilterResult('All');
-                  setGradingFilterTrainerApproval('All');
-                  setGradingFilterEligibility(gradingFilterEligibility === 'Eligible' ? 'All' : 'Eligible');
-                }}
-              >
-                âš¡ Ready for Test ({eligibleCount})
-              </button>
               <button
                 type="button"
                 className={`quick-chip ${gradingFilterTrainerApproval === 'Approved' && gradingFilterResult === 'All' ? 'active-eligible' : ''}`}
