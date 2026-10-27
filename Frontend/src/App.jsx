@@ -9461,40 +9461,92 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
       return !!(pRec && (String(pRec.status).toLowerCase() === 'paid'));
     };
 
-    // Base active students for current branch and batch filter (independent of table status/method/search filters)
+    // Helper to match student branch
+    const matchStudentBranch = (s, branch) => {
+      if (!branch || branch === 'All') return true;
+      if (!s.branch) return false;
+      const sBranch = String(s.branch).toLowerCase().trim();
+      const targetBranch = String(branch).toLowerCase().trim();
+      return sBranch === targetBranch || sBranch.includes(targetBranch) || targetBranch.includes(sBranch);
+    };
+
+    // Helper to match student batch
+    const matchStudentBatch = (s, batch) => {
+      if (!batch || batch === 'All') return true;
+      const sBatch = String(s.batch || '').toLowerCase().trim();
+      const targetBatch = String(batch).toLowerCase().trim();
+      if (sBatch && sBatch === targetBatch) return true;
+
+      const selectedBatchObj = batchOptions.find(b =>
+        (b.id && String(b.id).toLowerCase().trim() === targetBatch) ||
+        (b.code && String(b.code).toLowerCase().trim() === targetBatch) ||
+        (b.name && String(b.name).toLowerCase().trim() === targetBatch)
+      );
+      if (selectedBatchObj) {
+        const targetId = String(selectedBatchObj.id || '').toLowerCase().trim();
+        const targetCode = String(selectedBatchObj.code || '').toLowerCase().trim();
+        const targetName = String(selectedBatchObj.name || '').toLowerCase().trim();
+        if (sBatch && (sBatch === targetId || sBatch === targetCode || sBatch === targetName)) return true;
+        if (schedulesMatch(s.schedule, selectedBatchObj.schedule)) return true;
+      }
+      return false;
+    };
+
+    // Helper to match student time slot (Morning, Evening, Night)
+    const matchStudentTimeSlot = (s, slotFilter) => {
+      if (!slotFilter || slotFilter === 'All') return true;
+      const targetSlot = String(slotFilter).toLowerCase().trim();
+
+      // 1. Direct slot properties on student
+      if (s.slotType && String(s.slotType).toLowerCase().trim() === targetSlot) return true;
+      if (s.slot && String(s.slot).toLowerCase().trim() === targetSlot) return true;
+      if (s.batch && String(s.batch).toLowerCase().trim() === targetSlot) return true;
+
+      // 2. Match via batchOptions (by id, code, or name)
+      const sBatch = String(s.batch || '').toLowerCase().trim();
+      const bObj = batchOptions.find(b =>
+        (b.id && String(b.id).toLowerCase().trim() === sBatch) ||
+        (b.code && String(b.code).toLowerCase().trim() === sBatch) ||
+        (b.name && String(b.name).toLowerCase().trim() === sBatch)
+      );
+
+      if (bObj) {
+        if (bObj.slotType && String(bObj.slotType).toLowerCase().trim() === targetSlot) return true;
+        if (bObj.name && String(bObj.name).toLowerCase().includes(targetSlot)) return true;
+        if (bObj.startTime) {
+          const hr = parseInt(String(bObj.startTime).split(':')[0], 10);
+          if (!isNaN(hr)) {
+            if (targetSlot === 'morning' && hr < 12) return true;
+            if (targetSlot === 'evening' && hr >= 12 && hr < 18) return true;
+            if (targetSlot === 'night' && hr >= 18) return true;
+          }
+        }
+      }
+
+      // 3. Fallback on schedule or batch string inspection
+      const combo = `${String(s.schedule || '')} ${sBatch}`.toLowerCase();
+      if (combo.includes(targetSlot)) return true;
+
+      return false;
+    };
+
+    // Base active students for current branch, batch and slot filter
     const baseFeeStudents = (Array.isArray(students) ? students : [])
       .filter(s => (s.status || 'Active') !== 'Inactive')
       .filter(s => {
         // Branch filter
         if (isAdminUser(loggedInUser) && branchFilter !== 'All') {
-          if (s.branch && s.branch.toLowerCase().trim() !== branchFilter.toLowerCase().trim()) return false;
+          if (!matchStudentBranch(s, branchFilter)) return false;
         }
 
         // Batch filter
         if (batchFilter !== 'All') {
-          const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchFilter.toLowerCase());
-          if (selectedBatchObj) {
-            const studentBatchLower = (s.batch || '').toLowerCase().trim();
-            const targetIdLower = selectedBatchObj.id.toLowerCase().trim();
-            const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
-            if (studentBatchLower === targetIdLower || studentBatchLower === targetNameLower) {
-              // matched
-            } else if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
-              return false;
-            } else if (!schedulesMatch(s.schedule, selectedBatchObj.schedule)) {
-              return false;
-            }
-          }
+          if (!matchStudentBatch(s, batchFilter)) return false;
         }
 
-        // Slot filter (Morning, Evening, Night)
+        // Time Slot filter (Morning, Evening, Night)
         if (feeBatchFilter !== 'All') {
-          if (s.batch !== feeBatchFilter) {
-            const batchObj = batchOptions.find(b => b.id.toLowerCase() === (s.batch || '').toLowerCase());
-            if (!batchObj || !batchObj.slotType || batchObj.slotType.toLowerCase() !== feeBatchFilter.toLowerCase()) {
-              return false;
-            }
-          }
+          if (!matchStudentTimeSlot(s, feeBatchFilter)) return false;
         }
 
         return true;
@@ -9536,41 +9588,102 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
       return true;
     });
 
-    // Counts & Stat Card figures calculated from baseFeeStudents so table filters don't zero them out
-    const totalUnpaid = baseFeeStudents.filter(s => !isPaid(s)).length;
-    const totalPaid = baseFeeStudents.filter(s => isPaid(s)).length;
-
-    // Revenue strictly based on actual paymentDate (revenueMonth === paymentMonth)
-    let paymentMonthRevenue = 0;
-    let paymentMonthAdmission = 0;
-    let paymentCount = 0;
-
+    // Target payments received in selected paymentMonth matching active filters (Branch, Batch, Slot, Method)
     const targetPayments = feePaymentsList.filter(p => {
-      if (p.revenueMonth !== paymentMonth) return false;
-      if (branchFilter !== 'All' && p.branch && p.branch.toLowerCase().trim() !== branchFilter.toLowerCase().trim()) return false;
-      if (batchFilter !== 'All' && p.batch && p.batch.toLowerCase().trim() !== batchFilter.toLowerCase().trim()) return false;
+      // 1. Payment Month check (revenueMonth or paymentDate)
+      const pMonth = p.revenueMonth || (p.paymentDate ? p.paymentDate.slice(0, 7) : '');
+      if (pMonth !== paymentMonth) return false;
+
+      const matchedStudent = (Array.isArray(students) ? students.find(s =>
+        Number(s.id) === Number(p.studentId) || String(s.id) === String(p.studentId)
+      ) : null);
+
+      // 2. Branch check
+      if (isAdminUser(loggedInUser) && branchFilter !== 'All') {
+        const pBranch = (p.branch || '').toLowerCase().trim();
+        const bFilter = branchFilter.toLowerCase().trim();
+        if (pBranch && (pBranch === bFilter || pBranch.includes(bFilter) || bFilter.includes(pBranch))) {
+          // match
+        } else if (matchedStudent && matchStudentBranch(matchedStudent, branchFilter)) {
+          // match
+        } else {
+          return false;
+        }
+      }
+
+      // 3. Batch check
+      if (batchFilter !== 'All') {
+        const pBatch = (p.batch || '').toLowerCase().trim();
+        const bFilter = batchFilter.toLowerCase().trim();
+        if (pBatch && (pBatch === bFilter || pBatch.includes(bFilter) || bFilter.includes(pBatch))) {
+          // match
+        } else if (matchedStudent && matchStudentBatch(matchedStudent, batchFilter)) {
+          // match
+        } else {
+          return false;
+        }
+      }
+
+      // 4. Time Slot check (Morning, Evening, Night)
+      if (feeBatchFilter !== 'All') {
+        if (matchedStudent) {
+          if (!matchStudentTimeSlot(matchedStudent, feeBatchFilter)) return false;
+        } else if (p.batch) {
+          const sBatch = String(p.batch).toLowerCase().trim();
+          const bObj = batchOptions.find(b =>
+            (b.id && String(b.id).toLowerCase().trim() === sBatch) ||
+            (b.code && String(b.code).toLowerCase().trim() === sBatch) ||
+            (b.name && String(b.name).toLowerCase().trim() === sBatch)
+          );
+          if (!bObj || !bObj.slotType || bObj.slotType.toLowerCase().trim() !== feeBatchFilter.toLowerCase().trim()) {
+            return false;
+          }
+        }
+      }
+
+      // 5. Payment Method check
+      if (feeMethodFilter !== 'All') {
+        if (!p.paymentMethod || p.paymentMethod.toLowerCase().trim() !== feeMethodFilter.toLowerCase().trim()) {
+          return false;
+        }
+      }
+
       return true;
     });
 
-    if (revenueSummaryData && revenueSummaryData.targetMonth === paymentMonth) {
+    // Counts & Stat Card figures dynamically calculated to update with active filters
+    const totalUnpaid = baseFeeStudents.filter(s => !isPaid(s)).length;
+    const totalPaid = baseFeeStudents.filter(s => isPaid(s)).length;
+
+    // Actual revenue figures strictly reflecting active filters
+    const isFilteredView = branchFilter !== 'All' || batchFilter !== 'All' || feeBatchFilter !== 'All' || feeMethodFilter !== 'All';
+    let paymentMonthRevenue = targetPayments.reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
+    let paymentMonthAdmission = targetPayments.reduce((sum, p) => {
+      if (Array.isArray(p.breakdown) && p.breakdown.length > 0) {
+        return sum + p.breakdown.filter(b => b.feeType === 'admission').reduce((bs, b) => bs + (Number(b.amount) || 0), 0);
+      }
+      return sum + (p.feeType === 'admission' ? (Number(p.amountPaid) || 0) : 0);
+    }, 0);
+    let paymentCount = targetPayments.length;
+
+    if (!isFilteredView && revenueSummaryData && revenueSummaryData.targetMonth === paymentMonth && paymentMonthRevenue === 0 && (revenueSummaryData.totalCollected || 0) > 0) {
       paymentMonthRevenue = revenueSummaryData.totalCollected;
       paymentMonthAdmission = revenueSummaryData.admissionFeeCollected;
       paymentCount = revenueSummaryData.paymentCount || 0;
-    } else {
-      // All money physically received in this paymentMonth (regardless of fee month)
-      paymentMonthRevenue = targetPayments.reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
-      paymentMonthAdmission = targetPayments.reduce((sum, p) => {
-        if (Array.isArray(p.breakdown) && p.breakdown.length > 0) {
-          return sum + p.breakdown.filter(b => b.feeType === 'admission').reduce((bs, b) => bs + (Number(b.amount) || 0), 0);
-        }
-        return sum + (p.feeType === 'admission' ? (Number(p.amountPaid) || 0) : 0);
-      }, 0);
-      paymentCount = targetPayments.length;
     }
 
-    // Fees collected strictly for the selected feeMonth (matching paid students in the branch)
+    // Fees collected strictly for the selected feeMonth (matching paid students in active segment & method)
     const feeMonthMonthlyCollected = baseFeeStudents
       .filter(s => isPaid(s))
+      .filter(s => {
+        if (feeMethodFilter !== 'All') {
+          const pRec = feePaymentsList.find(p => (Number(p.studentId) === Number(s.id) || String(p.studentId) === String(s.id)) && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
+          if (!pRec || !pRec.paymentMethod || pRec.paymentMethod.toLowerCase().trim() !== feeMethodFilter.toLowerCase().trim()) {
+            return false;
+          }
+        }
+        return true;
+      })
       .reduce((sum, s) => {
         const pRec = feePaymentsList.find(p => (Number(p.studentId) === Number(s.id) || String(p.studentId) === String(s.id)) && (p.feeMonth === feeMonth || (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth))) && p.feeType === 'monthly');
         if (pRec) {
@@ -9594,13 +9707,16 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
           (Array.isArray(p.breakdown) && p.breakdown.some(b => b.feeMonth === feeMonth && b.feeType === 'admission'))
         ));
         if (pRec) {
+          if (feeMethodFilter !== 'All' && (!pRec.paymentMethod || pRec.paymentMethod.toLowerCase().trim() !== feeMethodFilter.toLowerCase().trim())) {
+            return sum;
+          }
           if (Array.isArray(pRec.breakdown) && pRec.breakdown.length > 0) {
             const item = pRec.breakdown.find(b => b.feeMonth === feeMonth && b.feeType === 'admission');
             if (item && item.amount !== undefined) return sum + Number(item.amount);
           }
           return sum + (Number(pRec.amountPaid) || 0);
         }
-        if (s.admissionPaid && (s.admissionPaid === feeMonth || (s.admissionPaid === true && s.joinDate && s.joinDate.slice(0, 7) === feeMonth))) {
+        if (feeMethodFilter === 'All' && s.admissionPaid && (s.admissionPaid === feeMonth || (s.admissionPaid === true && s.joinDate && s.joinDate.slice(0, 7) === feeMonth))) {
           const rateAdmission = s.customAdmissionRate !== undefined && s.customAdmissionRate !== null ? s.customAdmissionRate : admissionFeeRate;
           const admissionCoupon = resolveCouponCode(s.appliedAdmissionCoupon);
           let admissionDiscountAmount = 0;
@@ -9614,7 +9730,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
 
     const feeMonthTotalCollected = feeMonthMonthlyCollected + feeMonthAdmissionCollected;
 
-    // Pending Fees for selected feeMonth (unpaid students for feeMonth)
+    // Pending Fees for selected feeMonth (unpaid students in the active segment)
     const pendingFeesTotal = baseFeeStudents
       .filter(s => !isPaid(s))
       .reduce((sum, s) => {
@@ -9770,6 +9886,11 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
       const displayedAdmission = filterByQuery(rawAdmissionPaid);
       const displayedTotal = filterByQuery(rawTotalPaymentsList);
 
+      const displayedMonthlySum = displayedMonthly.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+      const displayedAdmissionSum = displayedAdmission.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+      const displayedTotalSum = displayedTotal.reduce((sum, item) => sum + (Number(item.amountPaid) || 0), 0);
+      const hasSearch = !!feeCardModalSearch;
+
       const getHeaderInfo = () => {
         switch (feeCardDetailType) {
           case 'monthly':
@@ -9780,12 +9901,14 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
               subtitle: `All students who have cleared their monthly tuition fee for ${formatMonthName(feeMonth)}`,
               color: '#38bdf8',
               tableHeading: `Paid Students List (${formatMonthName(feeMonth)})`,
-              totalAmount: feeMonthMonthlyCollected,
+              totalAmount: hasSearch ? displayedMonthlySum : feeMonthMonthlyCollected,
               rawTotalCount: rawMonthlyPaid.length,
               count: displayedMonthly.length,
-              footerNote: `Total â‚¹${feeMonthMonthlyCollected.toLocaleString()} collected from ${rawMonthlyPaid.length} students for ${formatMonthName(feeMonth)}`
+              isFiltered: hasSearch,
+              footerNote: `Total â‚¹${(hasSearch ? displayedMonthlySum : feeMonthMonthlyCollected).toLocaleString()} collected from ${displayedMonthly.length} student${displayedMonthly.length === 1 ? '' : 's'} for ${formatMonthName(feeMonth)}`
             };
-          case 'admission':
+          case 'admission': {
+            const baseAdm = feeMonthAdmissionCollected > 0 ? feeMonthAdmissionCollected : paymentMonthAdmission;
             return {
               tag: 'Admission Fees',
               badgeTitle: 'Admission Fees',
@@ -9793,11 +9916,13 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
               subtitle: `New student registrations and admission fee collections recorded for ${formatMonthName(feeMonth)}`,
               color: '#FFD700',
               tableHeading: `Admission Payments List (${formatMonthName(feeMonth)})`,
-              totalAmount: feeMonthAdmissionCollected > 0 ? feeMonthAdmissionCollected : paymentMonthAdmission,
+              totalAmount: hasSearch ? displayedAdmissionSum : baseAdm,
               rawTotalCount: rawAdmissionPaid.length,
               count: displayedAdmission.length,
-              footerNote: `Total â‚¹${(feeMonthAdmissionCollected > 0 ? feeMonthAdmissionCollected : paymentMonthAdmission).toLocaleString()} admission revenue from ${rawAdmissionPaid.length} admissions`
+              isFiltered: hasSearch,
+              footerNote: `Total â‚¹${(hasSearch ? displayedAdmissionSum : baseAdm).toLocaleString()} admission revenue from ${displayedAdmission.length} admission${displayedAdmission.length === 1 ? '' : 's'}`
             };
+          }
           case 'total':
           default:
             return {
@@ -9807,10 +9932,11 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
               subtitle: `Complete receipt audit log for all cash, UPI, and bank collections received between 1st & 31st of ${formatMonthName(paymentMonth)}`,
               color: '#c084fc',
               tableHeading: `Receipt Audit Log (${formatMonthName(paymentMonth)})`,
-              totalAmount: paymentMonthRevenue,
+              totalAmount: hasSearch ? displayedTotalSum : paymentMonthRevenue,
               rawTotalCount: rawTotalPaymentsList.length,
               count: displayedTotal.length,
-              footerNote: `Total â‚¹${paymentMonthRevenue.toLocaleString()} cash received across ${rawTotalPaymentsList.length} receipts in ${formatMonthName(paymentMonth)}`
+              isFiltered: hasSearch,
+              footerNote: `Total â‚¹${(hasSearch ? displayedTotalSum : paymentMonthRevenue).toLocaleString()} cash received across ${displayedTotal.length} receipt${displayedTotal.length === 1 ? '' : 's'} in ${formatMonthName(paymentMonth)}`
             };
         }
       };
@@ -9891,7 +10017,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
             }}
           >
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
                 <span style={{
                   background: `${headerInfo.color}25`,
                   color: headerInfo.color,
@@ -9907,6 +10033,16 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
                 <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
                   Fee Month: <strong>{formatMonthName(feeMonth)}</strong>
                 </span>
+                {feeBatchFilter !== 'All' && (
+                  <span className="badge" style={{ background: 'rgba(75, 192, 192, 0.15)', color: '#4BC0C0', border: '1px solid rgba(75, 192, 192, 0.3)', fontSize: '0.74rem' }}>
+                    Slot: {feeBatchFilter}
+                  </span>
+                )}
+                {isAdminUser(loggedInUser) && branchFilter !== 'All' && (
+                  <span className="badge" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', fontSize: '0.74rem' }}>
+                    Branch: {branchFilter}
+                  </span>
+                )}
               </div>
               <h1 style={{ margin: '4px 0', fontSize: '1.5rem', color: '#fff', fontWeight: 800 }}>
                 {headerInfo.title}
@@ -9918,15 +10054,19 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
 
             <div style={{ textAlign: 'right', display: 'flex', gap: '1.25rem', alignItems: 'center' }}>
               <div style={{ background: 'rgba(0,0,0,0.35)', padding: '0.75rem 1.25rem', borderRadius: '10px', border: `1px solid ${headerInfo.color}35` }}>
-                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Total Amount</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                  {headerInfo.isFiltered ? 'Filtered Amount' : 'Total Amount'}
+                </div>
                 <div style={{ fontSize: '1.65rem', fontWeight: 800, color: headerInfo.color, margin: '2px 0 0 0' }}>
                   â‚¹{headerInfo.totalAmount.toLocaleString()}
                 </div>
               </div>
               <div style={{ background: 'rgba(0,0,0,0.35)', padding: '0.75rem 1.25rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Total Records</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                  {headerInfo.isFiltered ? 'Matching Records' : 'Total Records'}
+                </div>
                 <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#fff', margin: '2px 0 0 0' }}>
-                  {headerInfo.rawTotalCount}
+                  {headerInfo.isFiltered ? `${headerInfo.count} of ${headerInfo.rawTotalCount}` : headerInfo.rawTotalCount}
                 </div>
               </div>
             </div>
@@ -9945,7 +10085,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
               gap: '12px'
             }}
           >
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
               <button
                 type="button"
                 className="btn-small"
@@ -10008,25 +10148,36 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
               </button>
             </div>
 
-            <div style={{ position: 'relative', minWidth: '260px', flex: '1', maxWidth: '380px' }}>
-              <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
-              <input
-                type="text"
-                className="form-control"
-                placeholder="Search student, batch, phone, receipt..."
-                value={feeCardModalSearch}
-                onChange={e => setFeeCardModalSearch(e.target.value)}
-                style={{ paddingLeft: '36px', height: '36px', fontSize: '0.84rem', width: '100%', borderRadius: '8px' }}
-              />
-              {feeCardModalSearch && (
-                <button
-                  type="button"
-                  onClick={() => setFeeCardModalSearch('')}
-                  style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer' }}
-                >
-                  <X size={14} />
-                </button>
-              )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', flex: '1', justifyContent: 'flex-end' }}>
+              {/* Quick Slot Filter in Full Page */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.04)', padding: '2px 6px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <span style={{ color: 'var(--color-text-muted)', fontSize: '0.78rem', marginRight: '4px', fontWeight: 600 }}>Slot:</span>
+                <button type="button" className={`btn-small ${feeBatchFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('All')} style={{ padding: '3px 8px', fontSize: '0.76rem' }}>All</button>
+                <button type="button" className={`btn-small ${feeBatchFilter === 'Morning' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Morning')} style={{ padding: '3px 8px', fontSize: '0.76rem' }}>Morning</button>
+                <button type="button" className={`btn-small ${feeBatchFilter === 'Evening' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Evening')} style={{ padding: '3px 8px', fontSize: '0.76rem' }}>Evening</button>
+                <button type="button" className={`btn-small ${feeBatchFilter === 'Night' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFeeBatchFilter('Night')} style={{ padding: '3px 8px', fontSize: '0.76rem' }}>Night</button>
+              </div>
+
+              <div style={{ position: 'relative', minWidth: '220px', maxWidth: '340px', flex: '1' }}>
+                <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Search student, batch, phone, receipt..."
+                  value={feeCardModalSearch}
+                  onChange={e => setFeeCardModalSearch(e.target.value)}
+                  style={{ paddingLeft: '36px', height: '36px', fontSize: '0.84rem', width: '100%', borderRadius: '8px' }}
+                />
+                {feeCardModalSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setFeeCardModalSearch('')}
+                    style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer' }}
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -10362,6 +10513,45 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Active Filters Indicator Bar */}
+        {(feeBatchFilter !== 'All' || (isAdminUser(loggedInUser) && branchFilter !== 'All') || batchFilter !== 'All' || feeMethodFilter !== 'All') && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '0.85rem', flexWrap: 'wrap', padding: '6px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>Active Filters:</span>
+            {isAdminUser(loggedInUser) && branchFilter !== 'All' && (
+              <span className="badge" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', fontSize: '0.76rem' }}>
+                Branch: {branchFilter}
+              </span>
+            )}
+            {batchFilter !== 'All' && (
+              <span className="badge" style={{ background: 'rgba(255, 215, 0, 0.15)', color: '#FFD700', border: '1px solid rgba(255, 215, 0, 0.3)', fontSize: '0.76rem' }}>
+                Batch: {resolveBatchName(batchFilter)}
+              </span>
+            )}
+            {feeBatchFilter !== 'All' && (
+              <span className="badge" style={{ background: 'rgba(75, 192, 192, 0.15)', color: '#4BC0C0', border: '1px solid rgba(75, 192, 192, 0.3)', fontSize: '0.76rem' }}>
+                Slot: {feeBatchFilter}
+              </span>
+            )}
+            {feeMethodFilter !== 'All' && (
+              <span className="badge" style={{ background: 'rgba(192, 132, 252, 0.15)', color: '#c084fc', border: '1px solid rgba(192, 132, 252, 0.3)', fontSize: '0.76rem' }}>
+                Method: {feeMethodFilter}
+              </span>
+            )}
+            <button
+              type="button"
+              className="btn-small"
+              onClick={() => {
+                setFeeBatchFilter('All');
+                setFeeMethodFilter('All');
+                setBatchFilter('All');
+              }}
+              style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: 'var(--color-text-muted)', fontSize: '0.74rem', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', marginLeft: 'auto' }}
+            >
+              Clear Filters
+            </button>
           </div>
         )}
 
