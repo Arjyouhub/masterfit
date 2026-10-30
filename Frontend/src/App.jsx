@@ -8326,7 +8326,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
             <img src="/vindas.jpg" alt="Coach Vindas" className="instructor-img" style={{ objectPosition: 'center 6%' }} />
             <div className="instructor-info">
               <h3>Vindas</h3>
-              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Head Coach</p>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>President</p>
             </div>
           </div>
 
@@ -8336,7 +8336,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
             <img src="/rashed-kavil.jpg" alt="ADV RASHED KAVIL" className="instructor-img" style={{ objectPosition: 'center 15%' }} />
             <div className="instructor-info">
               <h3>ADV RASHED KAVIL</h3>
-              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Legal Advisor & Chief Patron</p>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Legal Advisor & Examiner</p>
             </div>
           </div>
 
@@ -8346,7 +8346,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
             <img src="/hisham.jpg" alt="Coach Hisham" className="instructor-img" style={{ objectPosition: 'center 5%' }} />
             <div className="instructor-info">
               <h3>Hisham</h3>
-              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>MMA & Conditioning Coach</p>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Combat Coach</p>
             </div>
           </div>
 
