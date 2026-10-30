@@ -8343,7 +8343,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
             <img src="/navas-kc.jpg" alt="MR NAVAS KC" className="instructor-img" style={{ objectPosition: 'center 12%' }} />
             <div className="instructor-info">
               <h3>MR NAVAS KC</h3>
-              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Founder</p>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Founder President & Chief Instructor</p>
             </div>
           </div>
 
@@ -8363,7 +8363,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
             <img src="/vindas.jpg" alt="Coach Vindas" className="instructor-img" style={{ objectPosition: 'center 6%' }} />
             <div className="instructor-info">
               <h3>Vindas</h3>
-              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>President</p>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Treasurer</p>
             </div>
           </div>
 
