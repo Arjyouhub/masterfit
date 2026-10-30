@@ -8301,13 +8301,12 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
           <h2 className="section-title">TEAM MASTERFIT</h2>
         </div>
         <div className="instructor-grid">
-          {/* Sensei */}
+          {/* Founder */}
           <div className="instructor-card glass-panel">
-            <span className="instructor-role-tag">Sensei</span>
-            <img src="/navas-kc.jpg" alt="Sensei MR NAVAS KC" className="instructor-img" style={{ objectPosition: 'center 12%' }} />
+            <img src="/navas-kc.jpg" alt="MR NAVAS KC" className="instructor-img" style={{ objectPosition: 'center 12%' }} />
             <div className="instructor-info">
               <h3>MR NAVAS KC</h3>
-              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Founder & Chief Sensei</p>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Founder</p>
             </div>
           </div>
 
@@ -8317,7 +8316,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
             <img src="/munaib.jpg" alt="Coach Munaib" className="instructor-img" style={{ objectPosition: 'center 8%' }} />
             <div className="instructor-info">
               <h3>Munaib</h3>
-              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Striking & Fitness Coach</p>
+              <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Secretary</p>
             </div>
           </div>
 
@@ -8369,7 +8368,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
           <h2 className="section-title">Training Gallery</h2>
         </div>
         <div className="gallery-grid">
-          <div className="gallery-item"><img src={gallery1Img} alt="Sensei Navas KC - Strike Form" style={{ objectPosition: 'center 20%' }} /></div>
+          <div className="gallery-item"><img src={gallery1Img} alt="Navas KC - Strike Form" style={{ objectPosition: 'center 20%' }} /></div>
           <div className="gallery-item"><img src={gallery2Img} alt="Dojo Meditation Class" style={{ objectPosition: 'center 45%' }} /></div>
           <div className="gallery-item"><img src={gallery3Img} alt="MasterFit Black Belt Instructors Team - Standing Formation" style={{ objectPosition: 'center 25%' }} /></div>
           <div className="gallery-item"><img src={gallery4Img} alt="SKIF Japan Karate International Certification" style={{ objectPosition: 'center 18%' }} /></div>
