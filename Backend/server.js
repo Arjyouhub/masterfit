@@ -3577,8 +3577,25 @@ app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin
 
     const todayStr = new Date().toISOString().split('T')[0];
 
+    // Fetch batch trainer mappings to ensure students have trainer resolved
+    const BatchModel = mongoose.model('Batch');
+    const allBatchDocs = await BatchModel.find({}).select('code name trainer').lean();
+    const batchTrainerMap = {};
+    allBatchDocs.forEach(b => {
+      if (b.code && b.trainer) batchTrainerMap[b.code.toLowerCase().trim()] = b.trainer;
+      if (b.name && b.trainer) batchTrainerMap[b.name.toLowerCase().trim()] = b.trainer;
+    });
+
     // Process and decrypt students, resolve dynamic nextEligibleGradingDate if empty
-    const processedStudents = filteredStudents.map(dec => {
+    let processedStudents = filteredStudents.map(dec => {
+      // Resolve trainer if empty
+      if (!dec.trainer) {
+        const sBatch = (dec.batch || '').toLowerCase().trim();
+        if (batchTrainerMap[sBatch]) {
+          dec.trainer = batchTrainerMap[sBatch];
+        }
+      }
+
       // Compute next eligible date dynamically if not set
       if (!dec.nextEligibleGradingDate) {
         dec.nextEligibleGradingDate = calculateNextEligibleDate(dec.joinDate);
@@ -3592,6 +3609,15 @@ app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin
 
       return dec;
     });
+
+    if (req.query.trainer && req.query.trainer.toLowerCase() !== 'all') {
+      const qTrainer = req.query.trainer.toLowerCase().trim();
+      processedStudents = processedStudents.filter(s => {
+        const st = (s.trainer || '').toLowerCase().trim();
+        const ap = (s.trainerApprovedBy || '').toLowerCase().trim();
+        return st === qTrainer || ap === qTrainer;
+      });
+    }
 
     res.json(processedStudents);
   } catch (err) {

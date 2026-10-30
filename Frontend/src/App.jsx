@@ -658,6 +658,7 @@ function App() {
   const [loadingGrading, setLoadingGrading] = useState(false);
   const [gradingFilterBranch, setGradingFilterBranch] = useState('All');
   const [gradingFilterBatch, setGradingFilterBatch] = useState('All');
+  const [gradingFilterTrainer, setGradingFilterTrainer] = useState('All');
   const [gradingFilterBelt, setGradingFilterBelt] = useState('All');
   const [gradingFilterEligibility, setGradingFilterEligibility] = useState('All');
   const [gradingFilterTrainerApproval, setGradingFilterTrainerApproval] = useState('All');
@@ -871,6 +872,15 @@ function App() {
   const [statusFilter, setStatusFilter] = useState('Active');
 
   const handleSelectStudent = (student) => {
+    setShowAdmissionCouponInput(false);
+    setAdmissionCouponText('');
+    setAdmissionCouponMsg('');
+    setShowMonthlyCouponInput(false);
+    setMonthlyCouponText('');
+    setMonthlyCouponMsg('');
+    setMonthSpecificCouponEdit(null);
+    setMonthSpecificCouponText('');
+    setMonthSpecificCouponMsg('');
     if (!student) {
       setSelectedStudent(null);
       return;
@@ -1021,6 +1031,19 @@ function App() {
   const [admissionCouponInput, setAdmissionCouponInput] = useState('');
   const [admissionCouponMessage, setAdmissionCouponMessage] = useState('');
   const [customAdmissionInput, setCustomAdmissionInput] = useState('');
+
+  // Financial Summary Profile Modal Coupon States
+  const [showAdmissionCouponInput, setShowAdmissionCouponInput] = useState(false);
+  const [admissionCouponText, setAdmissionCouponText] = useState('');
+  const [admissionCouponMsg, setAdmissionCouponMsg] = useState('');
+
+  const [showMonthlyCouponInput, setShowMonthlyCouponInput] = useState(false);
+  const [monthlyCouponText, setMonthlyCouponText] = useState('');
+  const [monthlyCouponMsg, setMonthlyCouponMsg] = useState('');
+
+  const [monthSpecificCouponEdit, setMonthSpecificCouponEdit] = useState(null);
+  const [monthSpecificCouponText, setMonthSpecificCouponText] = useState('');
+  const [monthSpecificCouponMsg, setMonthSpecificCouponMsg] = useState('');
 
   // Super Admin Forgot Password (OTP) States
   const [forgotStep, setForgotStep] = useState(1);
@@ -1390,6 +1413,15 @@ function App() {
       }
       return matchedCoupon.discountValue;
     }
+    if (s && s.appliedCoupon) {
+      const baseCoupon = resolveCouponCode(s.appliedCoupon);
+      if (baseCoupon) {
+        if (baseCoupon.type === 'percentage') {
+          return Math.round(rateToUse * baseCoupon.value / 100);
+        }
+        return baseCoupon.value;
+      }
+    }
     return 0;
   };
 
@@ -1400,6 +1432,8 @@ function App() {
 
     const matchedCoupon = getAppliedCouponForMonth(student, monthStr);
     let finalRate = rateToUse;
+    let couponInfo = matchedCoupon;
+
     if (matchedCoupon) {
       if (matchedCoupon.discountType === 'percentage') {
         const discount = Math.round(rateToUse * matchedCoupon.discountValue / 100);
@@ -1407,11 +1441,28 @@ function App() {
       } else {
         finalRate = Math.max(0, rateToUse - matchedCoupon.discountValue);
       }
+    } else if (student && student.appliedCoupon) {
+      const baseCoupon = resolveCouponCode(student.appliedCoupon);
+      if (baseCoupon) {
+        couponInfo = {
+          couponCode: student.appliedCoupon,
+          discountType: baseCoupon.type,
+          discountValue: baseCoupon.value,
+          isBaseCoupon: true
+        };
+        if (baseCoupon.type === 'percentage') {
+          const discount = Math.round(rateToUse * baseCoupon.value / 100);
+          finalRate = Math.max(0, rateToUse - discount);
+        } else {
+          finalRate = Math.max(0, rateToUse - baseCoupon.value);
+        }
+      }
     }
+
     return {
       originalRate: rateToUse,
       finalRate,
-      coupon: matchedCoupon
+      coupon: couponInfo
     };
   };
 
@@ -5850,6 +5901,74 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
     })
       .then(res => res.json())
       .catch(err => console.error("Error updating month coupon from table:", err));
+  };
+
+  const handleApplyAdmissionCoupon = () => {
+    if (!selectedStudent) return;
+    const code = admissionCouponText.trim().toUpperCase();
+    if (!code) {
+      setAdmissionCouponMsg('❌ Please enter a coupon code');
+      return;
+    }
+    const resolved = resolveCouponCode(code);
+    if (!resolved) {
+      setAdmissionCouponMsg(`❌ Invalid coupon code: "${code}"`);
+      return;
+    }
+    handleCouponBlur(selectedStudent, 'appliedAdmissionCoupon', code);
+    setShowAdmissionCouponInput(false);
+    setAdmissionCouponText('');
+    setAdmissionCouponMsg('');
+  };
+
+  const handleRemoveAdmissionCoupon = () => {
+    if (!selectedStudent) return;
+    handleCouponBlur(selectedStudent, 'appliedAdmissionCoupon', '');
+    setShowAdmissionCouponInput(false);
+    setAdmissionCouponText('');
+    setAdmissionCouponMsg('');
+  };
+
+  const handleApplyMonthlyCoupon = () => {
+    if (!selectedStudent) return;
+    const code = monthlyCouponText.trim().toUpperCase();
+    if (!code) {
+      setMonthlyCouponMsg('❌ Please enter a coupon code');
+      return;
+    }
+    const resolved = resolveCouponCode(code);
+    if (!resolved) {
+      setMonthlyCouponMsg(`❌ Invalid coupon code: "${code}"`);
+      return;
+    }
+    handleCouponBlur(selectedStudent, 'appliedCoupon', code);
+    setShowMonthlyCouponInput(false);
+    setMonthlyCouponText('');
+    setMonthlyCouponMsg('');
+  };
+
+  const handleRemoveMonthlyCoupon = () => {
+    if (!selectedStudent) return;
+    handleCouponBlur(selectedStudent, 'appliedCoupon', '');
+    setShowMonthlyCouponInput(false);
+    setMonthlyCouponText('');
+    setMonthlyCouponMsg('');
+  };
+
+  const handleApplyMonthSpecificCoupon = (monthStr) => {
+    if (!selectedStudent) return;
+    const code = monthSpecificCouponText.trim().toUpperCase();
+    if (code) {
+      const resolved = resolveCouponCode(code);
+      if (!resolved) {
+        setMonthSpecificCouponMsg(`❌ Invalid coupon code: "${code}"`);
+        return;
+      }
+    }
+    handleCouponBlurForMonth(selectedStudent, monthStr, code);
+    setMonthSpecificCouponEdit(null);
+    setMonthSpecificCouponText('');
+    setMonthSpecificCouponMsg('');
   };
 
   const markAttendance = (studentId, status) => {
@@ -11202,6 +11321,165 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
     }
   };
 
+  // Helper for trainer options in grading view based on selected branch
+  const getGradingTrainerOptions = () => {
+    const isSuper = isAdminUser(loggedInUser);
+    const activeBranch = isSuper ? (gradingFilterBranch !== 'All' ? gradingFilterBranch : null) : userBranch;
+    const safeBatchOptions = Array.isArray(batchOptions) ? batchOptions : [];
+
+    // Filter trainersList by activeBranch if specified
+    const filteredTrainers = (trainersList || []).filter(t => {
+      if (!activeBranch) return true;
+      if (!t.branch) return true;
+      const bList = String(t.branch).toLowerCase().split(',').map(b => b.trim());
+      return bList.includes(activeBranch.toLowerCase().trim());
+    });
+
+    const trainerMap = new Map();
+
+    // 1. Add trainers from trainersList
+    filteredTrainers.forEach(t => {
+      if (t.username) {
+        const u = t.username.trim();
+        trainerMap.set(u.toLowerCase(), {
+          id: u,
+          name: t.fullName ? `${t.fullName} (${u})` : u
+        });
+      }
+    });
+
+    // 2. Add any trainers present in gradingStudents
+    if (Array.isArray(gradingStudents)) {
+      gradingStudents.forEach(s => {
+        const tr = (s.trainer || '').trim();
+        if (tr && !trainerMap.has(tr.toLowerCase())) {
+          const found = (trainersList || []).find(t =>
+            (t.username && t.username.toLowerCase().trim() === tr.toLowerCase()) ||
+            (t.fullName && t.fullName.toLowerCase().trim() === tr.toLowerCase())
+          );
+          if (found && found.username) {
+            trainerMap.set(found.username.toLowerCase().trim(), {
+              id: found.username,
+              name: found.fullName ? `${found.fullName} (${found.username})` : found.username
+            });
+          } else {
+            trainerMap.set(tr.toLowerCase(), {
+              id: tr,
+              name: tr
+            });
+          }
+        }
+      });
+    }
+
+    // 3. Add any trainers from batches
+    safeBatchOptions.forEach(b => {
+      if (activeBranch && b.branch && b.branch.toLowerCase().trim() !== activeBranch.toLowerCase().trim()) return;
+      const tr = (b.trainer || '').trim();
+      if (tr && tr !== 'TBA' && !trainerMap.has(tr.toLowerCase())) {
+        const found = (trainersList || []).find(t =>
+          (t.username && t.username.toLowerCase().trim() === tr.toLowerCase()) ||
+          (t.fullName && t.fullName.toLowerCase().trim() === tr.toLowerCase())
+        );
+        if (found && found.username) {
+          trainerMap.set(found.username.toLowerCase().trim(), {
+            id: found.username,
+            name: found.fullName ? `${found.fullName} (${found.username})` : found.username
+          });
+        } else {
+          trainerMap.set(tr.toLowerCase(), {
+            id: tr,
+            name: tr
+          });
+        }
+      }
+    });
+
+    return Array.from(trainerMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+  };
+
+  const matchesStudentTrainer = (student, filterTrainer) => {
+    if (!filterTrainer || filterTrainer === 'All') return true;
+    if (!student) return false;
+    const filterLower = String(filterTrainer).toLowerCase().trim();
+
+    // 1. Direct student.trainer match
+    const st = String(student.trainer || '').toLowerCase().trim();
+    if (st && st === filterLower) return true;
+
+    // Lookup trainer object
+    const matchedTrainerObj = (trainersList || []).find(t =>
+      (t.username && t.username.toLowerCase().trim() === filterLower) ||
+      (t.fullName && t.fullName.toLowerCase().trim() === filterLower)
+    );
+
+    if (matchedTrainerObj) {
+      const u = (matchedTrainerObj.username || '').toLowerCase().trim();
+      const f = (matchedTrainerObj.fullName || '').toLowerCase().trim();
+      if (st && (st === u || st === f)) return true;
+    }
+
+    // 2. Fallback: match via batch assigned trainer
+    const safeBatchOptions = Array.isArray(batchOptions) ? batchOptions : [];
+    const studentBatchLower = String(student.batch || '').toLowerCase().trim();
+    const batchOpt = safeBatchOptions.find(b =>
+      (b.id && String(b.id).toLowerCase().trim() === studentBatchLower) ||
+      (b.code && String(b.code).toLowerCase().trim() === studentBatchLower) ||
+      (b.name && String(b.name).toLowerCase().trim() === studentBatchLower)
+    );
+
+    if (batchOpt && batchOpt.trainer) {
+      const bt = String(batchOpt.trainer).toLowerCase().trim();
+      if (bt === filterLower) return true;
+      if (matchedTrainerObj) {
+        const u = (matchedTrainerObj.username || '').toLowerCase().trim();
+        const f = (matchedTrainerObj.fullName || '').toLowerCase().trim();
+        if (bt === u || bt === f) return true;
+      }
+    }
+
+    // 3. Fallback: match via trainerApprovedBy
+    const approvedBy = String(student.trainerApprovedBy || '').toLowerCase().trim();
+    if (approvedBy && approvedBy === filterLower) return true;
+    if (matchedTrainerObj && approvedBy) {
+      const u = (matchedTrainerObj.username || '').toLowerCase().trim();
+      const f = (matchedTrainerObj.fullName || '').toLowerCase().trim();
+      if (approvedBy === u || approvedBy === f) return true;
+    }
+
+    return false;
+  };
+
+  const getStudentTrainerDisplay = (student) => {
+    if (!student) return '';
+    let tr = (student.trainer || '').trim();
+    if (!tr) {
+      const safeBatchOptions = Array.isArray(batchOptions) ? batchOptions : [];
+      const studentBatchLower = String(student.batch || '').toLowerCase().trim();
+      const batchOpt = safeBatchOptions.find(b =>
+        (b.id && String(b.id).toLowerCase().trim() === studentBatchLower) ||
+        (b.code && String(b.code).toLowerCase().trim() === studentBatchLower) ||
+        (b.name && String(b.name).toLowerCase().trim() === studentBatchLower)
+      );
+      if (batchOpt && batchOpt.trainer && batchOpt.trainer.trim() !== 'TBA') {
+        tr = batchOpt.trainer.trim();
+      }
+    }
+    if (!tr && student.trainerApprovedBy) {
+      tr = student.trainerApprovedBy.trim();
+    }
+    if (!tr) return '';
+
+    const found = (trainersList || []).find(t =>
+      (t.username && t.username.toLowerCase().trim() === tr.toLowerCase()) ||
+      (t.fullName && t.fullName.toLowerCase().trim() === tr.toLowerCase())
+    );
+    if (found && found.fullName && found.username) {
+      return `${found.fullName} (${found.username})`;
+    }
+    return tr;
+  };
+
   const getStudentExamResult = (s) => {
     if (!s) return '';
     if (s.lastGradingResult && s.lastGradingResult !== 'N/A') return s.lastGradingResult;
@@ -11313,7 +11591,12 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
         }
       }
 
-      return matchesSearch && matchesBatch && matchesBelt && matchesEligibility && matchesResult && matchesTrainerApproval;
+      let matchesTrainer = true;
+      if (gradingFilterTrainer !== 'All') {
+        matchesTrainer = matchesStudentTrainer(student, gradingFilterTrainer);
+      }
+
+      return matchesSearch && matchesBatch && matchesTrainer && matchesBelt && matchesEligibility && matchesResult && matchesTrainerApproval;
     });
   };
 
@@ -11938,6 +12221,11 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
           }
           if (!matchesBatch) return false;
         }
+
+        if (gradingFilterTrainer !== 'All') {
+          if (!matchesStudentTrainer(student, gradingFilterTrainer)) return false;
+        }
+
         return true;
       }) : [];
 
@@ -11951,31 +12239,8 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
       const passedCount = scopedCandidates.filter(s => getStudentExamResult(s) === 'Pass').length;
       const failedCount = scopedCandidates.filter(s => getStudentExamResult(s) === 'Fail').length;
 
-      const beltCounts = {
-        White: 0,
-        Yellow: 0,
-        Orange: 0,
-        Green: 0,
-        Blue: 0,
-        Purple: 0,
-        Red: 0,
-        Brown: 0,
-        'Brown 1': 0,
-        'Brown 2': 0,
-        'Brown 3': 0,
-        'Brown 4': 0,
-        Black: 0
-      };
-      filtered.forEach(s => {
-        const b = (s.belt || 'White').trim();
-        const clean = b.replace(/\s*belt$/i, '').trim();
-        const matchedKey = Object.keys(beltCounts).find(k => k.toLowerCase() === b.toLowerCase() || k.toLowerCase() === clean.toLowerCase());
-        if (matchedKey) {
-          beltCounts[matchedKey]++;
-        }
-      });
-
       const batchListOptions = getGradingBatchOptions();
+      const trainerListOptions = getGradingTrainerOptions();
 
       return (
         <div className="grading-view-container">
@@ -12122,50 +12387,6 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
             </div>
           </div>
 
-          {/* Belt Distribution Bar */}
-          <div className="belt-distribution-strip" style={{ padding: '0.75rem 1rem' }}>
-            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, marginRight: '6px', whiteSpace: 'nowrap', flexShrink: 0, display: 'inline-block' }}>
-              Belts:
-            </span>
-            {/* Desktop/Tablet Horizontal Button List */}
-            <div className="belt-pill-list-desktop">
-              {Object.entries(beltCounts).map(([beltName, count]) => {
-                const isSelected = gradingFilterBelt === beltName;
-                return (
-                  <button
-                    key={beltName}
-                    type="button"
-                    className={`belt-pill-btn ${isSelected ? 'active' : ''}`}
-                    onClick={() => setGradingFilterBelt(isSelected ? 'All' : beltName)}
-                    title={`Filter by ${beltName} belt`}
-                    style={{ padding: '0.25rem 0.65rem' }}
-                  >
-                    <span className={`badge ${getBeltColorClass(beltName)}`} style={{ padding: '2px 6px', fontSize: '0.7rem', borderRadius: '4px', textTransform: 'uppercase' }}>
-                      {beltName}
-                    </span>
-                    <span className="belt-count" style={{ fontSize: '0.7rem' }}>{count}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Mobile Select Dropdown (No Side-Scrolling) */}
-            <div className="belt-select-mobile-wrapper">
-              <select
-                className="form-control belt-select-mobile"
-                value={gradingFilterBelt}
-                onChange={(e) => setGradingFilterBelt(e.target.value)}
-              >
-                <option value="All">All Belts ({filtered.length})</option>
-                {Object.entries(beltCounts).map(([beltName, count]) => (
-                  <option key={beltName} value={beltName}>
-                    {beltName} Belt ({count})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
           {/* Streamlined Clean Filters Panel */}
           <div className="filters-wrapper-card" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
             {/* Quick Filter Chips */}
@@ -12232,7 +12453,15 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
               {/* Branch (Superadmin only) */}
               {isSuper && (
                 <div style={{ minWidth: '140px', flex: '1 1 140px' }}>
-                  <select className="form-control" style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }} value={gradingFilterBranch} onChange={(e) => setGradingFilterBranch(e.target.value)}>
+                  <select
+                    className="form-control"
+                    style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
+                    value={gradingFilterBranch}
+                    onChange={(e) => {
+                      setGradingFilterBranch(e.target.value);
+                      setGradingFilterTrainer('All');
+                    }}
+                  >
                     <option value="All">All Branches</option>
                     {branches.map(b => (
                       <option key={b} value={b}>{b}</option>
@@ -12250,6 +12479,23 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                   ))}
                 </select>
               </div>
+
+              {/* Trainer Filter */}
+              {!isTrainer && (
+                <div style={{ minWidth: '150px', flex: '1 1 150px' }}>
+                  <select
+                    className="form-control"
+                    style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
+                    value={gradingFilterTrainer}
+                    onChange={(e) => setGradingFilterTrainer(e.target.value)}
+                  >
+                    <option value="All">All Trainers</option>
+                    {trainerListOptions.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Belt Rank / Level */}
               <div style={{ minWidth: '150px', flex: '1 1 150px' }}>
@@ -12296,6 +12542,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                 onClick={() => {
                   setGradingFilterBranch('All');
                   setGradingFilterBatch('All');
+                  setGradingFilterTrainer('All');
                   setGradingFilterBelt('All');
                   setGradingFilterEligibility('All');
                   setGradingFilterTrainerApproval('All');
@@ -12350,6 +12597,17 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                             <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: '0.75rem', padding: '3px 8px', borderRadius: '6px' }}>
                               {getBatchNameFromCode(student.batch, student.branch)}
                             </span>
+                            {(() => {
+                              const trName = getStudentTrainerDisplay(student);
+                              if (trName) {
+                                return (
+                                  <div style={{ fontSize: '0.72rem', color: '#38bdf8', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '4px' }} title={`Trainer: ${trName}`}>
+                                    <span>🥋 {trName}</span>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
                           </td>
                           <td data-label="Present Belt / Level">
                             <span className={`badge ${getBeltColorClass(student.belt)}`} style={{ padding: '4px 10px', fontSize: '0.75rem', borderRadius: '6px', fontWeight: 600 }}>
@@ -20772,37 +21030,208 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                         </div>
 
                         {/* Admission Fee Row */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.65rem', flexWrap: 'wrap', gap: '8px' }}>
-                          <span style={{ fontSize: '0.88rem', color: '#B0B0B0', fontWeight: 500 }}>Admission Fee:</span>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                            {selectedStudent.admissionPaid ? (
-                              <>
-                                <span className="badge badge-green" style={{ fontSize: '0.75rem', padding: '3px 8px' }}>✓ Paid ({selectedStudent.admissionPaid})</span>
+                        <div style={{ marginBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.65rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '0.88rem', color: '#B0B0B0', fontWeight: 500 }}>Admission Fee:</span>
+                              {selectedStudent.appliedAdmissionCoupon && (() => {
+                                const ac = resolveCouponCode(selectedStudent.appliedAdmissionCoupon);
+                                const discountStr = ac ? (ac.type === 'amount' ? `₹${ac.value}` : `${ac.value}%`) : '';
+                                return (
+                                  <span className="badge badge-green" style={{ fontSize: '0.72rem', padding: '2px 7px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                    🏷️ {selectedStudent.appliedAdmissionCoupon} {discountStr && `(${discountStr} Off)`}
+                                    <button
+                                      type="button"
+                                      style={{ background: 'none', border: 'none', color: '#ff6b6b', cursor: 'pointer', padding: 0, marginLeft: '3px', fontWeight: 800, fontSize: '0.75rem' }}
+                                      title="Remove Admission Coupon"
+                                      onClick={handleRemoveAdmissionCoupon}
+                                    >
+                                      ✕
+                                    </button>
+                                  </span>
+                                );
+                              })()}
+                              {!selectedStudent.appliedAdmissionCoupon && !showAdmissionCouponInput && (
                                 <button
                                   type="button"
                                   className="btn-small btn-secondary"
-                                  style={{ padding: '3px 10px', fontSize: '0.75rem', whiteSpace: 'nowrap', borderRadius: '6px', cursor: 'pointer', height: '26px' }}
-                                  onClick={() => unmarkFeePaid(selectedStudent.id, 'admissionPaid')}
+                                  style={{ padding: '2px 8px', fontSize: '0.72rem', borderRadius: '6px', height: '24px', display: 'inline-flex', alignItems: 'center', gap: '3px', opacity: 0.9 }}
+                                  onClick={() => {
+                                    setShowAdmissionCouponInput(true);
+                                    setAdmissionCouponText('');
+                                    setAdmissionCouponMsg('');
+                                  }}
                                 >
-                                  Undo
+                                  🏷️ + Coupon
                                 </button>
-                              </>
-                            ) : (
-                              <>
-                                <span className="badge badge-red" style={{ fontSize: '0.75rem', padding: '3px 8px' }}>
-                                  Pending (₹{feeDetails.admissionDue}){selectedStudent.appliedAdmissionCoupon ? ` [${selectedStudent.appliedAdmissionCoupon}]` : ''}
-                                </span>
+                              )}
+                            </div>
+
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                              {selectedStudent.admissionPaid ? (
+                                <>
+                                  <span className="badge badge-green" style={{ fontSize: '0.75rem', padding: '3px 8px' }}>✓ Paid ({selectedStudent.admissionPaid})</span>
+                                  <button
+                                    type="button"
+                                    className="btn-small btn-secondary"
+                                    style={{ padding: '3px 10px', fontSize: '0.75rem', whiteSpace: 'nowrap', borderRadius: '6px', cursor: 'pointer', height: '26px' }}
+                                    onClick={() => unmarkFeePaid(selectedStudent.id, 'admissionPaid')}
+                                  >
+                                    Undo
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="badge badge-red" style={{ fontSize: '0.75rem', padding: '3px 8px' }}>
+                                    Pending (₹{feeDetails.admissionDue})
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="btn-small btn-primary"
+                                    style={{ padding: '3px 12px', fontSize: '0.75rem', whiteSpace: 'nowrap', borderRadius: '6px', cursor: 'pointer', height: '26px' }}
+                                    onClick={() => markFeePaid(selectedStudent.id, 'admissionPaid')}
+                                  >
+                                    Pay
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Inline Admission Coupon Input */}
+                          {showAdmissionCouponInput && (
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '8px', background: 'rgba(0,0,0,0.25)', padding: '6px 8px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                              <input
+                                type="text"
+                                placeholder="Enter coupon code (e.g. WELCOME10, FIT20)"
+                                className="form-control"
+                                style={{ height: '28px', fontSize: '0.78rem', textTransform: 'uppercase', flex: 1, padding: '0 8px' }}
+                                value={admissionCouponText}
+                                onChange={(e) => {
+                                  setAdmissionCouponText(e.target.value.toUpperCase());
+                                  setAdmissionCouponMsg('');
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleApplyAdmissionCoupon();
+                                  if (e.key === 'Escape') setShowAdmissionCouponInput(false);
+                                }}
+                                autoFocus
+                              />
+                              <button
+                                type="button"
+                                className="btn-primary"
+                                style={{ height: '28px', padding: '0 10px', fontSize: '0.74rem', borderRadius: '6px' }}
+                                onClick={handleApplyAdmissionCoupon}
+                              >
+                                Apply
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-secondary"
+                                style={{ height: '28px', padding: '0 8px', fontSize: '0.74rem', borderRadius: '6px' }}
+                                onClick={() => {
+                                  setShowAdmissionCouponInput(false);
+                                  setAdmissionCouponMsg('');
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          )}
+                          {admissionCouponMsg && (
+                            <div style={{ fontSize: '0.74rem', color: admissionCouponMsg.includes('❌') ? '#ff6b6b' : '#4ade80', marginTop: '4px' }}>
+                              {admissionCouponMsg}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Monthly Fee Coupon Row */}
+                        <div style={{ marginBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.65rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '0.88rem', color: '#B0B0B0', fontWeight: 500 }}>Monthly Fee Coupon:</span>
+                              {selectedStudent.appliedCoupon && (() => {
+                                const mc = resolveCouponCode(selectedStudent.appliedCoupon);
+                                const discountStr = mc ? (mc.type === 'amount' ? `₹${mc.value}` : `${mc.value}%`) : '';
+                                return (
+                                  <span className="badge badge-green" style={{ fontSize: '0.72rem', padding: '2px 7px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                    🏷️ {selectedStudent.appliedCoupon} {discountStr && `(${discountStr} Off)`}
+                                    <button
+                                      type="button"
+                                      style={{ background: 'none', border: 'none', color: '#ff6b6b', cursor: 'pointer', padding: 0, marginLeft: '3px', fontWeight: 800, fontSize: '0.75rem' }}
+                                      title="Remove Monthly Coupon"
+                                      onClick={handleRemoveMonthlyCoupon}
+                                    >
+                                      ✕
+                                    </button>
+                                  </span>
+                                );
+                              })()}
+                              {!selectedStudent.appliedCoupon && !showMonthlyCouponInput && (
                                 <button
                                   type="button"
-                                  className="btn-small btn-primary"
-                                  style={{ padding: '3px 12px', fontSize: '0.75rem', whiteSpace: 'nowrap', borderRadius: '6px', cursor: 'pointer', height: '26px' }}
-                                  onClick={() => markFeePaid(selectedStudent.id, 'admissionPaid')}
+                                  className="btn-small btn-secondary"
+                                  style={{ padding: '2px 8px', fontSize: '0.72rem', borderRadius: '6px', height: '24px', display: 'inline-flex', alignItems: 'center', gap: '3px', opacity: 0.9 }}
+                                  onClick={() => {
+                                    setShowMonthlyCouponInput(true);
+                                    setMonthlyCouponText('');
+                                    setMonthlyCouponMsg('');
+                                  }}
                                 >
-                                  Pay
+                                  🏷️ + Coupon
                                 </button>
-                              </>
-                            )}
+                              )}
+                            </div>
+                            <span style={{ fontSize: '0.74rem', color: 'var(--color-text-muted)' }}>
+                              {selectedStudent.appliedCoupon ? 'Applies to monthly fees' : 'No default coupon'}
+                            </span>
                           </div>
+
+                          {/* Inline Monthly Coupon Input */}
+                          {showMonthlyCouponInput && (
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '8px', background: 'rgba(0,0,0,0.25)', padding: '6px 8px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                              <input
+                                type="text"
+                                placeholder="Enter monthly coupon (e.g. FIT20, FIT50)"
+                                className="form-control"
+                                style={{ height: '28px', fontSize: '0.78rem', textTransform: 'uppercase', flex: 1, padding: '0 8px' }}
+                                value={monthlyCouponText}
+                                onChange={(e) => {
+                                  setMonthlyCouponText(e.target.value.toUpperCase());
+                                  setMonthlyCouponMsg('');
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleApplyMonthlyCoupon();
+                                  if (e.key === 'Escape') setShowMonthlyCouponInput(false);
+                                }}
+                                autoFocus
+                              />
+                              <button
+                                type="button"
+                                className="btn-primary"
+                                style={{ height: '28px', padding: '0 10px', fontSize: '0.74rem', borderRadius: '6px' }}
+                                onClick={handleApplyMonthlyCoupon}
+                              >
+                                Apply
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-secondary"
+                                style={{ height: '28px', padding: '0 8px', fontSize: '0.74rem', borderRadius: '6px' }}
+                                onClick={() => {
+                                  setShowMonthlyCouponInput(false);
+                                  setMonthlyCouponMsg('');
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          )}
+                          {monthlyCouponMsg && (
+                            <div style={{ fontSize: '0.74rem', color: monthlyCouponMsg.includes('❌') ? '#ff6b6b' : '#4ade80', marginTop: '4px' }}>
+                              {monthlyCouponMsg}
+                            </div>
+                          )}
                         </div>
 
                         {/* Outstanding Monthly Fees */}
@@ -20826,19 +21255,98 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px' }}>
                               {feeDetails.unpaidMonths.map(m => {
                                 const info = getFeeInfoForMonth(selectedStudent, m);
+                                const isEditingThisMonth = monthSpecificCouponEdit === m;
                                 return (
-                                  <div key={m} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(244, 67, 54, 0.08)', border: '1px solid rgba(244, 67, 54, 0.25)', padding: '6px 10px', borderRadius: '8px', gap: '6px' }}>
-                                    <div style={{ minWidth: 0 }}>
-                                      <div style={{ color: '#fff', fontWeight: 600, fontSize: '0.78rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatMonthName(m)}</div>
-                                      <div style={{ color: '#ff453a', fontWeight: 800, fontSize: '0.85rem', fontFamily: 'Outfit, sans-serif' }}>₹{info.finalRate}</div>
+                                  <div key={m} style={{ background: 'rgba(244, 67, 54, 0.08)', border: '1px solid rgba(244, 67, 54, 0.25)', padding: '8px 10px', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                                      <div style={{ minWidth: 0 }}>
+                                        <div style={{ color: '#fff', fontWeight: 600, fontSize: '0.78rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatMonthName(m)}</div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                          <span style={{ color: '#ff453a', fontWeight: 800, fontSize: '0.85rem', fontFamily: 'Outfit, sans-serif' }}>₹{info.finalRate}</span>
+                                          {info.finalRate < info.originalRate && (
+                                            <span style={{ color: '#888', textDecoration: 'line-through', fontSize: '0.7rem' }}>₹{info.originalRate}</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        style={{ border: 'none', background: 'linear-gradient(135deg, #E50914, #b91c1c)', color: 'white', borderRadius: '6px', cursor: 'pointer', padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700, boxShadow: '0 2px 6px rgba(229,9,20,0.3)', whiteSpace: 'nowrap', flexShrink: 0 }}
+                                        onClick={() => markFeePaidCustomMonth(selectedStudent.id, m)}
+                                      >
+                                        Pay
+                                      </button>
                                     </div>
-                                    <button
-                                      type="button"
-                                      style={{ border: 'none', background: 'linear-gradient(135deg, #E50914, #b91c1c)', color: 'white', borderRadius: '6px', cursor: 'pointer', padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700, boxShadow: '0 2px 6px rgba(229,9,20,0.3)', whiteSpace: 'nowrap', flexShrink: 0 }}
-                                      onClick={() => markFeePaidCustomMonth(selectedStudent.id, m)}
-                                    >
-                                      Pay
-                                    </button>
+
+                                    {/* Month Coupon Pill / Add Button */}
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '4px', fontSize: '0.68rem' }}>
+                                      {info.coupon ? (
+                                        <span style={{ color: '#4ade80', display: 'inline-flex', alignItems: 'center', gap: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`Coupon: ${info.coupon.couponCode}`}>
+                                          🏷️ {info.coupon.couponCode}
+                                          {!info.coupon.isBaseCoupon && (
+                                            <button
+                                              type="button"
+                                              style={{ background: 'none', border: 'none', color: '#ff6b6b', cursor: 'pointer', padding: 0, marginLeft: '2px', fontWeight: 700 }}
+                                              title="Clear specific coupon for this month"
+                                              onClick={() => handleCouponBlurForMonth(selectedStudent, m, '')}
+                                            >
+                                              ✕
+                                            </button>
+                                          )}
+                                        </span>
+                                      ) : (
+                                        <span style={{ color: 'var(--color-text-muted)' }}>No coupon</span>
+                                      )}
+                                      <button
+                                        type="button"
+                                        style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', padding: 0, fontSize: '0.68rem' }}
+                                        onClick={() => {
+                                          setMonthSpecificCouponEdit(isEditingThisMonth ? null : m);
+                                          setMonthSpecificCouponText(info.coupon && !info.coupon.isBaseCoupon ? info.coupon.couponCode : '');
+                                          setMonthSpecificCouponMsg('');
+                                        }}
+                                      >
+                                        {info.coupon && !info.coupon.isBaseCoupon ? 'Change' : '+ Coupon'}
+                                      </button>
+                                    </div>
+
+                                    {isEditingThisMonth && (
+                                      <div style={{ display: 'flex', gap: '3px', marginTop: '2px' }}>
+                                        <input
+                                          type="text"
+                                          placeholder="Coupon"
+                                          className="form-control"
+                                          style={{ height: '22px', fontSize: '0.7rem', textTransform: 'uppercase', flex: 1, padding: '0 4px' }}
+                                          value={monthSpecificCouponText}
+                                          onChange={(e) => setMonthSpecificCouponText(e.target.value.toUpperCase())}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') handleApplyMonthSpecificCoupon(m);
+                                            if (e.key === 'Escape') setMonthSpecificCouponEdit(null);
+                                          }}
+                                          autoFocus
+                                        />
+                                        <button
+                                          type="button"
+                                          className="btn-primary"
+                                          style={{ height: '22px', padding: '0 5px', fontSize: '0.68rem', borderRadius: '4px' }}
+                                          onClick={() => handleApplyMonthSpecificCoupon(m)}
+                                        >
+                                          ✓
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn-secondary"
+                                          style={{ height: '22px', padding: '0 5px', fontSize: '0.68rem', borderRadius: '4px' }}
+                                          onClick={() => setMonthSpecificCouponEdit(null)}
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+                                    )}
+                                    {isEditingThisMonth && monthSpecificCouponMsg && (
+                                      <div style={{ fontSize: '0.66rem', color: '#ff6b6b' }}>
+                                        {monthSpecificCouponMsg}
+                                      </div>
+                                    )}
                                   </div>
                                 );
                               })}
