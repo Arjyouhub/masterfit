@@ -5204,6 +5204,43 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
     };
   };
 
+  const buildFeeReminderMessage = (student, feeDetails, targetMonthStr) => {
+    const name = student?.studentName || student?.name || 'Student';
+    const totalDue = feeDetails?.totalDue || 0;
+    const lines = [];
+    if (feeDetails?.admissionDue > 0) {
+      lines.push(`• Admission Fee: ₹${feeDetails.admissionDue.toLocaleString()}`);
+    }
+    if (feeDetails?.unpaidMonths && feeDetails.unpaidMonths.length > 0) {
+      const monthNames = feeDetails.unpaidMonths.map(m => formatMonthName(m)).join(', ');
+      lines.push(`• Monthly Tuition Fees (${feeDetails.unpaidMonths.length} month${feeDetails.unpaidMonths.length > 1 ? 's' : ''}: ${monthNames}): ₹${feeDetails.monthlyDue.toLocaleString()}`);
+    }
+    const breakdown = lines.length > 0 ? `\n\n*Pending Dues Breakdown:*\n${lines.join('\n')}` : '';
+
+    return `🥋 *MasterFit Martial Arts & Fitness Academy*\n*Fee Pending Reminder*\n\nDear *${name}*,\nThis is a gentle reminder regarding your outstanding academy fee balance of *₹${totalDue.toLocaleString()}*${targetMonthStr ? ` (calculated up to ${formatMonthName(targetMonthStr)})` : ''}.${breakdown}\n\nKindly clear the pending balance at your earliest convenience.\n\nThank you for your cooperation! 🙏\n*MasterFit Academy Management*`;
+  };
+
+  const sendStudentFeeReminder = (student, feeDetails, targetMonthStr, phoneTarget = 'any') => {
+    if (!student) return;
+    let targetPhone = '';
+    if (phoneTarget === 'student') {
+      targetPhone = student.phone;
+    } else if (phoneTarget === 'parent') {
+      targetPhone = student.parentPhone || student.phone;
+    } else {
+      targetPhone = student.phone || student.parentPhone;
+    }
+
+    const cleanPhone = String(targetPhone || '').replace(/\D/g, '');
+    if (!cleanPhone) {
+      alert(`No valid phone number available for ${student.studentName || student.name || 'student'}.`);
+      return;
+    }
+    const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+    const text = encodeURIComponent(buildFeeReminderMessage(student, feeDetails, targetMonthStr));
+    window.open(`https://wa.me/${formattedPhone}?text=${text}`, '_blank');
+  };
+
   const markFeePaid = (id, feeType) => {
     const student = students.find(s => s.id === id);
     let dueAmount = monthlyFeeRate;
@@ -9875,7 +9912,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
         return sum + Math.max(0, rateToUse - discountAmount);
       }, 0);
 
-    if (feeCardDetailType && feeCardDetailType !== 'pending') {
+    if (feeCardDetailType) {
       // 1. Raw Monthly Paid List (from baseFeeStudents so it is never 0 when table is filtered)
       const rawMonthlyPaid = baseFeeStudents
         .filter(s => isPaid(s))
@@ -10004,6 +10041,31 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
         };
       });
 
+      // 4. Raw Pending Fees List (unpaid students for feeMonth & total calculated dues)
+      const rawPendingList = baseFeeStudents
+        .filter(s => !isPaid(s))
+        .map(s => {
+          const rateToUse = s.customMonthlyRate !== undefined && s.customMonthlyRate !== null ? s.customMonthlyRate : monthlyFeeRate;
+          const discount = getStudentDiscountForMonth(s, rateToUse, feeMonth);
+          const thisMonthDue = Math.max(0, rateToUse - discount);
+          const fullFees = calculateStudentFees(s, feeMonth);
+          return {
+            studentId: s.id,
+            studentName: s.name || s.studentName,
+            batch: s.batch,
+            branch: s.branch,
+            phone: s.phone || '',
+            parentPhone: s.parentPhone || '',
+            amount: thisMonthDue,
+            totalDue: fullFees.totalDue,
+            admissionDue: fullFees.admissionDue,
+            monthlyDue: fullFees.monthlyDue,
+            unpaidMonthsCount: fullFees.unpaidMonths.length,
+            fees: fullFees,
+            student: s
+          };
+        });
+
       // Live search filter across active list
       const q = (feeCardModalSearch || '').toLowerCase().trim();
       const filterByQuery = (list) => {
@@ -10021,10 +10083,12 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
       const displayedMonthly = filterByQuery(rawMonthlyPaid);
       const displayedAdmission = filterByQuery(rawAdmissionPaid);
       const displayedTotal = filterByQuery(rawTotalPaymentsList);
+      const displayedPending = filterByQuery(rawPendingList);
 
       const displayedMonthlySum = displayedMonthly.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
       const displayedAdmissionSum = displayedAdmission.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
       const displayedTotalSum = displayedTotal.reduce((sum, item) => sum + (Number(item.amountPaid) || 0), 0);
+      const displayedPendingSum = displayedPending.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
       const hasSearch = !!feeCardModalSearch;
 
       const getHeaderInfo = () => {
@@ -10059,6 +10123,20 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
               footerNote: `Total ₹${(hasSearch ? displayedAdmissionSum : baseAdm).toLocaleString()} admission revenue from ${displayedAdmission.length} admission${displayedAdmission.length === 1 ? '' : 's'}`
             };
           }
+          case 'pending':
+            return {
+              tag: 'Pending Fees & Reminders',
+              badgeTitle: 'Pending Fees & Reminders',
+              title: `Pending Fees & Reminders for ${formatMonthName(feeMonth)}`,
+              subtitle: `Active students with outstanding fee balance for ${formatMonthName(feeMonth)}. Click to send instant WhatsApp payment reminders.`,
+              color: '#ff6b6b',
+              tableHeading: `Pending Students List & Fee Reminders (${formatMonthName(feeMonth)})`,
+              totalAmount: hasSearch ? displayedPendingSum : pendingFeesTotal,
+              rawTotalCount: rawPendingList.length,
+              count: displayedPending.length,
+              isFiltered: hasSearch,
+              footerNote: `Total ₹${(hasSearch ? displayedPendingSum : pendingFeesTotal).toLocaleString()} pending from ${displayedPending.length} student${displayedPending.length === 1 ? '' : 's'} for ${formatMonthName(feeMonth)}`
+            };
           case 'total':
           default:
             return {
@@ -10256,6 +10334,26 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                 onClick={() => setFeeCardDetailType('admission')}
               >
                 <span>🎓</span> Admission Fees ({rawAdmissionPaid.length}) • ₹{(feeMonthAdmissionCollected > 0 ? feeMonthAdmissionCollected : paymentMonthAdmission).toLocaleString()}
+              </button>
+              <button
+                type="button"
+                className="btn-small"
+                style={{
+                  background: feeCardDetailType === 'pending' ? '#ff6b6b' : 'rgba(255,255,255,0.04)',
+                  color: feeCardDetailType === 'pending' ? '#fff' : '#fff',
+                  fontWeight: 700,
+                  border: feeCardDetailType === 'pending' ? '1px solid #ff6b6b' : '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '8px',
+                  padding: '8px 14px',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+                onClick={() => setFeeCardDetailType('pending')}
+              >
+                <span>⏳</span> Pending & Reminders ({rawPendingList.length}) • ₹{pendingFeesTotal.toLocaleString()}
               </button>
               <button
                 type="button"
@@ -10537,6 +10635,120 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                   </tbody>
                 </table>
               )}
+
+              {/* TAB 5: PENDING FEES & REMINDERS */}
+              {feeCardDetailType === 'pending' && (
+                <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
+                  <thead>
+                    <tr style={{ background: 'rgba(255, 107, 107, 0.08)' }}>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>#</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Student</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Batch Name</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Branch</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'left' }}>Contact Phone</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'right' }}>Month Due</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'right' }}>Total Outstanding</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'center' }}>Send WhatsApp Reminder</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'center' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayedPending.length === 0 ? (
+                      <tr><td colSpan={9} style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>No pending students found matching criteria! 🎉</td></tr>
+                    ) : (
+                      displayedPending.map((item, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                          <td style={{ padding: '12px 14px', color: 'var(--color-text-muted)' }}>{idx + 1}</td>
+                          <td style={{ padding: '12px 14px', fontWeight: 600, color: '#fff' }}>
+                            <span
+                              style={{ cursor: 'pointer', color: '#ff6b6b', textDecoration: 'underline' }}
+                              onClick={() => {
+                                const st = students.find(s => Number(s.id) === Number(item.studentId));
+                                if (st) handleSelectStudent(st);
+                              }}
+                              title="Click to view student profile"
+                            >
+                              {item.studentName}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 14px', color: '#a78bfa' }}>{resolveBatchName(item.batch) || 'Regular'}</td>
+                          <td style={{ padding: '12px 14px', color: 'var(--color-text-muted)' }}>{item.branch}</td>
+                          <td style={{ padding: '12px 14px', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                            {item.phone && <div>📞 {item.phone}</div>}
+                            {item.parentPhone && <div>👨 {item.parentPhone}</div>}
+                            {!item.phone && !item.parentPhone && <span>N/A</span>}
+                          </td>
+                          <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700, color: '#ff6b6b' }}>
+                            ₹{Number(item.amount || 0).toLocaleString()}
+                          </td>
+                          <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 800, color: '#ff453a' }}>
+                            ₹{Number(item.totalDue || 0).toLocaleString()}
+                            <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
+                              {item.unpaidMonthsCount > 0 && `${item.unpaidMonthsCount} mo`}
+                              {item.admissionDue > 0 && ' + adm'}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                            <div style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+                              <button
+                                type="button"
+                                className="btn-small"
+                                style={{
+                                  background: '#25D366',
+                                  color: '#fff',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  padding: '5px 10px',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  fontSize: '0.76rem',
+                                  fontWeight: 700,
+                                  boxShadow: '0 2px 6px rgba(37,211,102,0.3)'
+                                }}
+                                onClick={() => sendStudentFeeReminder(item.student, item.fees, feeMonth)}
+                                title="Send Fee Reminder to Student/Parent"
+                              >
+                                💬 WhatsApp Alert
+                              </button>
+                              {item.parentPhone && item.phone && item.parentPhone !== item.phone && (
+                                <button
+                                  type="button"
+                                  className="btn-small"
+                                  style={{
+                                    background: 'rgba(255,255,255,0.08)',
+                                    color: '#B0B0B0',
+                                    border: '1px solid rgba(255,255,255,0.15)',
+                                    borderRadius: '6px',
+                                    padding: '5px 8px',
+                                    cursor: 'pointer',
+                                    fontSize: '0.72rem'
+                                  }}
+                                  onClick={() => sendStudentFeeReminder(item.student, item.fees, feeMonth, 'parent')}
+                                  title="Send to Parent Phone"
+                                >
+                                  👨 Parent
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn-small btn-primary"
+                              style={{ padding: '4px 10px', fontSize: '0.75rem', fontWeight: 700 }}
+                              onClick={() => markFeePaidCustomMonth(item.studentId, feeMonth)}
+                            >
+                              Pay
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              )}
             </div>
 
             {/* Full Page Table Footer */}
@@ -10676,6 +10888,64 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
           </div>
         )}
 
+        {/* Pending Fee Reminder Alert Banner */}
+        {pendingFeesTotal > 0 && (
+          <div
+            style={{
+              background: 'linear-gradient(135deg, rgba(255, 69, 58, 0.12) 0%, rgba(20, 20, 30, 0.75) 100%)',
+              border: '1px solid rgba(255, 69, 58, 0.35)',
+              borderRadius: '12px',
+              padding: '0.85rem 1.25rem',
+              marginBottom: '1rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '12px',
+              boxShadow: '0 4px 16px rgba(255, 69, 58, 0.15)'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ background: 'rgba(255, 69, 58, 0.2)', padding: '8px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Bell size={20} color="#ff6b6b" />
+              </div>
+              <div>
+                <div style={{ color: '#fff', fontWeight: 700, fontSize: '0.92rem' }}>
+                  Total Fee Pending for {formatMonthName(feeMonth)}: <span style={{ color: '#ff453a', fontWeight: 800 }}>₹{pendingFeesTotal.toLocaleString()}</span> ({totalUnpaid} student{totalUnpaid === 1 ? '' : 's'})
+                </div>
+                <div style={{ color: 'var(--color-text-muted)', fontSize: '0.78rem' }}>
+                  Quickly notify students and parents via automated WhatsApp fee reminders.
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{
+                  background: '#25D366',
+                  borderColor: '#25D366',
+                  color: '#fff',
+                  fontWeight: 700,
+                  fontSize: '0.82rem',
+                  padding: '7px 14px',
+                  borderRadius: '8px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 8px rgba(37,211,102,0.3)'
+                }}
+                onClick={() => {
+                  setFeeCardDetailType('pending');
+                  setFeeCardModalSearch('');
+                }}
+              >
+                💬 View Pending & Send Reminders
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Dashboard Revenue & Fee Cards (Clickable for Full Page Details) */}
         <div className="stats-grid fees-stats-grid">
           <div
@@ -10734,14 +11004,27 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
           <div
             className="stat-card"
             style={{
-              borderLeft: '4px solid #ff6b6b'
+              borderLeft: '4px solid #ff6b6b',
+              cursor: 'pointer',
+              transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+              position: 'relative'
             }}
+            onClick={() => {
+              setFeeCardDetailType('pending');
+              setFeeCardModalSearch('');
+            }}
+            title="Click to view full page of pending fee students and send reminders"
           >
             <div className="stat-details">
-              <h3 style={{ color: '#ff6b6b', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Pending Fees</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ color: '#ff6b6b', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Pending Fees</h3>
+                <span className="badge" style={{ background: 'rgba(255, 107, 107, 0.2)', color: '#ff6b6b', fontSize: '0.68rem', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(255, 107, 107, 0.3)' }}>
+                  💬 Reminders
+                </span>
+              </div>
               <p className="stat-value" style={{ color: '#ff6b6b', margin: 0 }}>₹{pendingFeesTotal.toLocaleString()}</p>
               <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
-                {totalUnpaid} student{totalUnpaid === 1 ? '' : 's'} unpaid for {formatMonthName(feeMonth)}
+                {totalUnpaid} student{totalUnpaid === 1 ? '' : 's'} unpaid • Click to send reminders
               </span>
             </div>
           </div>
@@ -13997,26 +14280,23 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
 
   const renderReminders = () => {
     const currentSystemMonth = new Date().toISOString().slice(0, 7);
-    const unpaidStudents = searchedStudents.filter(s => {
-      const isInactive = (s.status || 'Active') === 'Inactive';
-      if (isInactive) return false;
-      const matchBranch = branchFilter === 'All' || !s.branch || String(s.branch).toLowerCase().trim() === String(branchFilter).toLowerCase().trim();
-      const matchBatch = batchFilter === 'All' || !s.batch || String(s.batch).toLowerCase().trim() === String(batchFilter).toLowerCase().trim();
+    const unpaidStudentsWithFees = (searchedStudents || [])
+      .filter(s => {
+        const isInactive = (s.status || 'Active') === 'Inactive' || s.status === 'SoftDeleted';
+        if (isInactive) return false;
+        const matchBranch = branchFilter === 'All' || !s.branch || String(s.branch).toLowerCase().trim() === String(branchFilter).toLowerCase().trim();
+        const matchBatch = batchFilter === 'All' || !s.batch || String(s.batch).toLowerCase().trim() === String(batchFilter).toLowerCase().trim();
+        return matchBranch && matchBatch;
+      })
+      .map(s => {
+        const fees = calculateStudentFees(s, currentSystemMonth);
+        return { student: s, fees };
+      })
+      .filter(item => item.fees.totalDue > 0);
 
-      const fees = calculateStudentFees(s, currentSystemMonth);
-      return matchBranch && matchBatch && fees.totalDue > 0;
-    });
-
-    const sendReminderMessage = (student) => {
-      const pFee = student.pendingFees !== undefined ? Number(student.pendingFees) : 600;
-      const text = encodeURIComponent(`Hello ${student.studentName || student.name}, this is a gentle reminder from MasterFit Academy regarding your pending fee balance of ₹${pFee}. Please clear it at your earliest convenience.`);
-      const phone = student.phone || student.parentPhone;
-      if (phone) {
-        window.open(`https://wa.me/91${phone}?text=${text}`, '_blank');
-      } else {
-        alert(`No phone number available for ${student.studentName || student.name}`);
-      }
-    };
+    const totalPendingFeesAmount = unpaidStudentsWithFees.reduce((sum, item) => sum + item.fees.totalDue, 0);
+    const totalAdmissionDueAmount = unpaidStudentsWithFees.reduce((sum, item) => sum + item.fees.admissionDue, 0);
+    const totalMonthlyDueAmount = unpaidStudentsWithFees.reduce((sum, item) => sum + item.fees.monthlyDue, 0);
 
     return (
       <div className="reminders-container" style={{ maxWidth: '1200px', margin: '0 auto' }}>
@@ -14031,10 +14311,20 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                 Track student fee due alerts and send WhatsApp / SMS reminders directly to parents & students.
               </p>
             </div>
-            <div style={{ display: 'flex', gap: '1rem' }}>
+            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+              <div className="stat-card" style={{ padding: '0.75rem 1.25rem', minWidth: '160px', background: 'rgba(255, 69, 58, 0.1)', border: '1px solid rgba(255, 69, 58, 0.3)', borderRadius: '10px' }}>
+                <span style={{ fontSize: '0.72rem', color: '#ff6b6b', fontWeight: 700, textTransform: 'uppercase' }}>Total Fee Pending</span>
+                <p style={{ fontSize: '1.6rem', fontWeight: 800, color: '#ff453a', margin: '2px 0 0 0' }}>₹{totalPendingFeesAmount.toLocaleString()}</p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', display: 'block', marginTop: '2px' }}>
+                  Monthly: ₹{totalMonthlyDueAmount.toLocaleString()} • Adm: ₹{totalAdmissionDueAmount.toLocaleString()}
+                </span>
+              </div>
               <div className="stat-card" style={{ padding: '0.75rem 1.25rem', minWidth: '130px', background: 'rgba(255, 215, 0, 0.08)', border: '1px solid rgba(255, 215, 0, 0.2)', borderRadius: '10px' }}>
-                <span style={{ fontSize: '0.72rem', color: '#FFD700', fontWeight: 700, textTransform: 'uppercase' }}>Pending Dues</span>
-                <p style={{ fontSize: '1.5rem', fontWeight: 800, color: '#fff', margin: '2px 0 0 0' }}>{unpaidStudents.length}</p>
+                <span style={{ fontSize: '0.72rem', color: '#FFD700', fontWeight: 700, textTransform: 'uppercase' }}>Pending Students</span>
+                <p style={{ fontSize: '1.6rem', fontWeight: 800, color: '#fff', margin: '2px 0 0 0' }}>{unpaidStudentsWithFees.length}</p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', display: 'block', marginTop: '2px' }}>
+                  Students with dues
+                </span>
               </div>
             </div>
           </div>
@@ -14044,8 +14334,11 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
         <div className="panel" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '16px', overflow: 'hidden', padding: 0 }}>
           <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, fontSize: '1.1rem', color: '#fff' }}>
-              <Wallet size={18} color="#FFD700" /> Pending Dues List ({unpaidStudents.length})
+              <Wallet size={18} color="#FFD700" /> Pending Dues List ({unpaidStudentsWithFees.length})
             </h3>
+            <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
+              Total Outstanding: <strong style={{ color: '#ff453a' }}>₹{totalPendingFeesAmount.toLocaleString()}</strong>
+            </div>
           </div>
 
           <div className="premium-table-container" style={{ border: 'none', background: 'transparent' }}>
@@ -14060,13 +14353,16 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                 </tr>
               </thead>
               <tbody>
-                {unpaidStudents.length > 0 ? unpaidStudents.map(student => {
-                  const pFee = student.pendingFees !== undefined ? Number(student.pendingFees) : 600;
+                {unpaidStudentsWithFees.length > 0 ? unpaidStudentsWithFees.map(({ student, fees }) => {
                   return (
                     <tr key={student.id}>
                       <td data-label="Student Name">
                         <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left' }}>
-                          <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.92rem' }}>
+                          <span
+                            style={{ fontWeight: 700, color: '#fff', fontSize: '0.92rem', cursor: 'pointer', textDecoration: 'underline' }}
+                            onClick={() => handleSelectStudent(student)}
+                            title="Click to view student profile"
+                          >
                             {student.studentName || student.name}
                           </span>
                           <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
@@ -14091,18 +14387,38 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                         </div>
                       </td>
                       <td data-label="Pending Amount">
-                        <span className="badge badge-gold" style={{ fontSize: '0.88rem', fontWeight: 800, padding: '4px 10px' }}>
-                          ₹{pFee}
-                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span className="badge badge-gold" style={{ fontSize: '0.92rem', fontWeight: 800, padding: '4px 10px', width: 'fit-content' }}>
+                            ₹{fees.totalDue.toLocaleString()}
+                          </span>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: '3px' }}>
+                            {fees.admissionDue > 0 && <span style={{ color: '#FFD700', marginRight: '6px' }}>🎓 Adm: ₹{fees.admissionDue.toLocaleString()}</span>}
+                            {fees.unpaidMonths.length > 0 && <span style={{ color: '#ff6b6b' }}>📅 {fees.unpaidMonths.length} Mo: ₹{fees.monthlyDue.toLocaleString()}</span>}
+                          </div>
+                        </div>
                       </td>
                       <td data-label="Send Reminder" style={{ textAlign: 'center' }}>
-                        <button
-                          className="btn-primary btn-small"
-                          style={{ padding: '6px 14px', fontWeight: 700, whiteSpace: 'nowrap', background: '#25D366', borderColor: '#25D366', color: '#fff' }}
-                          onClick={() => sendReminderMessage(student)}
-                        >
-                          💬 Send WhatsApp Alert
-                        </button>
+                        <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            className="btn-primary btn-small"
+                            style={{ padding: '6px 14px', fontWeight: 700, whiteSpace: 'nowrap', background: '#25D366', borderColor: '#25D366', color: '#fff', boxShadow: '0 2px 8px rgba(37,211,102,0.3)', cursor: 'pointer' }}
+                            onClick={() => sendStudentFeeReminder(student, fees, currentSystemMonth)}
+                          >
+                            💬 Send WhatsApp Alert
+                          </button>
+                          {student.parentPhone && student.phone && student.parentPhone !== student.phone && (
+                            <button
+                              type="button"
+                              className="btn-secondary btn-small"
+                              style={{ padding: '6px 10px', fontSize: '0.75rem', whiteSpace: 'nowrap', cursor: 'pointer' }}
+                              onClick={() => sendStudentFeeReminder(student, fees, currentSystemMonth, 'parent')}
+                              title="Send WhatsApp Alert to Parent Phone"
+                            >
+                              👨 Parent
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -21240,10 +21556,58 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                         </div>
 
                         {/* Total Dues */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '0.75rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: feeDetails.totalDue > 0 ? '0.75rem' : '1.25rem', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '0.75rem' }}>
                           <span style={{ color: '#fff', fontSize: '0.95rem', fontWeight: 700 }}>Total Dues:</span>
                           <span style={{ fontSize: '1.35rem', color: feeDetails.totalDue > 0 ? '#ff453a' : '#4CAF50', fontFamily: 'Outfit, sans-serif', fontWeight: 800 }}>₹{feeDetails.totalDue}</span>
                         </div>
+
+                        {feeDetails.totalDue > 0 && (
+                          <div style={{ marginBottom: '1.25rem', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              className="btn-primary"
+                              style={{
+                                flex: 1,
+                                minWidth: '180px',
+                                background: '#25D366',
+                                borderColor: '#25D366',
+                                color: '#fff',
+                                fontWeight: 700,
+                                fontSize: '0.82rem',
+                                padding: '8px 12px',
+                                borderRadius: '8px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '6px',
+                                cursor: 'pointer',
+                                boxShadow: '0 3px 10px rgba(37, 211, 102, 0.25)'
+                              }}
+                              onClick={() => sendStudentFeeReminder(selectedStudent, feeDetails, profileFeeMonth)}
+                            >
+                              💬 Send Fee Reminder (₹{feeDetails.totalDue})
+                            </button>
+                            {selectedStudent.parentPhone && selectedStudent.phone && selectedStudent.parentPhone !== selectedStudent.phone && (
+                              <button
+                                type="button"
+                                className="btn-secondary"
+                                style={{
+                                  fontSize: '0.75rem',
+                                  padding: '8px 10px',
+                                  borderRadius: '8px',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                                onClick={() => sendStudentFeeReminder(selectedStudent, feeDetails, profileFeeMonth, 'parent')}
+                                title="Send WhatsApp Reminder to Parent Phone"
+                              >
+                                👨 Parent
+                              </button>
+                            )}
+                          </div>
+                        )}
 
                         {/* Unpaid Months Grid */}
                         {feeDetails.unpaidMonths.length > 0 && (
