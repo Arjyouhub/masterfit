@@ -697,7 +697,7 @@ function App() {
 
   const [isEditGradingModalOpen, setIsEditGradingModalOpen] = useState(false);
   const [selectedEditGradingStudent, setSelectedEditGradingStudent] = useState(null);
-  const [editGradingForm, setEditGradingForm] = useState({ joinDate: '', lastGradingDate: '', belt: '' });
+  const [editGradingForm, setEditGradingForm] = useState({ joinDate: '', lastGradingDate: '', belt: '', trainerSuggestedBelt: '' });
 
   // Trainer Approval & Belt Suggestion Modal
   const [isTrainerApprovalModalOpen, setIsTrainerApprovalModalOpen] = useState(false);
@@ -10988,9 +10988,6 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                 <span className="stat-subtext" style={{ color: '#38bdf8', display: 'block', fontWeight: 600 }}>
                   {totalPaid} student{totalPaid === 1 ? '' : 's'} paid for {formatMonthName(feeMonth)}
                 </span>
-                <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', display: 'block', marginTop: '2px', fontSize: '0.74rem' }}>
-                  Total cash received in {formatMonthName(paymentMonth)}: ‚Çπ{paymentMonthRevenue.toLocaleString()}
-                </span>
               </div>
             </div>
           </div>
@@ -11062,9 +11059,9 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
           >
             <div className="stat-details">
               <h3 style={{ color: '#c084fc', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 700 }}>Total Payments</h3>
-              <p className="stat-value" style={{ color: '#fff', margin: 0 }}>{paymentCount}</p>
+              <p className="stat-value" style={{ color: '#fff', margin: 0 }}>‚Çπ{paymentMonthRevenue.toLocaleString()}</p>
               <span className="stat-subtext" style={{ color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
-                Receipt transactions in {formatMonthName(paymentMonth)}
+                {paymentCount} receipt transaction{paymentCount === 1 ? '' : 's'} in {formatMonthName(paymentMonth)}
               </span>
             </div>
           </div>
@@ -13176,10 +13173,15 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                                 style={{ color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.25)', width: '30px', height: '30px', borderRadius: '8px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
                                 onClick={() => {
                                   setSelectedEditGradingStudent(student);
+                                  const naturalNext = getNextBelt(student.belt);
+                                  const initialSuggested = (student.trainerSuggestedBelt && student.trainerSuggestedBelt !== student.belt)
+                                    ? student.trainerSuggestedBelt
+                                    : (naturalNext !== 'None' ? naturalNext : (student.belt || 'Yellow Belt'));
                                   setEditGradingForm({
                                     joinDate: student.joinDate,
                                     lastGradingDate: student.lastGradingDate || 'N/A',
-                                    belt: student.belt,
+                                    belt: student.belt || 'White Belt',
+                                    trainerSuggestedBelt: initialSuggested,
                                     eligibilityOverride: student.eligibilityOverride || ''
                                   });
                                   setIsEditGradingModalOpen(true);
@@ -13574,6 +13576,47 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                   </div>
 
                   {gradeResult === 'Pass' && (
+                    <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#4ade80', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '8px' }}>
+                        üèÜ Promoted Belt / Level If Passed *
+                      </label>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <input
+                          type="text"
+                          className="form-control"
+                          style={{ height: '40px', borderRadius: '10px', flex: 1, fontSize: '0.9rem' }}
+                          value={targetBelt || ''}
+                          onChange={(e) => setTargetBelt(e.target.value)}
+                          placeholder="Promoted Belt (e.g. Orange Belt)"
+                          list="grading-belt-options-list"
+                          required
+                        />
+                        <select
+                          className="form-control"
+                          style={{ height: '40px', borderRadius: '10px', width: 'auto', maxWidth: '160px', fontSize: '0.85rem' }}
+                          value={targetBelt || ''}
+                          onChange={(e) => setTargetBelt(e.target.value)}
+                        >
+                          <option value="">-- Quick Select --</option>
+                          <optgroup label="ü•ã Traditional Belts">
+                            {[
+                              'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt',
+                              'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt'
+                            ].map(b => (
+                              <option key={b} value={b}>{b}</option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="ü•ä Kickboxing / Boxing Levels">
+                            {['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
+                              <option key={b} value={b}>{b}</option>
+                            ))}
+                          </optgroup>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {gradeResult === 'Pass' && (
                     <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                       <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '8px' }}>
                         Awarded Grade Level *
@@ -13675,9 +13718,10 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                     </div>
                   </div>
 
-                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                    <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', display: 'block', marginBottom: '6px' }}>
-                      Present Grade / Level
+                  {/* Field 1: Present Belt / Level */}
+                  <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                    <label style={{ fontSize: '0.82rem', fontWeight: 700, color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                      ü•ã Present Grade / Level (Current Belt)
                     </label>
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                       <input
@@ -13685,8 +13729,21 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                         className="form-control"
                         style={{ height: '40px', borderRadius: '10px', flex: 1, fontSize: '0.9rem' }}
                         value={editGradingForm.belt || ''}
-                        onChange={(e) => setEditGradingForm({ ...editGradingForm, belt: e.target.value })}
-                        placeholder="Type or select belt/level (e.g. Orange Belt)"
+                        onChange={(e) => {
+                          const newCurrentBelt = e.target.value;
+                          setEditGradingForm(prev => {
+                            const updated = { ...prev, belt: newCurrentBelt };
+                            const oldNext = getNextBelt(prev.belt);
+                            if (!prev.trainerSuggestedBelt || prev.trainerSuggestedBelt === oldNext) {
+                              const newNext = getNextBelt(newCurrentBelt);
+                              if (newNext && newNext !== 'None') {
+                                updated.trainerSuggestedBelt = newNext;
+                              }
+                            }
+                            return updated;
+                          });
+                        }}
+                        placeholder="Current Belt (e.g. Purple Belt)"
                         list="grading-belt-options-list"
                         required
                       />
@@ -13694,15 +13751,26 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                         className="form-control"
                         style={{ height: '40px', borderRadius: '10px', width: 'auto', maxWidth: '160px', fontSize: '0.85rem' }}
                         value={editGradingForm.belt || ''}
-                        onChange={(e) => setEditGradingForm({ ...editGradingForm, belt: e.target.value })}
+                        onChange={(e) => {
+                          const newCurrentBelt = e.target.value;
+                          setEditGradingForm(prev => {
+                            const updated = { ...prev, belt: newCurrentBelt };
+                            const oldNext = getNextBelt(prev.belt);
+                            if (!prev.trainerSuggestedBelt || prev.trainerSuggestedBelt === oldNext) {
+                              const newNext = getNextBelt(newCurrentBelt);
+                              if (newNext && newNext !== 'None') {
+                                updated.trainerSuggestedBelt = newNext;
+                              }
+                            }
+                            return updated;
+                          });
+                        }}
                       >
                         <option value="">-- Quick Select --</option>
                         <optgroup label="ü•ã Traditional Belts">
                           {[
                             'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt',
-                            'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt',
-                            'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple',
-                            'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black'
+                            'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt'
                           ].map(b => (
                             <option key={b} value={b}>{b}</option>
                           ))}
@@ -13714,19 +13782,63 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                         </optgroup>
                       </select>
                     </div>
-                    <datalist id="grading-belt-options-list">
-                      {[
-                        'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt',
-                        'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt',
-                        'Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'
-                      ].map(b => (
-                        <option key={b} value={b} />
-                      ))}
-                    </datalist>
                     <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
-                      Type any custom grade/level or choose from the quick selection dropdown.
+                      Current belt held by the student before taking the exam.
                     </span>
                   </div>
+
+                  {/* Field 2: Promoted Belt / Level (If Passed) */}
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label style={{ fontSize: '0.82rem', fontWeight: 700, color: '#4ade80', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                      üèÜ Promoted Belt / Level (If Passed Exam)
+                    </label>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <input
+                        type="text"
+                        className="form-control"
+                        style={{ height: '40px', borderRadius: '10px', flex: 1, fontSize: '0.9rem' }}
+                        value={editGradingForm.trainerSuggestedBelt || ''}
+                        onChange={(e) => setEditGradingForm({ ...editGradingForm, trainerSuggestedBelt: e.target.value })}
+                        placeholder="Promoted Belt If Passed (e.g. Brown 1 Belt)"
+                        list="grading-belt-options-list"
+                        required
+                      />
+                      <select
+                        className="form-control"
+                        style={{ height: '40px', borderRadius: '10px', width: 'auto', maxWidth: '160px', fontSize: '0.85rem' }}
+                        value={editGradingForm.trainerSuggestedBelt || ''}
+                        onChange={(e) => setEditGradingForm({ ...editGradingForm, trainerSuggestedBelt: e.target.value })}
+                      >
+                        <option value="">-- Quick Select --</option>
+                        <optgroup label="ü•ã Traditional Belts">
+                          {[
+                            'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt',
+                            'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt'
+                          ].map(b => (
+                            <option key={b} value={b}>{b}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="ü•ä Kickboxing / Boxing Levels">
+                          {['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
+                            <option key={b} value={b}>{b}</option>
+                          ))}
+                        </optgroup>
+                      </select>
+                    </div>
+                    <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
+                      The belt awarded to the student upon successfully passing the grading examination.
+                    </span>
+                  </div>
+
+                  <datalist id="grading-belt-options-list">
+                    {[
+                      'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt',
+                      'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt',
+                      'Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'
+                    ].map(b => (
+                      <option key={b} value={b} />
+                    ))}
+                  </datalist>
 
                   <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                     <button

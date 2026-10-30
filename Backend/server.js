@@ -3947,11 +3947,13 @@ app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('s
     }
 
     if (belt !== undefined && belt !== student.belt) {
-      const matchedBelt = BELT_ORDER.find(b => b.toLowerCase() === String(belt).toLowerCase().trim());
-      if (!matchedBelt) {
-        return res.status(400).json({ error: `Invalid belt level. Choose from: ${BELT_ORDER.join(', ')}` });
-      }
+      const matchedBelt = BELT_ORDER.find(b => b.toLowerCase() === String(belt).toLowerCase().trim()) || String(belt).trim();
       student.belt = matchedBelt;
+      modified = true;
+    }
+
+    if (req.body.trainerSuggestedBelt !== undefined && req.body.trainerSuggestedBelt !== student.trainerSuggestedBelt) {
+      student.trainerSuggestedBelt = String(req.body.trainerSuggestedBelt).trim();
       modified = true;
     }
 
