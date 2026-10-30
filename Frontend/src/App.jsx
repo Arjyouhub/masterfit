@@ -663,6 +663,8 @@ function App() {
   const [gradingFilterEligibility, setGradingFilterEligibility] = useState('All');
   const [gradingFilterTrainerApproval, setGradingFilterTrainerApproval] = useState('All');
   const [gradingFilterResult, setGradingFilterResult] = useState('All');
+  const [gradingFilterMonth, setGradingFilterMonth] = useState('current');
+  const [availableGradingMonths, setAvailableGradingMonths] = useState([]);
   const [gradingFilterStartDate, setGradingFilterStartDate] = useState('');
   const [gradingFilterEndDate, setGradingFilterEndDate] = useState('');
   const [allowBranchAdminChangeBelt, setAllowBranchAdminChangeBelt] = useState(false);
@@ -1685,7 +1687,10 @@ function App() {
       batchParam = (gradingFilterBatch && gradingFilterBatch !== 'All') ? gradingFilterBatch : (activeBatch || 'All');
     }
 
-    fetch(`${API_BASE_URL}/grading/students?branch=${encodeURIComponent(branchParam)}&batch=${encodeURIComponent(batchParam)}`)
+    const trainerParam = gradingFilterTrainer || 'All';
+    const monthParam = gradingFilterMonth || 'All';
+
+    fetch(`${API_BASE_URL}/grading/students?branch=${encodeURIComponent(branchParam)}&batch=${encodeURIComponent(batchParam)}&trainer=${encodeURIComponent(trainerParam)}&month=${encodeURIComponent(monthParam)}`)
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch student grading details.');
         return res.json();
@@ -1698,6 +1703,18 @@ function App() {
         setGradingError(err.message);
       })
       .finally(() => setLoadingGrading(false));
+
+    // Also fetch unique grading candidate months from API
+    fetch(`${API_BASE_URL}/grading/months?branch=${encodeURIComponent(branchParam)}&batch=${encodeURIComponent(batchParam)}&trainer=${encodeURIComponent(trainerParam)}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data && Array.isArray(data.months)) {
+          setAvailableGradingMonths(data.months);
+        }
+      })
+      .catch(err => {
+        console.warn('Could not fetch grading months:', err);
+      });
   };
 
   const handleCreateAdmin = (e) => {
@@ -1935,7 +1952,7 @@ function App() {
     if (currentView === 'grading' && (activeRole === 'superadmin' || activeRole === 'developer' || activeRole === 'branchadmin' || activeRole === 'trainer')) {
       fetchGradingStudents();
     }
-  }, [gradingFilterBranch, gradingFilterBatch, currentView, loggedInUser]);
+  }, [gradingFilterBranch, gradingFilterBatch, gradingFilterTrainer, gradingFilterMonth, currentView, loggedInUser]);
 
   // Dynamic branches & batches loading for Login & Trainer Registration from MongoDB
   useEffect(() => {
@@ -11878,7 +11895,17 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
         matchesTrainer = matchesStudentTrainer(student, gradingFilterTrainer);
       }
 
-      return matchesSearch && matchesBatch && matchesTrainer && matchesBelt && matchesEligibility && matchesResult && matchesTrainerApproval;
+      let matchesMonth = true;
+      if (gradingFilterMonth && gradingFilterMonth !== 'All') {
+        const targetMonth = (gradingFilterMonth === 'current' || gradingFilterMonth === 'auto')
+          ? new Date().toISOString().slice(0, 7)
+          : gradingFilterMonth;
+        const nextEligible = String(student.nextEligibleGradingDate || '').toLowerCase();
+        const lastGrading = String(student.lastGradingDate && student.lastGradingDate !== 'N/A' ? student.lastGradingDate : '').toLowerCase();
+        matchesMonth = nextEligible.startsWith(targetMonth) || lastGrading.startsWith(targetMonth);
+      }
+
+      return matchesSearch && matchesBatch && matchesTrainer && matchesBelt && matchesEligibility && matchesResult && matchesTrainerApproval && matchesMonth;
     });
   };
 
@@ -12513,6 +12540,40 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
 
       const filtered = getFilteredGradingStudents();
 
+      // Month calculation & auto-discovery helper
+      const currentMonthStr = new Date().toISOString().slice(0, 7);
+      const formatGradingMonthLabel = (mStr) => {
+        if (!mStr || mStr === 'All') return 'All Months';
+        try {
+          const [year, month] = mStr.split('-');
+          const date = new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1);
+          return date.toLocaleString('default', { month: 'short', year: 'numeric' });
+        } catch (e) {
+          return mStr;
+        }
+      };
+
+      // Aggregate candidate counts per month from scoped candidates
+      const detectedMonthsMap = {};
+      scopedCandidates.forEach(s => {
+        const m = String(s.nextEligibleGradingDate || '').slice(0, 7);
+        if (/^\d{4}-\d{2}$/.test(m)) {
+          detectedMonthsMap[m] = (detectedMonthsMap[m] || 0) + 1;
+        }
+      });
+      if (Array.isArray(availableGradingMonths)) {
+        availableGradingMonths.forEach(item => {
+          if (item && item.month && !detectedMonthsMap[item.month]) {
+            detectedMonthsMap[item.month] = item.count;
+          }
+        });
+      }
+      const detectedMonthList = Object.keys(detectedMonthsMap).sort();
+      const currentMonthCount = scopedCandidates.filter(s => {
+        const nextEligible = String(s.nextEligibleGradingDate || '').slice(0, 7);
+        return nextEligible === currentMonthStr;
+      }).length;
+
       // Stats calculations based on scoped candidates
       const totalCandidatesCount = scopedCandidates.length;
       const eligibleCount = scopedCandidates.filter(s => s.eligibilityStatus === 'Eligible').length;
@@ -12717,6 +12778,17 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
               >
                 ‚ùå Failed / Retest ({failedCount})
               </button>
+              <button
+                type="button"
+                className={`quick-chip ${gradingFilterMonth === currentMonthStr || gradingFilterMonth === 'current' ? 'active-eligible' : ''}`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                onClick={() => {
+                  setGradingFilterMonth(gradingFilterMonth === currentMonthStr || gradingFilterMonth === 'current' ? 'All' : currentMonthStr);
+                }}
+                title={`Auto-filter candidates eligible in ${formatGradingMonthLabel(currentMonthStr)}`}
+              >
+                <span>‚ö° Auto Month: {formatGradingMonthLabel(currentMonthStr)} ({currentMonthCount})</span>
+              </button>
             </div>
 
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -12817,6 +12889,31 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                 </select>
               </div>
 
+              {/* Auto Month Filter */}
+              <div style={{ minWidth: '160px', flex: '1 1 160px' }}>
+                <select
+                  className="form-control"
+                  style={{
+                    height: '38px',
+                    borderRadius: '8px',
+                    fontSize: '0.85rem',
+                    width: '100%',
+                    borderColor: gradingFilterMonth !== 'All' ? '#38bdf8' : undefined,
+                    backgroundColor: gradingFilterMonth !== 'All' ? 'rgba(56, 189, 248, 0.08)' : undefined
+                  }}
+                  value={gradingFilterMonth}
+                  onChange={(e) => setGradingFilterMonth(e.target.value)}
+                >
+                  <option value="current">‚ö° Auto: Current Month ({formatGradingMonthLabel(currentMonthStr)})</option>
+                  <option value="All">üìÖ All Months</option>
+                  {detectedMonthList.map(m => (
+                    <option key={m} value={m}>
+                      {formatGradingMonthLabel(m)} {m === currentMonthStr ? '‚≠ê (Current)' : ''} ({detectedMonthsMap[m] || 0})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Reset Button */}
               <button
                 className="btn-secondary"
@@ -12829,6 +12926,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                   setGradingFilterEligibility('All');
                   setGradingFilterTrainerApproval('All');
                   setGradingFilterResult('All');
+                  setGradingFilterMonth('current');
                   setSearchQuery('');
                 }}
               >

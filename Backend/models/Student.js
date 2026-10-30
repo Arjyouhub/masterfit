@@ -62,7 +62,6 @@ const studentSchema = new mongoose.Schema({
   trainerSuggestedBelt: { type: String, default: '' },
   trainerGradingNotes: { type: String, default: '' }
 }, { timestamps: true });
-
 studentSchema.index({ branch: 1, status: 1 });
 studentSchema.index({ branch: 1, schedule: 1, status: 1 });
 

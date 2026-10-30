@@ -3619,7 +3619,60 @@ app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin
       });
     }
 
+    // Auto Month Find & filter for grading candidates
+    if (req.query.month && req.query.month.toLowerCase() !== 'all') {
+      let qMonth = req.query.month.toLowerCase().trim();
+      if (qMonth === 'auto' || qMonth === 'current') {
+        qMonth = new Date().toISOString().slice(0, 7);
+      }
+      processedStudents = processedStudents.filter(s => {
+        const nextEligible = (s.nextEligibleGradingDate || '').toLowerCase();
+        const lastGrading = (s.lastGradingDate && s.lastGradingDate !== 'N/A' ? s.lastGradingDate : '').toLowerCase();
+        return nextEligible.startsWith(qMonth) || lastGrading.startsWith(qMonth);
+      });
+    }
+
     res.json(processedStudents);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 1b. Auto-find unique grading candidate months with counts
+app.get('/api/grading/months', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
+  try {
+    const { role, branch } = req.user;
+    let filter = {};
+    if (role === 'branchadmin' || role === 'trainer') {
+      filter.branch = new RegExp(`^${branch}$`, 'i');
+    } else if (req.query.branch && req.query.branch.toLowerCase() !== 'all') {
+      filter.branch = new RegExp(`^${req.query.branch}$`, 'i');
+    }
+
+    const baseStudents = await Student.find(filter).select('joinDate nextEligibleGradingDate lastGradingDate').lean();
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const monthCounts = {};
+
+    baseStudents.forEach(s => {
+      let nextDate = s.nextEligibleGradingDate;
+      if (!nextDate && s.joinDate) {
+        nextDate = calculateNextEligibleDate(s.joinDate);
+      }
+      if (nextDate && nextDate !== 'N/A') {
+        const m = String(nextDate).slice(0, 7);
+        if (/^\d{4}-\d{2}$/.test(m)) {
+          monthCounts[m] = (monthCounts[m] || 0) + 1;
+        }
+      }
+    });
+
+    const months = Object.keys(monthCounts).sort().map(m => ({
+      month: m,
+      count: monthCounts[m],
+      isCurrent: m === currentMonth
+    }));
+
+    res.json({ currentMonth, months });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
