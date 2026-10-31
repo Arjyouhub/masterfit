@@ -697,12 +697,13 @@ function App() {
 
   const [isEditGradingModalOpen, setIsEditGradingModalOpen] = useState(false);
   const [selectedEditGradingStudent, setSelectedEditGradingStudent] = useState(null);
-  const [editGradingForm, setEditGradingForm] = useState({ joinDate: '', lastGradingDate: '', belt: '', trainerSuggestedBelt: '' });
+  const [editGradingForm, setEditGradingForm] = useState({ joinDate: '', lastGradingDate: '', belt: '', trainerSuggestedBelt: '', trainerBeltSize: 'Medium', trainerGradingNotes: '', trainerApprovedForGrading: false });
 
   // Trainer Approval & Belt Suggestion Modal
   const [isTrainerApprovalModalOpen, setIsTrainerApprovalModalOpen] = useState(false);
   const [selectedTrainerApprovalStudent, setSelectedTrainerApprovalStudent] = useState(null);
   const [trainerSuggestedBeltInput, setTrainerSuggestedBeltInput] = useState('');
+  const [trainerBeltSizeInput, setTrainerBeltSizeInput] = useState('Medium');
   const [trainerGradingNotesInput, setTrainerGradingNotesInput] = useState('');
 
   const [classFormSlotType, setClassFormSlotType] = useState('Morning');
@@ -1688,7 +1689,7 @@ function App() {
     }
 
     const trainerParam = gradingFilterTrainer || 'All';
-    const monthParam = gradingFilterMonth || 'All';
+    const monthParam = (activeRole === 'trainer') ? 'All' : (gradingFilterMonth || 'All');
 
     fetch(`${API_BASE_URL}/grading/students?branch=${encodeURIComponent(branchParam)}&batch=${encodeURIComponent(batchParam)}&trainer=${encodeURIComponent(trainerParam)}&month=${encodeURIComponent(monthParam)}`)
       .then(res => {
@@ -11804,10 +11805,14 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
         }
         if (allowedTrainerBatches.length > 0) {
           const studentBatchLower = (student.batch || '').toLowerCase().trim();
-          if (!allowedTrainerBatches.includes(studentBatchLower)) {
+          const studentTrainerLower = (student.trainer || '').toLowerCase().trim();
+          const userLower = (loggedInUser?.username || '').toLowerCase().trim();
+          const isTrainerDirectMatch = studentTrainerLower && (studentTrainerLower === userLower || studentTrainerLower.includes(userLower));
+          if (!isTrainerDirectMatch && !allowedTrainerBatches.includes(studentBatchLower)) {
             const batchNameMatch = allowedTrainerBatches.some(b => {
               const opt = safeBatchOptions.find(o => o && (o.id || o.code || '').toLowerCase() === b);
               return (opt && opt.name && opt.name.toLowerCase().trim() === studentBatchLower) ||
+                (opt && opt.code && opt.code.toLowerCase().trim() === studentBatchLower) ||
                 (opt && schedulesMatch(opt.schedule, student.schedule));
             });
             if (!batchNameMatch) return false;
@@ -11841,6 +11846,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
           const opt = safeBatchOptions.find(o => o && (o.id || o.code || '').toLowerCase() === filterBatchLower);
           if (opt) {
             matchesBatch = (opt.name && opt.name.toLowerCase().trim() === studentBatchLower) ||
+              (opt.code && opt.code.toLowerCase().trim() === studentBatchLower) ||
               schedulesMatch(opt.schedule, student.schedule);
           }
         }
@@ -11857,8 +11863,8 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
       }
 
       let matchesResult = true;
-      const resVal = getStudentExamResult(student);
-      if (gradingFilterResult !== 'All') {
+      if (!isTrainer && gradingFilterResult !== 'All') {
+        const resVal = getStudentExamResult(student);
         if (gradingFilterResult === 'No History') {
           matchesResult = !resVal || resVal === 'N/A';
         } else {
@@ -11867,10 +11873,12 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
       }
 
       let matchesTrainerApproval = true;
-      if (gradingFilterTrainerApproval === 'Approved') {
-        matchesTrainerApproval = !!student.trainerApprovedForGrading;
-      } else if (gradingFilterTrainerApproval === 'Pending') {
-        matchesTrainerApproval = !student.trainerApprovedForGrading;
+      if (!isTrainer) {
+        if (gradingFilterTrainerApproval === 'Approved') {
+          matchesTrainerApproval = !!student.trainerApprovedForGrading;
+        } else if (gradingFilterTrainerApproval === 'Pending') {
+          matchesTrainerApproval = !student.trainerApprovedForGrading;
+        }
       }
 
       // In Admin page (Super Admin, Branch Admin, Developer):
@@ -11893,13 +11901,14 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
       }
 
       let matchesMonth = true;
-      if (gradingFilterMonth && gradingFilterMonth !== 'All') {
+      if (!isTrainer && gradingFilterMonth && gradingFilterMonth !== 'All') {
         const targetMonth = (gradingFilterMonth === 'current' || gradingFilterMonth === 'auto')
           ? new Date().toISOString().slice(0, 7)
           : gradingFilterMonth;
         const nextEligible = String(student.nextEligibleGradingDate || '').toLowerCase();
         const lastGrading = String(student.lastGradingDate && student.lastGradingDate !== 'N/A' ? student.lastGradingDate : '').toLowerCase();
-        matchesMonth = nextEligible.startsWith(targetMonth) || lastGrading.startsWith(targetMonth);
+        // If student is trainer approved, ALWAYS match so admin sees them!
+        matchesMonth = !!student.trainerApprovedForGrading || nextEligible.startsWith(targetMonth) || lastGrading.startsWith(targetMonth);
       }
 
       return matchesSearch && matchesBatch && matchesTrainer && matchesBelt && matchesEligibility && matchesResult && matchesTrainerApproval && matchesMonth;
@@ -11910,11 +11919,12 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
     setSelectedTrainerApprovalStudent(student);
     const naturalNext = student.nextBelt && student.nextBelt !== 'None' ? student.nextBelt : getNextBelt(student.belt);
     setTrainerSuggestedBeltInput(student.trainerSuggestedBelt || (naturalNext !== 'None' ? naturalNext : (student.belt || 'Yellow Belt')));
+    setTrainerBeltSizeInput(student.trainerBeltSize || 'Medium');
     setTrainerGradingNotesInput(student.trainerGradingNotes || '');
     setIsTrainerApprovalModalOpen(true);
   };
 
-  const handleToggleTrainerApproval = (student, approvedStatus, suggestedBelt = '', notes = '') => {
+  const handleToggleTrainerApproval = (student, approvedStatus, suggestedBelt = '', beltSize = '', notes = '') => {
     setGradingError('');
     setGradingSuccess('');
 
@@ -11925,6 +11935,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
       trainerApprovedForGrading: approvedStatus,
       trainerApprovedAt: approvedStatus ? new Date().toISOString() : '',
       trainerSuggestedBelt: approvedStatus ? suggestedBelt : '',
+      trainerBeltSize: approvedStatus ? beltSize : '',
       trainerGradingNotes: approvedStatus ? notes : ''
     };
     setGradingStudents(prev => prev.map(s => (String(s.id || s._id) === targetId) ? { ...s, ...optimisticUpdate } : s));
@@ -11936,6 +11947,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
       body: JSON.stringify({
         approved: approvedStatus,
         suggestedBelt: approvedStatus ? suggestedBelt : '',
+        beltSize: approvedStatus ? beltSize : '',
         notes: approvedStatus ? notes : ''
       })
     })
@@ -11946,7 +11958,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
         setGradingStudents(prev => prev.map(s => (String(s.id || s._id) === resId) ? { ...s, ...data } : s));
         setStudents(prev => prev.map(s => (String(s.id || s._id) === resId) ? { ...s, ...data } : s));
         setGradingSuccess(approvedStatus
-          ? `Approved test for ${data.name}${suggestedBelt ? ` (Suggested: ${suggestedBelt})` : ''}.`
+          ? `Approved test for ${data.name}${suggestedBelt ? ` (Suggested: ${suggestedBelt}${beltSize ? `, Size: ${beltSize}` : ''})` : ''}.`
           : `Revoked test approval for ${data.name}.`
         );
         setTimeout(() => setGradingSuccess(''), 3500);
@@ -12497,10 +12509,14 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
           if (activeBranchLower && (student.branch || '').toLowerCase().trim() !== activeBranchLower) return false;
           if (allowedTrainerBatches.length > 0) {
             const studentBatchLower = (student.batch || '').toLowerCase().trim();
-            if (!allowedTrainerBatches.includes(studentBatchLower)) {
+            const studentTrainerLower = (student.trainer || '').toLowerCase().trim();
+            const userLower = (loggedInUser?.username || '').toLowerCase().trim();
+            const isTrainerDirectMatch = studentTrainerLower && (studentTrainerLower === userLower || studentTrainerLower.includes(userLower));
+            if (!isTrainerDirectMatch && !allowedTrainerBatches.includes(studentBatchLower)) {
               const batchNameMatch = allowedTrainerBatches.some(b => {
                 const opt = safeBatchOptions.find(o => o && (o.id || o.code || '').toLowerCase() === b);
                 return (opt && opt.name && opt.name.toLowerCase().trim() === studentBatchLower) ||
+                  (opt && opt.code && opt.code.toLowerCase().trim() === studentBatchLower) ||
                   (opt && schedulesMatch(opt.schedule, student.schedule));
               });
               if (!batchNameMatch) return false;
@@ -12522,6 +12538,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
             const opt = safeBatchOptions.find(o => o && (o.id || o.code || '').toLowerCase() === filterBatchLower);
             if (opt) {
               matchesBatch = (opt.name && opt.name.toLowerCase().trim() === studentBatchLower) ||
+                (opt.code && opt.code.toLowerCase().trim() === studentBatchLower) ||
                 schedulesMatch(opt.schedule, student.schedule);
             }
           }
@@ -12669,124 +12686,130 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                 <CheckCircle className="stat-icon" style={{ color: '#4ade80' }} size={18} />
               </div>
               <div className="stat-details">
-                <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#86efac', fontSize: '0.72rem', fontWeight: 600 }}>Trainer Approved</h3>
+                <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#86efac', fontSize: '0.72rem', fontWeight: 600 }}>{isTrainer ? 'Approved for Test' : 'Trainer Approved'}</h3>
                 <p className="stat-value" style={{ color: '#4ade80', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{trainerApprovedCount}</p>
               </div>
             </div>
 
-            <div
-              className={`stat-card glow-card-blue ${gradingFilterResult === 'Pass' ? 'active-glow' : ''}`}
-              style={{
-                background: 'linear-gradient(145deg, rgba(18, 28, 45, 0.7) 0%, rgba(13, 19, 32, 0.8) 100%)',
-                border: gradingFilterResult === 'Pass' ? '2px solid #60a5fa' : '1px solid rgba(59, 130, 246, 0.25)',
-                borderRadius: '14px',
-                padding: '1rem 1.25rem',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease'
-              }}
-              onClick={() => {
-                setGradingFilterEligibility('All');
-                setGradingFilterTrainerApproval('All');
-                setGradingFilterResult(gradingFilterResult === 'Pass' ? 'All' : 'Pass');
-              }}
-              title="Click to view all passed students"
-            >
-              <div className="stat-icon-wrapper" style={{ background: 'rgba(59, 130, 246, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
-                <Award className="stat-icon" style={{ color: '#60a5fa' }} size={18} />
-              </div>
-              <div className="stat-details">
-                <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#93c5fd', fontSize: '0.72rem', fontWeight: 600 }}>Passed Students</h3>
-                <p className="stat-value" style={{ color: '#60a5fa', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{passedCount}</p>
-              </div>
-            </div>
+            {!isTrainer && (
+              <>
+                <div
+                  className={`stat-card glow-card-blue ${gradingFilterResult === 'Pass' ? 'active-glow' : ''}`}
+                  style={{
+                    background: 'linear-gradient(145deg, rgba(18, 28, 45, 0.7) 0%, rgba(13, 19, 32, 0.8) 100%)',
+                    border: gradingFilterResult === 'Pass' ? '2px solid #60a5fa' : '1px solid rgba(59, 130, 246, 0.25)',
+                    borderRadius: '14px',
+                    padding: '1rem 1.25rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onClick={() => {
+                    setGradingFilterEligibility('All');
+                    setGradingFilterTrainerApproval('All');
+                    setGradingFilterResult(gradingFilterResult === 'Pass' ? 'All' : 'Pass');
+                  }}
+                  title="Click to view all passed students"
+                >
+                  <div className="stat-icon-wrapper" style={{ background: 'rgba(59, 130, 246, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
+                    <Award className="stat-icon" style={{ color: '#60a5fa' }} size={18} />
+                  </div>
+                  <div className="stat-details">
+                    <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#93c5fd', fontSize: '0.72rem', fontWeight: 600 }}>Passed Students</h3>
+                    <p className="stat-value" style={{ color: '#60a5fa', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{passedCount}</p>
+                  </div>
+                </div>
 
-            <div
-              className={`stat-card glow-card-red ${gradingFilterResult === 'Fail' ? 'active-glow' : ''}`}
-              style={{
-                background: 'linear-gradient(145deg, rgba(38, 16, 20, 0.7) 0%, rgba(24, 12, 14, 0.8) 100%)',
-                border: gradingFilterResult === 'Fail' ? '2px solid #fb7185' : '1px solid rgba(244, 63, 94, 0.25)',
-                borderRadius: '14px',
-                padding: '1rem 1.25rem',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease'
-              }}
-              onClick={() => {
-                setGradingFilterEligibility('All');
-                setGradingFilterTrainerApproval('All');
-                setGradingFilterResult(gradingFilterResult === 'Fail' ? 'All' : 'Fail');
-              }}
-              title="Click to view failed / retest students"
-            >
-              <div className="stat-icon-wrapper" style={{ background: 'rgba(244, 63, 94, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
-                <XCircle className="stat-icon" style={{ color: '#fb7185' }} size={18} />
-              </div>
-              <div className="stat-details">
-                <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#fda4af', fontSize: '0.72rem', fontWeight: 600 }}>Failed / Retest</h3>
-                <p className="stat-value" style={{ color: '#fb7185', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{failedCount}</p>
-              </div>
-            </div>
+                <div
+                  className={`stat-card glow-card-red ${gradingFilterResult === 'Fail' ? 'active-glow' : ''}`}
+                  style={{
+                    background: 'linear-gradient(145deg, rgba(38, 16, 20, 0.7) 0%, rgba(24, 12, 14, 0.8) 100%)',
+                    border: gradingFilterResult === 'Fail' ? '2px solid #fb7185' : '1px solid rgba(244, 63, 94, 0.25)',
+                    borderRadius: '14px',
+                    padding: '1rem 1.25rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onClick={() => {
+                    setGradingFilterEligibility('All');
+                    setGradingFilterTrainerApproval('All');
+                    setGradingFilterResult(gradingFilterResult === 'Fail' ? 'All' : 'Fail');
+                  }}
+                  title="Click to view failed / retest students"
+                >
+                  <div className="stat-icon-wrapper" style={{ background: 'rgba(244, 63, 94, 0.15)', width: '38px', height: '38px', borderRadius: '8px' }}>
+                    <XCircle className="stat-icon" style={{ color: '#fb7185' }} size={18} />
+                  </div>
+                  <div className="stat-details">
+                    <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.5px', color: '#fda4af', fontSize: '0.72rem', fontWeight: 600 }}>Failed / Retest</h3>
+                    <p className="stat-value" style={{ color: '#fb7185', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.6rem' }}>{failedCount}</p>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Streamlined Clean Filters Panel */}
           <div className="filters-wrapper-card" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
             {/* Quick Filter Chips */}
-            <div className="grading-quick-chips" style={{ marginBottom: '0.85rem', paddingBottom: '0.65rem' }}>
-              <button
-                type="button"
-                className={`quick-chip ${gradingFilterTrainerApproval === 'Approved' && gradingFilterResult === 'All' ? 'active-eligible' : ''}`}
-                onClick={() => {
-                  setGradingFilterResult('All');
-                  setGradingFilterEligibility('All');
-                  setGradingFilterTrainerApproval(gradingFilterTrainerApproval === 'Approved' ? 'All' : 'Approved');
-                }}
-              >
-                ✓ Trainer Approved ({trainerApprovedCount})
-              </button>
-              <button
-                type="button"
-                className={`quick-chip ${gradingFilterTrainerApproval === 'Pending' && gradingFilterResult === 'All' ? 'active-fail' : ''}`}
-                onClick={() => {
-                  setGradingFilterResult('All');
-                  setGradingFilterEligibility('All');
-                  setGradingFilterTrainerApproval(gradingFilterTrainerApproval === 'Pending' ? 'All' : 'Pending');
-                }}
-              >
-                ⏳ Pending Approval ({pendingApprovalCount})
-              </button>
-              <button
-                type="button"
-                className={`quick-chip ${gradingFilterResult === 'Pass' ? 'active-pass' : ''}`}
-                onClick={() => {
-                  setGradingFilterEligibility('All');
-                  setGradingFilterTrainerApproval('All');
-                  setGradingFilterResult(gradingFilterResult === 'Pass' ? 'All' : 'Pass');
-                }}
-              >
-                🏆 Passed Students ({passedCount})
-              </button>
-              <button
-                type="button"
-                className={`quick-chip ${gradingFilterResult === 'Fail' ? 'active-fail' : ''}`}
-                onClick={() => {
-                  setGradingFilterEligibility('All');
-                  setGradingFilterTrainerApproval('All');
-                  setGradingFilterResult(gradingFilterResult === 'Fail' ? 'All' : 'Fail');
-                }}
-              >
-                ❌ Failed / Retest ({failedCount})
-              </button>
-              <button
-                type="button"
-                className={`quick-chip ${gradingFilterMonth === currentMonthStr || gradingFilterMonth === 'current' ? 'active-eligible' : ''}`}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                onClick={() => {
-                  setGradingFilterMonth(gradingFilterMonth === currentMonthStr || gradingFilterMonth === 'current' ? 'All' : currentMonthStr);
-                }}
-                title={`Auto-filter candidates eligible in ${formatGradingMonthLabel(currentMonthStr)}`}
-              >
-                <span>⚡ Auto Month: {formatGradingMonthLabel(currentMonthStr)} ({currentMonthCount})</span>
-              </button>
-            </div>
+            {!isTrainer && (
+              <div className="grading-quick-chips" style={{ marginBottom: '0.85rem', paddingBottom: '0.65rem' }}>
+                <button
+                  type="button"
+                  className={`quick-chip ${gradingFilterTrainerApproval === 'Approved' && gradingFilterResult === 'All' ? 'active-eligible' : ''}`}
+                  onClick={() => {
+                    setGradingFilterResult('All');
+                    setGradingFilterEligibility('All');
+                    setGradingFilterTrainerApproval(gradingFilterTrainerApproval === 'Approved' ? 'All' : 'Approved');
+                  }}
+                >
+                  ✓ Trainer Approved ({trainerApprovedCount})
+                </button>
+                <button
+                  type="button"
+                  className={`quick-chip ${gradingFilterTrainerApproval === 'Pending' && gradingFilterResult === 'All' ? 'active-fail' : ''}`}
+                  onClick={() => {
+                    setGradingFilterResult('All');
+                    setGradingFilterEligibility('All');
+                    setGradingFilterTrainerApproval(gradingFilterTrainerApproval === 'Pending' ? 'All' : 'Pending');
+                  }}
+                >
+                  ⏳ Pending Approval ({pendingApprovalCount})
+                </button>
+                <button
+                  type="button"
+                  className={`quick-chip ${gradingFilterResult === 'Pass' ? 'active-pass' : ''}`}
+                  onClick={() => {
+                    setGradingFilterEligibility('All');
+                    setGradingFilterTrainerApproval('All');
+                    setGradingFilterResult(gradingFilterResult === 'Pass' ? 'All' : 'Pass');
+                  }}
+                >
+                  🏆 Passed Students ({passedCount})
+                </button>
+                <button
+                  type="button"
+                  className={`quick-chip ${gradingFilterResult === 'Fail' ? 'active-fail' : ''}`}
+                  onClick={() => {
+                    setGradingFilterEligibility('All');
+                    setGradingFilterTrainerApproval('All');
+                    setGradingFilterResult(gradingFilterResult === 'Fail' ? 'All' : 'Fail');
+                  }}
+                >
+                  ❌ Failed / Retest ({failedCount})
+                </button>
+                <button
+                  type="button"
+                  className={`quick-chip ${gradingFilterMonth === currentMonthStr || gradingFilterMonth === 'current' ? 'active-eligible' : ''}`}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  onClick={() => {
+                    setGradingFilterMonth(gradingFilterMonth === currentMonthStr || gradingFilterMonth === 'current' ? 'All' : currentMonthStr);
+                  }}
+                  title={`Auto-filter candidates eligible in ${formatGradingMonthLabel(currentMonthStr)}`}
+                >
+                  <span>⚡ Auto Month: {formatGradingMonthLabel(currentMonthStr)} ({currentMonthCount})</span>
+                </button>
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
               {/* Search Input */}
@@ -12866,50 +12889,54 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
               </div>
 
               {/* Exam Result Filter */}
-              <div style={{ minWidth: '150px', flex: '1 1 150px' }}>
-                <select
-                  className="form-control"
-                  style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
-                  value={gradingFilterResult}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setGradingFilterResult(val);
-                    if (val === 'Pass' || val === 'Fail') {
-                      setGradingFilterTrainerApproval('All');
-                    }
-                  }}
-                >
-                  <option value="All">All Exam Statuses</option>
-                  <option value="Pass">🏆 Passed Students ({passedCount})</option>
-                  <option value="Fail">❌ Failed / Retest ({failedCount})</option>
-                  <option value="No History">⏳ Not Graded Yet</option>
-                </select>
-              </div>
+              {!isTrainer && (
+                <div style={{ minWidth: '150px', flex: '1 1 150px' }}>
+                  <select
+                    className="form-control"
+                    style={{ height: '38px', borderRadius: '8px', fontSize: '0.85rem', width: '100%' }}
+                    value={gradingFilterResult}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setGradingFilterResult(val);
+                      if (val === 'Pass' || val === 'Fail') {
+                        setGradingFilterTrainerApproval('All');
+                      }
+                    }}
+                  >
+                    <option value="All">All Exam Statuses</option>
+                    <option value="Pass">🏆 Passed Students ({passedCount})</option>
+                    <option value="Fail">❌ Failed / Retest ({failedCount})</option>
+                    <option value="No History">⏳ Not Graded Yet</option>
+                  </select>
+                </div>
+              )}
 
               {/* Auto Month Filter */}
-              <div style={{ minWidth: '160px', flex: '1 1 160px' }}>
-                <select
-                  className="form-control"
-                  style={{
-                    height: '38px',
-                    borderRadius: '8px',
-                    fontSize: '0.85rem',
-                    width: '100%',
-                    borderColor: gradingFilterMonth !== 'All' ? '#38bdf8' : undefined,
-                    backgroundColor: gradingFilterMonth !== 'All' ? 'rgba(56, 189, 248, 0.08)' : undefined
-                  }}
-                  value={gradingFilterMonth}
-                  onChange={(e) => setGradingFilterMonth(e.target.value)}
-                >
-                  <option value="current">⚡ Auto: Current Month ({formatGradingMonthLabel(currentMonthStr)})</option>
-                  <option value="All">📅 All Months</option>
-                  {detectedMonthList.map(m => (
-                    <option key={m} value={m}>
-                      {formatGradingMonthLabel(m)} {m === currentMonthStr ? '⭐ (Current)' : ''} ({detectedMonthsMap[m] || 0})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {!isTrainer && (
+                <div style={{ minWidth: '160px', flex: '1 1 160px' }}>
+                  <select
+                    className="form-control"
+                    style={{
+                      height: '38px',
+                      borderRadius: '8px',
+                      fontSize: '0.85rem',
+                      width: '100%',
+                      borderColor: gradingFilterMonth !== 'All' ? '#38bdf8' : undefined,
+                      backgroundColor: gradingFilterMonth !== 'All' ? 'rgba(56, 189, 248, 0.08)' : undefined
+                    }}
+                    value={gradingFilterMonth}
+                    onChange={(e) => setGradingFilterMonth(e.target.value)}
+                  >
+                    <option value="current">⚡ Auto: Current Month ({formatGradingMonthLabel(currentMonthStr)})</option>
+                    <option value="All">📅 All Months</option>
+                    {detectedMonthList.map(m => (
+                      <option key={m} value={m}>
+                        {formatGradingMonthLabel(m)} {m === currentMonthStr ? '⭐ (Current)' : ''} ({detectedMonthsMap[m] || 0})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Reset Button */}
               <button
@@ -12923,7 +12950,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                   setGradingFilterEligibility('All');
                   setGradingFilterTrainerApproval('All');
                   setGradingFilterResult('All');
-                  setGradingFilterMonth('current');
+                  setGradingFilterMonth(isTrainer ? 'All' : 'current');
                   setSearchQuery('');
                 }}
               >
@@ -12947,9 +12974,9 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                       <th>Student</th>
                       <th>Batch</th>
                       <th>Present Belt / Level</th>
-                      {isTrainer && <th>Trainer Status & Suggestion</th>}
-                      {!isTrainer && <th>Trainer Suggested Belt</th>}
-                      <th>Exam Result</th>
+                      {isTrainer && <th>Approval Status</th>}
+                      {!isTrainer && <th>Trainer Status & Suggested Belt</th>}
+                      {!isTrainer && <th>Exam Result</th>}
                       <th style={{ textAlign: 'center' }}>Actions</th>
                     </tr>
                   </thead>
@@ -12992,116 +13019,132 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                             </span>
                           </td>
                           {isTrainer && (
-                            <td data-label="Trainer Status">
-                              {student.trainerApprovedForGrading ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                                  <span className="badge badge-green" style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '6px', width: 'fit-content' }}>
-                                    ✓ Approved for Test
-                                  </span>
-                                  {student.trainerSuggestedBelt && (
-                                    <span style={{ fontSize: '0.73rem', color: '#38bdf8', fontWeight: 600 }}>
-                                      Suggested: {student.trainerSuggestedBelt}
+                            <td data-label="Approval Status">
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                  {student.trainerApprovedForGrading ? (
+                                    <span className="badge badge-green" style={{ fontSize: '0.74rem', padding: '3px 8px', borderRadius: '6px', fontWeight: 600 }}>
+                                      ✓ Approved for Test
+                                    </span>
+                                  ) : (
+                                    <span className="badge badge-gray" style={{ fontSize: '0.74rem', padding: '3px 8px', borderRadius: '6px' }}>
+                                      Pending Approval
+                                    </span>
+                                  )}
+                                  {student.trainerApprovedForGrading && student.trainerSuggestedBelt && (
+                                    <span className={`badge ${getBeltColorClass(student.trainerSuggestedBelt)}`} style={{ padding: '2px 7px', fontSize: '0.74rem', fontWeight: 700 }}>
+                                      🥋 {student.trainerSuggestedBelt}
+                                    </span>
+                                  )}
+                                  {student.trainerApprovedForGrading && student.trainerBeltSize && (
+                                    <span className="badge" style={{ background: 'rgba(234, 179, 8, 0.15)', color: '#fbbf24', border: '1px solid rgba(234, 179, 8, 0.35)', padding: '2px 6px', fontSize: '0.72rem', borderRadius: '5px', fontWeight: 600 }}>
+                                      📏 Size: {student.trainerBeltSize}
                                     </span>
                                   )}
                                 </div>
-                              ) : (
-                                <span className="badge badge-gray" style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '6px' }}>
-                                  Pending Approval
-                                </span>
-                              )}
+                                {student.trainerApprovedForGrading && student.trainerGradingNotes && (
+                                  <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontStyle: 'italic', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={student.trainerGradingNotes}>
+                                    💬 "{student.trainerGradingNotes}"
+                                  </div>
+                                )}
+                              </div>
                             </td>
                           )}
                           {!isTrainer && (
-                            <td data-label="Trainer Suggested Belt">
-                              {student.trainerSuggestedBelt ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                  <span className={`badge ${getBeltColorClass(student.trainerSuggestedBelt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem', fontWeight: 700, width: 'fit-content' }}>
-                                    🥋 {student.trainerSuggestedBelt}
-                                  </span>
-                                  {student.trainerGradingNotes && (
-                                    <span style={{ fontSize: '0.7rem', color: '#94a3b8', fontStyle: 'italic', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={student.trainerGradingNotes}>
-                                      "{student.trainerGradingNotes}"
+                            <td data-label="Trainer Status & Suggested Belt">
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                  {student.trainerApprovedForGrading ? (
+                                    <span className="badge badge-green" style={{ fontSize: '0.72rem', padding: '2px 7px', borderRadius: '5px', fontWeight: 600 }}>
+                                      ✓ Approved
+                                    </span>
+                                  ) : (
+                                    <span className="badge badge-gray" style={{ fontSize: '0.72rem', padding: '2px 7px', borderRadius: '5px' }}>
+                                      Pending
+                                    </span>
+                                  )}
+                                  {student.trainerSuggestedBelt ? (
+                                    <span className={`badge ${getBeltColorClass(student.trainerSuggestedBelt)}`} style={{ padding: '2px 7px', fontSize: '0.74rem', fontWeight: 700 }}>
+                                      🥋 {student.trainerSuggestedBelt}
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>
+                                      {student.nextBelt && student.nextBelt !== 'None' ? student.nextBelt : 'Standard Next'}
+                                    </span>
+                                  )}
+                                  {student.trainerBeltSize && (
+                                    <span className="badge" style={{ background: 'rgba(234, 179, 8, 0.15)', color: '#fbbf24', border: '1px solid rgba(234, 179, 8, 0.35)', padding: '2px 6px', fontSize: '0.72rem', borderRadius: '5px', fontWeight: 600 }}>
+                                      📏 Size: {student.trainerBeltSize}
                                     </span>
                                   )}
                                 </div>
-                              ) : (
-                                <span style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
-                                  {student.nextBelt && student.nextBelt !== 'None' ? student.nextBelt : 'Standard Next'}
-                                </span>
-                              )}
+                                {student.trainerGradingNotes && (
+                                  <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontStyle: 'italic', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={student.trainerGradingNotes}>
+                                    💬 "{student.trainerGradingNotes}"
+                                  </div>
+                                )}
+                                {student.trainerApprovedBy && (
+                                  <div style={{ fontSize: '0.67rem', color: '#64748b' }}>
+                                    By: {student.trainerApprovedBy}
+                                  </div>
+                                )}
+                              </div>
                             </td>
                           )}
-                          <td data-label="Exam Result">
-                            {(() => {
-                              const res = getStudentExamResult(student);
-                              if (res === 'Pass') {
-                                return (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                    <span className="badge badge-green" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', padding: '3px 8px', borderRadius: '6px', fontSize: '0.74rem', fontWeight: 600, width: 'fit-content' }}>
-                                      🏆 Passed {student.lastGradeLetter ? `(${student.lastGradeLetter})` : ''}
-                                    </span>
-                                    {student.lastGradingDate && (
-                                      <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
-                                        {student.lastGradingDate}
+                          {!isTrainer && (
+                            <td data-label="Exam Result">
+                              {(() => {
+                                const res = getStudentExamResult(student);
+                                if (res === 'Pass') {
+                                  return (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                      <span className="badge badge-green" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', padding: '3px 8px', borderRadius: '6px', fontSize: '0.74rem', fontWeight: 600, width: 'fit-content' }}>
+                                        🏆 Passed {student.lastGradeLetter ? `(${student.lastGradeLetter})` : ''}
                                       </span>
-                                    )}
-                                  </div>
-                                );
-                              }
-                              if (res === 'Fail') {
-                                return (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                    <span className="badge badge-red" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#fb7185', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '3px 8px', borderRadius: '6px', fontSize: '0.74rem', fontWeight: 600, width: 'fit-content' }}>
-                                      ❌ Failed / Retest
-                                    </span>
-                                    {student.lastGradingDate && (
-                                      <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
-                                        {student.lastGradingDate}
+                                      {student.lastGradingDate && (
+                                        <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
+                                          {student.lastGradingDate}
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                }
+                                if (res === 'Fail') {
+                                  return (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                      <span className="badge badge-red" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#fb7185', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '3px 8px', borderRadius: '6px', fontSize: '0.74rem', fontWeight: 600, width: 'fit-content' }}>
+                                        ❌ Failed / Retest
                                       </span>
-                                    )}
-                                  </div>
+                                      {student.lastGradingDate && (
+                                        <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
+                                          {student.lastGradingDate}
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                }
+                                return (
+                                  <span style={{ color: 'var(--color-text-muted)', fontSize: '0.74rem' }}>
+                                    Not Graded Yet
+                                  </span>
                                 );
-                              }
-                              return (
-                                <span style={{ color: 'var(--color-text-muted)', fontSize: '0.74rem' }}>
-                                  Not Graded Yet
-                                </span>
-                              );
-                            })()}
-                          </td>
+                              })()}
+                            </td>
+                          )}
                           <td data-label="Actions" style={{ whiteSpace: 'nowrap' }}>
                             <div style={{ display: 'inline-flex', justifyContent: 'center', gap: '6px', alignItems: 'center', flexWrap: 'nowrap' }}>
                               {isTrainer && (
                                 student.trainerApprovedForGrading ? (
-                                  <div style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+                                  <>
                                     <button
                                       className="action-btn-pill"
                                       style={{
                                         padding: '5px 10px',
-                                        fontSize: '0.75rem',
+                                        fontSize: '0.74rem',
                                         borderRadius: '8px',
                                         fontWeight: 600,
-                                        border: '1px solid rgba(56, 189, 248, 0.4)',
-                                        background: 'rgba(56, 189, 248, 0.15)',
-                                        color: '#38bdf8',
-                                        cursor: 'pointer',
-                                        whiteSpace: 'nowrap'
-                                      }}
-                                      onClick={() => openTrainerApprovalModal(student)}
-                                      disabled={gradingActionLoading}
-                                      title="Change suggested belt or remarks"
-                                    >
-                                      ✏️ Edit Belt
-                                    </button>
-                                    <button
-                                      className="action-btn-pill"
-                                      style={{
-                                        padding: '5px 8px',
-                                        fontSize: '0.75rem',
-                                        borderRadius: '8px',
-                                        fontWeight: 600,
-                                        border: '1px solid rgba(239, 68, 68, 0.3)',
-                                        background: 'rgba(239, 68, 68, 0.12)',
+                                        border: '1px solid rgba(239, 68, 68, 0.35)',
+                                        background: 'rgba(239, 68, 68, 0.15)',
                                         color: '#ef4444',
                                         cursor: 'pointer',
                                         whiteSpace: 'nowrap'
@@ -13112,7 +13155,26 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                                     >
                                       Revoke
                                     </button>
-                                  </div>
+                                    <button
+                                      className="action-btn-pill"
+                                      style={{
+                                        padding: '5px 10px',
+                                        fontSize: '0.74rem',
+                                        borderRadius: '8px',
+                                        fontWeight: 600,
+                                        border: '1px solid rgba(56, 189, 248, 0.3)',
+                                        background: 'rgba(56, 189, 248, 0.12)',
+                                        color: '#38bdf8',
+                                        cursor: 'pointer',
+                                        whiteSpace: 'nowrap'
+                                      }}
+                                      onClick={() => openTrainerApprovalModal(student)}
+                                      disabled={gradingActionLoading}
+                                      title="Edit belt suggestion, size, or remarks"
+                                    >
+                                      ✏️ Edit
+                                    </button>
+                                  </>
                                 ) : (
                                   <button
                                     className="action-btn-pill"
@@ -13122,18 +13184,21 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                                       borderRadius: '8px',
                                       fontWeight: 600,
                                       border: '1px solid transparent',
-                                      background: 'var(--status-success)',
+                                      background: 'var(--status-success, #22c55e)',
                                       color: '#fff',
                                       cursor: 'pointer',
                                       whiteSpace: 'nowrap'
                                     }}
                                     onClick={() => openTrainerApprovalModal(student)}
                                     disabled={gradingActionLoading}
+                                    title="Approve student for test (select suggested belt, size & remark)"
                                   >
                                     ✓ Approve for Test
                                   </button>
                                 )
                               )}
+
+
 
                               <button
                                 className="btn-secondary action-btn-pill"
@@ -13167,28 +13232,33 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                                 </button>
                               )}
 
-                              <button
-                                className="btn-icon"
-                                title="Edit Student Record / Belt"
-                                style={{ color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.25)', width: '30px', height: '30px', borderRadius: '8px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
-                                onClick={() => {
-                                  setSelectedEditGradingStudent(student);
-                                  const naturalNext = getNextBelt(student.belt);
-                                  const initialSuggested = (student.trainerSuggestedBelt && student.trainerSuggestedBelt !== student.belt)
-                                    ? student.trainerSuggestedBelt
-                                    : (naturalNext !== 'None' ? naturalNext : (student.belt || 'Yellow Belt'));
-                                  setEditGradingForm({
-                                    joinDate: student.joinDate,
-                                    lastGradingDate: student.lastGradingDate || 'N/A',
-                                    belt: student.belt || 'White Belt',
-                                    trainerSuggestedBelt: initialSuggested,
-                                    eligibilityOverride: student.eligibilityOverride || ''
-                                  });
-                                  setIsEditGradingModalOpen(true);
-                                }}
-                              >
-                                <Settings size={14} />
-                              </button>
+                              {!isTrainer && (
+                                <button
+                                  className="btn-icon"
+                                  title="Edit Student Record / Belts"
+                                  style={{ color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.25)', width: '30px', height: '30px', borderRadius: '8px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+                                  onClick={() => {
+                                    setSelectedEditGradingStudent(student);
+                                    const naturalNext = getNextBelt(student.belt);
+                                    const initialSuggested = (student.trainerSuggestedBelt && student.trainerSuggestedBelt !== student.belt)
+                                      ? student.trainerSuggestedBelt
+                                      : (naturalNext !== 'None' ? naturalNext : (student.belt || 'Yellow Belt'));
+                                    setEditGradingForm({
+                                      joinDate: student.joinDate,
+                                      lastGradingDate: student.lastGradingDate || 'N/A',
+                                      belt: student.belt || 'White Belt',
+                                      trainerSuggestedBelt: initialSuggested,
+                                      trainerBeltSize: student.trainerBeltSize || 'Medium',
+                                      trainerGradingNotes: student.trainerGradingNotes || '',
+                                      eligibilityOverride: student.eligibilityOverride || '',
+                                      trainerApprovedForGrading: !!student.trainerApprovedForGrading
+                                    });
+                                    setIsEditGradingModalOpen(true);
+                                  }}
+                                >
+                                  <Settings size={14} />
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -13332,6 +13402,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                     selectedTrainerApprovalStudent,
                     true,
                     trainerSuggestedBeltInput,
+                    trainerBeltSizeInput,
                     trainerGradingNotesInput
                   );
                   setIsTrainerApprovalModalOpen(false);
@@ -13350,8 +13421,8 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                       </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Current Belt:</span>
-                      <span className={`badge ${getBeltColorClass(selectedTrainerApprovalStudent.belt)}`} style={{ padding: '3px 8px', fontSize: '0.75rem' }}>
+                      <span style={{ color: '#38bdf8', fontSize: '0.85rem', fontWeight: 600 }}>🥋 Present Belt:</span>
+                      <span className={`badge ${getBeltColorClass(selectedTrainerApprovalStudent.belt)}`} style={{ padding: '3px 8px', fontSize: '0.78rem', fontWeight: 700 }}>
                         {selectedTrainerApprovalStudent.belt}
                       </span>
                     </div>
@@ -13366,7 +13437,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                   {/* Suggest Belt Select */}
                   <div className="form-group" style={{ marginBottom: '1.25rem' }}>
                     <label style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>
-                      Suggested Belt / Level for Test *
+                      🥋 Suggested Belt / Level for Test *
                     </label>
                     <select
                       className="form-control"
@@ -13379,9 +13450,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                       <optgroup label="🥋 Traditional Belts">
                         {[
                           'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt',
-                          'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt',
-                          'White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple',
-                          'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black'
+                          'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt'
                         ].map(b => (
                           <option key={b} value={b} style={{ background: '#12141d', color: '#fff' }}>{b}</option>
                         ))}
@@ -13397,15 +13466,38 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                     </div>
                   </div>
 
+                  {/* Belt Size Select */}
+                  <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                    <label style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>
+                      📏 Belt Size *
+                    </label>
+                    <select
+                      className="form-control"
+                      style={{ height: '42px', borderRadius: '10px', fontSize: '0.88rem', width: '100%', background: 'rgba(255, 255, 255, 0.05)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.15)' }}
+                      value={trainerBeltSizeInput}
+                      onChange={(e) => setTrainerBeltSizeInput(e.target.value)}
+                      required
+                    >
+                      <option value="Small" style={{ background: '#12141d', color: '#fff' }}>Small (Kids / Teens)</option>
+                      <option value="Medium" style={{ background: '#12141d', color: '#fff' }}>Medium (Standard Adult)</option>
+                      <option value="Large" style={{ background: '#12141d', color: '#fff' }}>Large</option>
+                      <option value="XL" style={{ background: '#12141d', color: '#fff' }}>XL (Extra Large)</option>
+                      <option value="XXL" style={{ background: '#12141d', color: '#fff' }}>XXL</option>
+                    </select>
+                    <div style={{ fontSize: '0.73rem', color: '#94a3b8', marginTop: '5px' }}>
+                      📏 Select the required belt size for the student.
+                    </div>
+                  </div>
+
                   {/* Optional Trainer Remarks */}
                   <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                     <label style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>
-                      Trainer Notes / Remarks (Optional)
+                      💬 Remark / Trainer Notes (Optional)
                     </label>
                     <textarea
                       className="form-control"
                       style={{ borderRadius: '10px', fontSize: '0.85rem', width: '100%', background: 'rgba(255, 255, 255, 0.05)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.15)', minHeight: '70px', padding: '8px 12px', resize: 'vertical' }}
-                      placeholder="e.g. Excellent kata performance, highly disciplined"
+                      placeholder="e.g. Kata performed well, good discipline, ready for testing"
                       value={trainerGradingNotesInput}
                       onChange={(e) => setTrainerGradingNotesInput(e.target.value)}
                     />
@@ -13429,7 +13521,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                       disabled={gradingActionLoading}
                       style={{ background: '#10b981', borderColor: '#10b981', borderRadius: '10px', padding: '8px 18px', fontSize: '0.85rem', fontWeight: 600 }}
                     >
-                      {selectedTrainerApprovalStudent.trainerApprovedForGrading ? 'Update Suggestion' : '✓ Confirm & Approve'}
+                      {selectedTrainerApprovalStudent.trainerApprovedForGrading ? '✓ Update Details' : '✓ Approve for Test'}
                     </button>
                   </div>
                 </form>
@@ -13486,14 +13578,21 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                     {selectedGradeStudent.trainerSuggestedBelt && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', padding: '6px 10px', background: 'rgba(56, 189, 248, 0.1)', borderRadius: '8px', border: '1px solid rgba(56, 189, 248, 0.25)' }}>
                         <span style={{ color: '#38bdf8', fontSize: '0.82rem', fontWeight: 600 }}>🥋 Trainer Suggested:</span>
-                        <span className={`badge ${getBeltColorClass(selectedGradeStudent.trainerSuggestedBelt)}`} style={{ padding: '3px 8px', fontSize: '0.78rem', fontWeight: 700 }}>
-                          {selectedGradeStudent.trainerSuggestedBelt}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span className={`badge ${getBeltColorClass(selectedGradeStudent.trainerSuggestedBelt)}`} style={{ padding: '3px 8px', fontSize: '0.78rem', fontWeight: 700 }}>
+                            {selectedGradeStudent.trainerSuggestedBelt}
+                          </span>
+                          {selectedGradeStudent.trainerBeltSize && (
+                            <span className="badge" style={{ background: 'rgba(234, 179, 8, 0.15)', color: '#fbbf24', border: '1px solid rgba(234, 179, 8, 0.35)', padding: '2px 6px', fontSize: '0.72rem', borderRadius: '5px', fontWeight: 600 }}>
+                              📏 Size: {selectedGradeStudent.trainerBeltSize}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     )}
                     {selectedGradeStudent.trainerGradingNotes && (
                       <div style={{ marginTop: '6px', fontSize: '0.78rem', color: '#94a3b8', fontStyle: 'italic', background: 'rgba(255,255,255,0.02)', padding: '5px 8px', borderRadius: '6px' }}>
-                        <span style={{ color: 'var(--color-text-muted)', fontStyle: 'normal' }}>Trainer Remarks: </span>
+                        <span style={{ color: 'var(--color-text-muted)', fontStyle: 'normal' }}>💬 Trainer Remarks: </span>
                         "{selectedGradeStudent.trainerGradingNotes}"
                       </div>
                     )}
@@ -13828,6 +13927,69 @@ _Thank you for your payment! Please keep this receipt for future reference._ �
                     <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
                       The belt awarded to the student upon successfully passing the grading examination.
                     </span>
+                  </div>
+
+                  {/* Field 3: Exam Approval Status */}
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label style={{ fontSize: '0.82rem', fontWeight: 700, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                      📋 Exam Approval Status
+                    </label>
+                    <div style={{ display: 'flex', gap: '16px', alignItems: 'center', background: 'rgba(255, 255, 255, 0.04)', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.88rem', color: '#fff' }}>
+                        <input
+                          type="radio"
+                          name="adminGradingApprovalStatus"
+                          checked={!!editGradingForm.trainerApprovedForGrading}
+                          onChange={() => setEditGradingForm({ ...editGradingForm, trainerApprovedForGrading: true })}
+                        />
+                        <span style={{ color: '#4ade80', fontWeight: 700 }}>✓ Approved for Test</span>
+                      </label>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.88rem', color: '#fff' }}>
+                        <input
+                          type="radio"
+                          name="adminGradingApprovalStatus"
+                          checked={!editGradingForm.trainerApprovedForGrading}
+                          onChange={() => setEditGradingForm({ ...editGradingForm, trainerApprovedForGrading: false })}
+                        />
+                        <span style={{ color: '#94a3b8', fontWeight: 600 }}>⏳ Pending Approval</span>
+                      </label>
+                    </div>
+                    <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
+                      Set whether this student is officially approved to appear for the grading examination.
+                    </span>
+                  </div>
+
+                  {/* Field 4: Belt Size */}
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label style={{ fontSize: '0.82rem', fontWeight: 700, color: '#fbbf24', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                      📏 Belt Size
+                    </label>
+                    <select
+                      className="form-control"
+                      style={{ height: '40px', borderRadius: '10px', fontSize: '0.88rem', width: '100%', background: 'rgba(255, 255, 255, 0.05)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.15)' }}
+                      value={editGradingForm.trainerBeltSize || 'Medium'}
+                      onChange={(e) => setEditGradingForm({ ...editGradingForm, trainerBeltSize: e.target.value })}
+                    >
+                      <option value="Small" style={{ background: '#12141d', color: '#fff' }}>Small (Kids / Teens)</option>
+                      <option value="Medium" style={{ background: '#12141d', color: '#fff' }}>Medium (Standard Adult)</option>
+                      <option value="Large" style={{ background: '#12141d', color: '#fff' }}>Large</option>
+                      <option value="XL" style={{ background: '#12141d', color: '#fff' }}>XL (Extra Large)</option>
+                      <option value="XXL" style={{ background: '#12141d', color: '#fff' }}>XXL</option>
+                    </select>
+                  </div>
+
+                  {/* Field 5: Trainer Remarks / Notes */}
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                      💬 Trainer Remarks / Notes
+                    </label>
+                    <textarea
+                      className="form-control"
+                      style={{ borderRadius: '10px', fontSize: '0.85rem', width: '100%', background: 'rgba(255, 255, 255, 0.05)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.15)', minHeight: '65px', padding: '8px 12px', resize: 'vertical' }}
+                      value={editGradingForm.trainerGradingNotes || ''}
+                      onChange={(e) => setEditGradingForm({ ...editGradingForm, trainerGradingNotes: e.target.value })}
+                      placeholder="e.g. Kata performed well, good discipline"
+                    />
                   </div>
 
                   <datalist id="grading-belt-options-list">

@@ -3513,11 +3513,7 @@ app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin
     if (role === 'trainer') {
       allowedTrainerBatches = (batch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
       if (req.query.batch && req.query.batch.toLowerCase() !== 'all') {
-        if (allowedTrainerBatches.includes(req.query.batch.toLowerCase().trim())) {
-          targetBatchCode = req.query.batch;
-        } else {
-          targetBatchCode = 'none'; // unauthorized batch selection
-        }
+        targetBatchCode = req.query.batch;
       } else {
         targetBatchCode = batch; // all trainer's batches
       }
@@ -3531,7 +3527,10 @@ app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin
       const BatchModel = mongoose.model('Batch');
       const codes = targetBatchCode.split(',').map(c => c.trim()).filter(Boolean);
       selectedBatchObjs = await BatchModel.find({
-        code: { $in: codes.map(c => new RegExp(`^${c}$`, 'i')) }
+        $or: [
+          { code: { $in: codes.map(c => new RegExp(`^${c}$`, 'i')) } },
+          { name: { $in: codes.map(c => new RegExp(`^${c}$`, 'i')) } }
+        ]
       }).lean();
       selectedBatchObj = selectedBatchObjs[0] || null;
     }
@@ -3548,12 +3547,15 @@ app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin
       // Check if student's batch is in the selected batch list
       if (codes.includes(studentBatchLower)) return true;
 
+      // Check if student trainer matches req.user.username
+      if (role === 'trainer' && s.trainer && s.trainer.toLowerCase().trim() === (req.user.username || '').toLowerCase().trim()) return true;
+
       // Check direct match with selectedBatchObjs code or name
       for (const obj of selectedBatchObjs) {
-        if (studentBatchLower === obj.code.toLowerCase().trim()) return true;
-        if (studentBatchLower === obj.name.toLowerCase().trim()) return true;
+        if (studentBatchLower === (obj.code || '').toLowerCase().trim()) return true;
+        if (studentBatchLower === (obj.name || '').toLowerCase().trim()) return true;
         if (mongoose.Types.ObjectId.isValid(targetBatchCode) && String(obj._id) === targetBatchCode) {
-          if (studentBatchLower === obj.code.toLowerCase().trim() || studentBatchLower === obj.name.toLowerCase().trim()) return true;
+          if (studentBatchLower === (obj.code || '').toLowerCase().trim() || studentBatchLower === (obj.name || '').toLowerCase().trim()) return true;
         }
       }
 
@@ -3620,12 +3622,16 @@ app.get('/api/grading/students', authenticateSession, authorizeRoles('superadmin
     }
 
     // Auto Month Find & filter for grading candidates
-    if (req.query.month && req.query.month.toLowerCase() !== 'all') {
+    // Note: Trainers must always see their full batch students list without month restriction.
+    // For admins, when filtering by month, always include students approved by trainer so admin sees them immediately!
+    if (role !== 'trainer' && req.query.month && req.query.month.toLowerCase() !== 'all') {
       let qMonth = req.query.month.toLowerCase().trim();
       if (qMonth === 'auto' || qMonth === 'current') {
         qMonth = new Date().toISOString().slice(0, 7);
       }
       processedStudents = processedStudents.filter(s => {
+        // ALWAYS keep students approved for grading by trainer so Admin sees them immediately!
+        if (s.trainerApprovedForGrading) return true;
         const nextEligible = (s.nextEligibleGradingDate || '').toLowerCase();
         const lastGrading = (s.lastGradingDate && s.lastGradingDate !== 'N/A' ? s.lastGradingDate : '').toLowerCase();
         return nextEligible.startsWith(qMonth) || lastGrading.startsWith(qMonth);
@@ -3853,7 +3859,7 @@ app.delete('/api/students/:id/grading-history/:historyId', authenticateSession, 
 app.put('/api/students/:id/trainer-approval', authenticateSession, authorizeRoles('superadmin', 'developer', 'branchadmin', 'trainer'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { approved, suggestedBelt, notes } = req.body;
+    const { approved, suggestedBelt, beltSize, notes } = req.body;
     const { username } = req.user;
 
     const student = await findStudentById(id);
@@ -3865,6 +3871,7 @@ app.put('/api/students/:id/trainer-approval', authenticateSession, authorizeRole
     student.trainerApprovedBy = approved ? username : '';
     student.trainerApprovedAt = approved ? new Date().toISOString() : '';
     student.trainerSuggestedBelt = approved ? (suggestedBelt || '') : '';
+    student.trainerBeltSize = approved ? (beltSize || '') : '';
     student.trainerGradingNotes = approved ? (notes || '') : '';
 
     await student.save();
@@ -3873,7 +3880,7 @@ app.put('/api/students/:id/trainer-approval', authenticateSession, authorizeRole
     returnedStudent.nextBelt = getNextBelt(returnedStudent.belt);
     returnedStudent.eligibilityStatus = returnedStudent.eligibilityOverride || 'Eligible';
 
-    addLog('api', `Trainer approval updated for student ${decrypt(student.name)} (ID: ${student.id}) - Approved: ${approved}${approved && suggestedBelt ? `, Suggested Belt: ${suggestedBelt}` : ''}`);
+    addLog('api', `Trainer approval updated for student ${decrypt(student.name)} (ID: ${student.id}) - Approved: ${approved}${approved && suggestedBelt ? `, Suggested Belt: ${suggestedBelt}` : ''}${approved && beltSize ? `, Belt Size: ${beltSize}` : ''}`);
 
     res.json(returnedStudent);
   } catch (err) {
@@ -3957,8 +3964,25 @@ app.put('/api/students/:id/grading-info', authenticateSession, authorizeRoles('s
       modified = true;
     }
 
+    if (req.body.trainerBeltSize !== undefined && req.body.trainerBeltSize !== student.trainerBeltSize) {
+      student.trainerBeltSize = String(req.body.trainerBeltSize).trim();
+      modified = true;
+    }
+
+    if (req.body.trainerGradingNotes !== undefined && req.body.trainerGradingNotes !== student.trainerGradingNotes) {
+      student.trainerGradingNotes = String(req.body.trainerGradingNotes).trim();
+      modified = true;
+    }
+
     if (req.body.eligibilityOverride !== undefined && req.body.eligibilityOverride !== student.eligibilityOverride) {
       student.eligibilityOverride = req.body.eligibilityOverride;
+      modified = true;
+    }
+
+    if (req.body.trainerApprovedForGrading !== undefined && Boolean(req.body.trainerApprovedForGrading) !== student.trainerApprovedForGrading) {
+      student.trainerApprovedForGrading = Boolean(req.body.trainerApprovedForGrading);
+      student.trainerApprovedBy = student.trainerApprovedForGrading ? (req.user?.username || 'Admin') : '';
+      student.trainerApprovedAt = student.trainerApprovedForGrading ? new Date().toISOString() : '';
       modified = true;
     }
 
