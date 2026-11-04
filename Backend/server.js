@@ -28,6 +28,7 @@ import StudentAuth from './models/StudentAuth.js';
 import StudentPaymentSubmission from './models/StudentPaymentSubmission.js';
 import bcrypt from 'bcryptjs';
 import { calculateRevenueByPaymentDate, getRevenueTrends, generateReceiptNumber, getRevenueMonthFromDate } from './services/revenueService.js';
+import { getNextUniqueStudentId, issueStudentQR, validateStudentQRPayload, formatStudentId, migrateLegacyStudentIds } from './services/studentIdService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -703,7 +704,7 @@ const authenticateStudentSession = async (req, res, next) => {
 
 const app = express();
 app.set('trust proxy', true);
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.TEST_PORT || process.env.PORT || 5000;
 
 // Security Middlewares
 app.use(helmet({
@@ -3204,6 +3205,14 @@ app.post('/api/public/students', async (req, res) => {
       nextId = lastStudent && lastStudent.id ? lastStudent.id + 1 : 1;
 
       req.body.id = nextId;
+      if (!req.body.uniqueStudentId) {
+        req.body.uniqueStudentId = await getNextUniqueStudentId(req.body.branch);
+      }
+      const rawQrToken1 = crypto.randomBytes(24).toString('hex');
+      req.body.qrTokenHash = crypto.createHash('sha256').update(rawQrToken1).digest('hex');
+      req.body.qrTokenVersion = 1;
+      req.body.qrStatus = 'Active';
+      req.body.idCardStatus = 'Pending';
       const encryptedBody = encryptStudentData(req.body);
       const newStudent = new Student(encryptedBody);
 
@@ -3233,7 +3242,7 @@ app.post('/api/public/students', async (req, res) => {
           studentId: saved.id,
           mobileNumber: cleanMobile,
           mpinHash,
-          mustChangeMPIN: true,
+          mustChangeMPIN: false,
           failedLoginAttempts: 0,
           lockedUntil: null,
           isActive: true
@@ -3340,6 +3349,14 @@ app.post('/api/students', authenticateSession, async (req, res) => {
       nextId = lastStudent && lastStudent.id ? lastStudent.id + 1 : 1;
 
       req.body.id = nextId;
+      if (!req.body.uniqueStudentId) {
+        req.body.uniqueStudentId = await getNextUniqueStudentId(req.body.branch);
+      }
+      const rawQrToken2 = crypto.randomBytes(24).toString('hex');
+      req.body.qrTokenHash = crypto.createHash('sha256').update(rawQrToken2).digest('hex');
+      req.body.qrTokenVersion = 1;
+      req.body.qrStatus = 'Active';
+      req.body.idCardStatus = 'Pending';
       req.body.nextEligibleGradingDate = calculateNextEligibleDate(req.body.joinDate);
       const encryptedBody = encryptStudentData(req.body);
       const newStudent = new Student(encryptedBody);
@@ -3371,7 +3388,7 @@ app.post('/api/students', authenticateSession, async (req, res) => {
           studentId: saved.id,
           mobileNumber: cleanMobile,
           mpinHash,
-          mustChangeMPIN: true,
+          mustChangeMPIN: false,
           failedLoginAttempts: 0,
           lockedUntil: null,
           isActive: true
@@ -7510,89 +7527,127 @@ app.post('/api/admin/allocate-batch', authenticateSession, authorizeRoles('super
 // --- STUDENT PORTAL API ENDPOINTS ---
 // ==========================================
 
-// 1. Student Login (Mobile + 6-digit MPIN)
-app.post('/api/student/login', async (req, res) => {
+// 1. Validate Scanned Student QR Code (Identifies student without logging in)
+app.post('/api/student/qr-validate', async (req, res) => {
   try {
-    const { mobileNumber, mpin } = req.body;
-    if (!mobileNumber || !mpin) {
-      return res.status(400).json({ error: 'Registered mobile number and 6-digit MPIN are required' });
+    const { qrData } = req.body;
+    if (!qrData) {
+      return res.status(400).json({ error: 'QR Code data is required' });
     }
 
-    const cleanMobile = String(mobileNumber).replace(/[^0-9]/g, '').slice(-10);
-    const cleanMpin = String(mpin).trim();
-
-    if (cleanMobile.length !== 10) {
-      return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number' });
-    }
-    if (!/^\d{6}$/.test(cleanMpin)) {
-      return res.status(400).json({ error: 'MPIN must be exactly 6 numeric digits' });
+    const validation = await validateStudentQRPayload(qrData);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error || 'Invalid MASTERFIT QR Code' });
     }
 
-    let auth = await StudentAuth.findOne({ mobileNumber: cleanMobile });
+    const s = decryptStudent(validation.student);
+    const resolvedBatch = await resolveBatchDisplayName(s.batch, s.branch);
 
-    // Fallback: If no StudentAuth exists yet for an existing student admitted earlier, check if student is enrolled
-    if (!auth) {
-      const allStudents = await Student.find({}).lean();
-      const match = allStudents.find(s => {
-        try {
-          const decPhone = String(decrypt(s.phone)).replace(/[^0-9]/g, '').slice(-10);
-          const decParent = s.parentPhone ? String(decrypt(s.parentPhone)).replace(/[^0-9]/g, '').slice(-10) : '';
-          return decPhone === cleanMobile || (decParent && decParent === cleanMobile);
-        } catch (e) {
-          return false;
-        }
-      });
-      if (match) {
-        return res.status(400).json({
-          error: 'MPIN has not been set up yet for this registered mobile number. Please switch to the "Create MPIN" tab to create your 6-digit MPIN.',
-          needsMpinSetup: true
-        });
+    res.json({
+      valid: true,
+      student: {
+        id: s.id,
+        uniqueStudentId: s.uniqueStudentId,
+        name: s.name,
+        branch: s.branch,
+        batch: resolvedBatch,
+        belt: s.belt,
+        photo: s.photo || null
       }
+    });
+  } catch (err) {
+    console.error('Student QR validation error:', err);
+    res.status(500).json({ error: 'QR validation failed: ' + err.message });
+  }
+});
+
+// 2. Student Instant QR Login (Zero MPIN required - Direct Access)
+app.post('/api/student/qr-login', async (req, res) => {
+  try {
+    const { qrData, studentId, id, uniqueId, mpin } = req.body;
+    const rawTarget = studentId || id || uniqueId;
+
+    if (!qrData && !rawTarget) {
+      return res.status(400).json({ error: 'Scanned QR Code data or Student ID is required' });
     }
 
+    let targetStudentId = rawTarget;
+
+    if (qrData) {
+      const validation = await validateStudentQRPayload(qrData);
+      if (!validation.valid) {
+        return res.status(400).json({ error: validation.error || 'Invalid or revoked MASTERFIT QR Code' });
+      }
+      targetStudentId = validation.student.uniqueStudentId;
+    }
+
+    const cleanSid = String(targetStudentId).trim().toUpperCase();
+    const cleanNumeric = Number(cleanSid.replace(/[^0-9]/g, ''));
+
+    const studentDoc = await Student.findOne({
+      $or: [
+        { uniqueStudentId: cleanSid },
+        { id: cleanNumeric }
+      ]
+    });
+
+    if (!studentDoc) {
+      return res.status(404).json({ error: `Student ${cleanSid} was not found` });
+    }
+
+    if (studentDoc.status && String(studentDoc.status).toLowerCase() !== 'active') {
+      return res.status(403).json({ error: `Student account is currently ${studentDoc.status}. Please contact academy administration.` });
+    }
+
+    let auth = await StudentAuth.findOne({
+      $or: [
+        { uniqueStudentId: cleanSid },
+        { studentId: studentDoc.id }
+      ]
+    });
+
     if (!auth) {
-      return res.status(401).json({ error: 'No student account registered with this mobile number. Please contact academy admin.' });
+      let rawMobile = '0000000000';
+      try {
+        if (studentDoc.phone) {
+          rawMobile = String(decrypt(studentDoc.phone)).replace(/[^0-9]/g, '').slice(-10) || '0000000000';
+        }
+      } catch (e) {}
+      const defaultHash = await bcrypt.hash('123456', 10);
+      auth = await StudentAuth.create({
+        studentId: studentDoc.id,
+        uniqueStudentId: studentDoc.uniqueStudentId,
+        mobileNumber: rawMobile,
+        mpinHash: defaultHash,
+        mustChangeMPIN: false,
+        isActive: true
+      });
     }
 
     if (!auth.isActive) {
-      return res.status(403).json({ error: 'Student portal account has been deactivated. Please contact academy admin.' });
+      return res.status(403).json({ error: 'Student portal account has been deactivated. Please contact academy administration.' });
     }
 
-    if (auth.lockedUntil && new Date(auth.lockedUntil) > new Date()) {
-      const remainingMins = Math.ceil((new Date(auth.lockedUntil) - Date.now()) / (60 * 1000));
-      return res.status(423).json({ error: `Account is temporarily locked due to failed attempts. Please try again in ${remainingMins} minute(s) or contact academy.` });
-    }
-
-    const isMatch = await bcrypt.compare(cleanMpin, auth.mpinHash);
-    if (!isMatch) {
-      auth.failedLoginAttempts = (auth.failedLoginAttempts || 0) + 1;
-      if (auth.failedLoginAttempts >= 5) {
-        auth.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
-        await auth.save();
-        return res.status(423).json({ error: 'Account locked for 15 minutes due to 5 consecutive failed login attempts.' });
+    // If MPIN is supplied, verify it. If not supplied, allow instant login without MPIN!
+    if (mpin && String(mpin).trim() !== '') {
+      const isMatch = await bcrypt.compare(String(mpin).trim(), auth.mpinHash);
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Invalid MPIN' });
       }
-      await auth.save();
-      return res.status(401).json({ error: `Invalid MPIN. ${5 - auth.failedLoginAttempts} attempt(s) remaining.` });
     }
 
-    // Success: Reset failed attempts & unlock
     auth.failedLoginAttempts = 0;
     auth.lockedUntil = null;
     auth.lastLoginAt = new Date();
     await auth.save();
 
-    const studentDoc = await Student.findOne({ id: auth.studentId });
-    if (!studentDoc) {
-      return res.status(404).json({ error: 'Student profile record not found' });
-    }
     const decStudent = decryptStudent(studentDoc);
-
     const token = crypto.randomBytes(32).toString('hex');
     await Session.create({
-      username: cleanMobile,
+      username: `student_${studentDoc.id}`,
       token,
       role: 'student',
-      studentId: auth.studentId,
+      studentId: studentDoc.id,
       branch: decStudent.branch || '',
       batch: decStudent.batch || '',
       ipAddress: getClientIp(req),
@@ -7606,20 +7661,648 @@ app.post('/api/student/login', async (req, res) => {
       token,
       student: {
         id: decStudent.id,
+        uniqueStudentId: decStudent.uniqueStudentId || formatStudentId(decStudent.id),
         name: decStudent.name,
         branch: decStudent.branch,
         batch: resolvedBatch,
         batchId: decStudent.batch,
         batchName: resolvedBatch,
         belt: decStudent.belt,
-        mobileNumber: cleanMobile,
+        joinDate: decStudent.joinDate,
+        schedule: decStudent.schedule,
+        status: decStudent.status,
+        mobileNumber: auth.mobileNumber || '',
         photo: decStudent.photo || null,
-        mustChangeMPIN: auth.mustChangeMPIN
+        mustChangeMPIN: false
+      }
+    });
+  } catch (err) {
+    console.error('Student QR login error:', err);
+    res.status(500).json({ error: 'QR Login failed: ' + err.message });
+  }
+});
+
+// 3. Direct Student Login (Unique Student ID - Zero MPIN required)
+app.post('/api/student/login', async (req, res) => {
+  try {
+    const { studentId, uniqueId, identifier, loginMethod, mobileNumber, mpin } = req.body;
+    const targetSid = studentId || uniqueId || (identifier && !/^\d{10}$/.test(String(identifier).trim()) ? identifier : null);
+
+    // 3a. Direct Unique Student ID Login (Zero MPIN required)
+    if (targetSid || loginMethod === 'studentId') {
+      const sid = targetSid || identifier;
+      const cleanSid = String(sid).trim().toUpperCase();
+      const cleanNumeric = Number(cleanSid.replace(/[^0-9]/g, ''));
+
+      if (!cleanSid) {
+        return res.status(400).json({ error: 'Please enter your Unique Student ID (e.g. MF-0001 or numeric ID)' });
+      }
+
+      const formattedHyphenSid = cleanSid.replace(/^MF-?([A-Z]{3})-?(\d+)$/i, 'MF-$1-$2');
+      const studentDoc = await Student.findOne({
+        $or: [
+          { uniqueStudentId: cleanSid },
+          { uniqueStudentId: formattedHyphenSid },
+          { id: cleanNumeric },
+          { admissionNumber: String(cleanNumeric) }
+        ]
+      });
+
+      if (!studentDoc) {
+        return res.status(404).json({ error: `Student ID ${cleanSid} not found. Please verify your ID or contact academy.` });
+      }
+
+      if (studentDoc.status && String(studentDoc.status).toLowerCase() !== 'active') {
+        return res.status(403).json({ error: `Student account is currently ${studentDoc.status}. Please contact academy administration.` });
+      }
+
+      let auth = await StudentAuth.findOne({
+        $or: [
+          { uniqueStudentId: cleanSid },
+          { studentId: studentDoc.id }
+        ]
+      });
+
+      if (!auth) {
+        let rawMobile = '0000000000';
+        try {
+          if (studentDoc.phone) {
+            rawMobile = String(decrypt(studentDoc.phone)).replace(/[^0-9]/g, '').slice(-10) || '0000000000';
+          }
+        } catch (e) {}
+        const defaultHash = await bcrypt.hash('123456', 10);
+        auth = await StudentAuth.create({
+          studentId: studentDoc.id,
+          uniqueStudentId: studentDoc.uniqueStudentId,
+          mobileNumber: rawMobile,
+          mpinHash: defaultHash,
+          mustChangeMPIN: false,
+          isActive: true
+        });
+      }
+
+      if (!auth.isActive) {
+        return res.status(403).json({ error: 'Student portal account has been deactivated. Please contact academy administration.' });
+      }
+
+      // Optional MPIN check: if MPIN provided, verify it; otherwise grant instant login
+      if (mpin && String(mpin).trim() !== '') {
+        const isMatch = await bcrypt.compare(String(mpin).trim(), auth.mpinHash);
+        if (!isMatch) {
+          return res.status(401).json({ error: 'Invalid 6-digit MPIN' });
+        }
+      }
+
+      auth.failedLoginAttempts = 0;
+      auth.lockedUntil = null;
+      auth.lastLoginAt = new Date();
+      await auth.save();
+
+      const decStudent = decryptStudent(studentDoc);
+      const token = crypto.randomBytes(32).toString('hex');
+      await Session.create({
+        username: `student_${studentDoc.id}`,
+        token,
+        role: 'student',
+        studentId: studentDoc.id,
+        branch: decStudent.branch || '',
+        batch: decStudent.batch || '',
+        ipAddress: getClientIp(req),
+        userAgent: req.headers['user-agent']
+      });
+
+      const resolvedBatch = await resolveBatchDisplayName(decStudent.batch, decStudent.branch);
+
+      return res.json({
+        success: true,
+        token,
+        student: {
+          id: decStudent.id,
+          uniqueStudentId: decStudent.uniqueStudentId || formatStudentId(decStudent.id),
+          name: decStudent.name,
+          branch: decStudent.branch,
+          batch: resolvedBatch,
+          batchId: decStudent.batch,
+          batchName: resolvedBatch,
+          belt: decStudent.belt,
+          joinDate: decStudent.joinDate,
+          schedule: decStudent.schedule,
+          status: decStudent.status,
+          mobileNumber: auth.mobileNumber || '',
+          photo: decStudent.photo || null,
+          mustChangeMPIN: false
+        }
+      });
+    }
+
+    // 3b. Fallback: Mobile + MPIN (if provided)
+    const targetMobile = mobileNumber || identifier;
+    const cleanMobile = String(targetMobile).replace(/[^0-9]/g, '').slice(-10);
+
+    if (cleanMobile.length !== 10) {
+      return res.status(400).json({ error: 'Please enter your Unique Student ID (e.g. MF-0001)' });
+    }
+
+    let auth = await StudentAuth.findOne({ mobileNumber: cleanMobile });
+    if (!auth) {
+      return res.status(401).json({ error: 'No student account registered with this mobile number. Please log in with your Student ID.' });
+    }
+
+    const studentDoc = await Student.findOne({ id: auth.studentId });
+    if (!studentDoc) {
+      return res.status(404).json({ error: 'Student record not found' });
+    }
+
+    if (mpin && String(mpin).trim() !== '') {
+      const isMatch = await bcrypt.compare(String(mpin).trim(), auth.mpinHash);
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Invalid MPIN' });
+      }
+    }
+
+    const decStudent = decryptStudent(studentDoc);
+    const token = crypto.randomBytes(32).toString('hex');
+    await Session.create({
+      username: `student_${studentDoc.id}`,
+      token,
+      role: 'student',
+      studentId: studentDoc.id,
+      branch: decStudent.branch || '',
+      batch: decStudent.batch || '',
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent']
+    });
+
+    const resolvedBatch = await resolveBatchDisplayName(decStudent.batch, decStudent.branch);
+
+    res.json({
+      success: true,
+      token,
+      student: {
+        id: decStudent.id,
+        uniqueStudentId: decStudent.uniqueStudentId || formatStudentId(decStudent.id),
+        name: decStudent.name,
+        branch: decStudent.branch,
+        batch: resolvedBatch,
+        batchId: decStudent.batch,
+        batchName: resolvedBatch,
+        belt: decStudent.belt,
+        joinDate: decStudent.joinDate,
+        schedule: decStudent.schedule,
+        status: decStudent.status,
+        mobileNumber: auth.mobileNumber || '',
+        photo: decStudent.photo || null,
+        mustChangeMPIN: false
       }
     });
   } catch (err) {
     console.error('Student login error:', err);
     res.status(500).json({ error: 'Login failed: ' + err.message });
+  }
+});
+
+// 4. Fetch Authenticated Student's Full ID Card
+app.get('/api/student/id-card', authenticateStudentSession, async (req, res) => {
+  try {
+    const studentDoc = await Student.findOne({ id: req.student.studentId });
+    if (!studentDoc) {
+      return res.status(404).json({ error: 'Student record not found' });
+    }
+
+    const decStudent = decryptStudent(studentDoc);
+    const resolvedBatch = await resolveBatchDisplayName(decStudent.batch, decStudent.branch);
+
+    let qrPayload = '';
+    if (!studentDoc.qrTokenHash) {
+      const qrRes = await issueStudentQR(studentDoc);
+      qrPayload = qrRes.qrPayload;
+    } else {
+      qrPayload = JSON.stringify({
+        academy: 'MASTERFIT',
+        sid: decStudent.uniqueStudentId || formatStudentId(decStudent.id),
+        token: studentDoc.qrTokenHash.slice(0, 32),
+        v: studentDoc.qrTokenVersion || 1
+      });
+    }
+
+    res.json({
+      academy: 'MASTERFIT',
+      uniqueStudentId: decStudent.uniqueStudentId || formatStudentId(decStudent.id),
+      id: decStudent.id,
+      name: decStudent.name,
+      photo: decStudent.photo || null,
+      belt: decStudent.belt || 'White',
+      branch: decStudent.branch || 'Main Dojo',
+      batch: resolvedBatch,
+      joinDate: decStudent.joinDate || 'N/A',
+      bloodGroup: studentDoc.bloodGroup || 'O+',
+      phone: decStudent.phone || decStudent.parentPhone || '',
+      bloodGroup: studentDoc.bloodGroup || 'O+',
+      phone: decStudent.phone || decStudent.parentPhone || '',
+      emergencyPhone: decStudent.parentPhone || decStudent.phone || 'N/A',
+      qrPayload,
+      qrStatus: studentDoc.qrStatus || 'Active',
+      idCardStatus: studentDoc.idCardStatus || 'Generated',
+      idCardGeneratedAt: studentDoc.idCardGeneratedAt || studentDoc.createdAt
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. Admin - Fetch Any Student's Full ID Card
+app.get('/api/admin/students/:id/id-card', authenticateSession, async (req, res) => {
+  try {
+    const sId = Number(req.params.id);
+    const studentDoc = await Student.findOne({ id: sId });
+    if (!studentDoc) {
+      return res.status(404).json({ error: 'Student record not found' });
+    }
+
+    const decStudent = decryptStudent(studentDoc);
+    const resolvedBatch = await resolveBatchDisplayName(decStudent.batch, decStudent.branch);
+
+    let qrPayload = '';
+    if (!studentDoc.qrTokenHash) {
+      const qrRes = await issueStudentQR(studentDoc);
+      qrPayload = qrRes.qrPayload;
+    } else {
+      qrPayload = JSON.stringify({
+        academy: 'MASTERFIT',
+        sid: decStudent.uniqueStudentId || formatStudentId(decStudent.id),
+        token: studentDoc.qrTokenHash.slice(0, 32),
+        v: studentDoc.qrTokenVersion || 1
+      });
+    }
+
+    res.json({
+      academy: 'MASTERFIT',
+      uniqueStudentId: decStudent.uniqueStudentId || formatStudentId(decStudent.id),
+      id: decStudent.id,
+      name: decStudent.name,
+      photo: decStudent.photo || null,
+      belt: decStudent.belt || 'White',
+      branch: decStudent.branch || 'Main Dojo',
+      batch: resolvedBatch,
+      joinDate: decStudent.joinDate || 'N/A',
+      emergencyPhone: decStudent.parentPhone || decStudent.phone || 'N/A',
+      qrPayload,
+      qrStatus: studentDoc.qrStatus || 'Active',
+      idCardStatus: studentDoc.idCardStatus || 'Pending',
+      idCardGeneratedAt: studentDoc.idCardGeneratedAt || null
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. Admin - Regenerate Student QR Code
+app.post('/api/admin/students/:id/regenerate-qr', authenticateSession, async (req, res) => {
+  try {
+    const sId = Number(req.params.id);
+    const studentDoc = await Student.findOne({ id: sId });
+    if (!studentDoc) {
+      return res.status(404).json({ error: 'Student record not found' });
+    }
+
+    const qrResult = await issueStudentQR(studentDoc);
+    res.json({
+      success: true,
+      message: `QR Code regenerated successfully (Version ${qrResult.version}). Old QR codes revoked.`,
+      qrPayload: qrResult.qrPayload,
+      version: qrResult.version
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 7. Admin - Revoke Student QR Code
+app.post('/api/admin/students/:id/revoke-qr', authenticateSession, async (req, res) => {
+  try {
+    const sId = Number(req.params.id);
+    const studentDoc = await Student.findOne({ id: sId });
+    if (!studentDoc) {
+      return res.status(404).json({ error: 'Student record not found' });
+    }
+
+    studentDoc.qrStatus = 'Revoked';
+    await studentDoc.save();
+
+    res.json({
+      success: true,
+      message: `QR Code for student ${studentDoc.uniqueStudentId || sId} has been REVOKED.`
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 8. Admin - Update ID Card Status
+app.post('/api/admin/students/:id/update-id-card-status', authenticateSession, async (req, res) => {
+  try {
+    const sId = Number(req.params.id);
+    const { status } = req.body; // 'Generated' | 'Printed' | 'Pending'
+    const studentDoc = await Student.findOne({ id: sId });
+    if (!studentDoc) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    studentDoc.idCardStatus = status || 'Generated';
+    if (status === 'Generated' || status === 'Printed') {
+      studentDoc.idCardGeneratedAt = new Date();
+    }
+    await studentDoc.save();
+
+    res.json({ success: true, idCardStatus: studentDoc.idCardStatus });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 9. Admin - Scan QR Code (Identifies student, shows attendance & fees)
+app.post('/api/admin/qr-scan', authenticateSession, async (req, res) => {
+  try {
+    const { qrData } = req.body;
+    if (!qrData) {
+      return res.status(400).json({ error: 'QR data is required' });
+    }
+
+    const validation = await validateStudentQRPayload(qrData);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error || 'Invalid QR code' });
+    }
+
+    const rawStudent = await Student.findOne({ uniqueStudentId: validation.student.uniqueStudentId });
+    if (!rawStudent) {
+      return res.status(404).json({ error: 'Student record not found' });
+    }
+
+    // Role restriction: Trainer / Branch Admin can only view students in their branch
+    if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
+      if (rawStudent.branch.toLowerCase().trim() !== req.user.branch.toLowerCase().trim()) {
+        return res.status(403).json({ error: 'Unauthorized: Student belongs to another academy branch.' });
+      }
+    }
+
+    const decStudent = decryptStudent(rawStudent);
+    const resolvedBatch = await resolveBatchDisplayName(decStudent.batch, decStudent.branch);
+
+    // Today's attendance check
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayAttDoc = await Attendance.findOne({ date: todayStr }).lean();
+    let todayStatus = 'Not Marked';
+    if (todayAttDoc && todayAttDoc.records) {
+      const rec = todayAttDoc.records[decStudent.id];
+      if (rec) {
+        todayStatus = typeof rec === 'object' ? (rec.status || 'Present') : String(rec);
+      }
+    }
+
+    // Fee summary
+    const paidMonthsCount = decStudent.paidMonths ? Object.keys(decStudent.paidMonths).length : 0;
+
+    res.json({
+      success: true,
+      student: {
+        id: decStudent.id,
+        uniqueStudentId: decStudent.uniqueStudentId || formatStudentId(decStudent.id),
+        name: decStudent.name,
+        photo: decStudent.photo || null,
+        branch: decStudent.branch,
+        batch: resolvedBatch,
+        belt: decStudent.belt,
+        joinDate: decStudent.joinDate,
+        status: decStudent.status,
+        emergencyPhone: decStudent.parentPhone || decStudent.phone || 'N/A',
+        qrStatus: rawStudent.qrStatus || 'Active',
+        idCardStatus: rawStudent.idCardStatus || 'Pending'
+      },
+      todayAttendance: todayStatus,
+      todayDate: todayStr,
+      paidMonthsCount
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 10. Admin - Mark Attendance via QR Scan
+app.post('/api/admin/qr-attendance', authenticateSession, async (req, res) => {
+  try {
+    const { qrData, date } = req.body;
+    if (!qrData) {
+      return res.status(400).json({ error: 'QR data is required' });
+    }
+
+    const validation = await validateStudentQRPayload(qrData);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error || 'Invalid QR code' });
+    }
+
+    const rawStudent = await Student.findOne({ uniqueStudentId: validation.student.uniqueStudentId });
+    if (!rawStudent) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    const markDate = date || new Date().toISOString().slice(0, 10);
+    let attDoc = await Attendance.findOne({ date: markDate });
+    if (!attDoc) {
+      attDoc = new Attendance({ date: markDate, records: {} });
+    }
+
+    if (!attDoc.records) attDoc.records = {};
+    const existingStatus = attDoc.records[rawStudent.id];
+
+    if (existingStatus && (existingStatus === 'Present' || existingStatus?.status === 'Present')) {
+      return res.json({
+        success: true,
+        alreadyMarked: true,
+        message: `Attendance already recorded as PRESENT today for ${decrypt(rawStudent.name) || rawStudent.uniqueStudentId}`,
+        studentName: decrypt(rawStudent.name)
+      });
+    }
+
+    // Mark as Present with audit trail
+    if (attDoc.records.set) {
+      attDoc.records.set(String(rawStudent.id), {
+        status: 'Present',
+        markedBy: req.user.username,
+        method: 'QR_SCAN',
+        timestamp: new Date()
+      });
+    } else {
+      attDoc.records[rawStudent.id] = {
+        status: 'Present',
+        markedBy: req.user.username,
+        method: 'QR_SCAN',
+        timestamp: new Date()
+      };
+    }
+
+    attDoc.markModified('records');
+    await attDoc.save();
+
+    res.json({
+      success: true,
+      message: `Successfully marked attendance for ${decrypt(rawStudent.name) || rawStudent.uniqueStudentId}!`,
+      studentName: decrypt(rawStudent.name),
+      date: markDate
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 11. Admin - Student ID Cards Management Listing
+app.get('/api/admin/id-cards/list', authenticateSession, async (req, res) => {
+  try {
+    const { branch, batch, status, search } = req.query;
+    let query = {};
+
+    let targetBranch = '';
+    if (req.user.role !== 'superadmin' && req.user.role !== 'developer') {
+      targetBranch = req.user.branch || branch || '';
+    } else if (branch && branch !== 'All') {
+      targetBranch = branch;
+    }
+
+    if (targetBranch && targetBranch.toLowerCase() !== 'all') {
+      const branchParts = targetBranch.split(',').map(b => b.trim()).filter(Boolean);
+      if (branchParts.length === 1) {
+        query.branch = new RegExp('^' + branchParts[0] + '$', 'i');
+      } else if (branchParts.length > 1) {
+        query.branch = { $in: branchParts.map(b => new RegExp('^' + b + '$', 'i')) };
+      }
+    }
+
+    if (status && status !== 'All') {
+      if (status === 'Pending') {
+        query.$or = [
+          { idCardStatus: 'Pending' },
+          { idCardStatus: null },
+          { idCardStatus: { $exists: false } }
+        ];
+      } else {
+        query.idCardStatus = status;
+      }
+    }
+
+    const list = await Student.find(query).sort({ uniqueStudentId: 1, id: 1 }).lean();
+    const allBatches = await Batch.find({}).lean();
+    const batchMap = {};
+    allBatches.forEach(b => {
+      const bName = b.name || b.batchName || '';
+      if (b._id) batchMap[String(b._id).toLowerCase()] = bName;
+      if (b.code) batchMap[String(b.code).toLowerCase()] = bName;
+      if (b.batchCode) batchMap[String(b.batchCode).toLowerCase()] = bName;
+      if (b.name) batchMap[String(b.name).toLowerCase()] = bName;
+    });
+
+    // Batch filtering (both for explicit batch filter and for trainer's assigned batches)
+    let targetBatch = batch && batch !== 'All' ? batch.trim() : '';
+    let allowedTrainerBatches = [];
+
+    if (req.user.role === 'trainer') {
+      allowedTrainerBatches = (req.user.batch || '').toLowerCase().split(',').map(b => b.trim()).filter(Boolean);
+    }
+
+    const matchesBatchFilter = (s) => {
+      const sBatch = String(s.batch || '').toLowerCase().trim();
+      const sTrainer = String(s.trainer || '').toLowerCase().trim();
+      const uName = String(req.user.username || '').toLowerCase().trim();
+
+      // If user is trainer and student is assigned directly to this trainer
+      if (req.user.role === 'trainer' && sTrainer && sTrainer === uName) {
+        return true;
+      }
+
+      // 1. Explicit batch selected from dropdown
+      if (targetBatch && targetBatch.toLowerCase() !== 'all') {
+        const tbLower = targetBatch.toLowerCase().trim();
+        if (sBatch === tbLower) return true;
+
+        for (const b of allBatches) {
+          const bCode = (b.code || '').toLowerCase().trim();
+          const bName = (b.name || b.batchName || '').toLowerCase().trim();
+          const bId = String(b._id || '').toLowerCase();
+          if (tbLower === bCode || tbLower === bName || tbLower === bId) {
+            if (sBatch === bCode || sBatch === bName || sBatch === bId) return true;
+            if (s.schedule && schedulesMatch(s.schedule, b.schedule)) return true;
+          }
+        }
+        return false;
+      }
+
+      // 2. If trainer has assigned batches and "All Batches" is selected
+      if (req.user.role === 'trainer' && allowedTrainerBatches.length > 0 && !allowedTrainerBatches.includes('all')) {
+        if (allowedTrainerBatches.includes(sBatch)) return true;
+
+        for (const b of allBatches) {
+          const bCode = (b.code || '').toLowerCase().trim();
+          const bName = (b.name || b.batchName || '').toLowerCase().trim();
+          const bId = String(b._id || '').toLowerCase();
+          const bTrainer = (b.trainer || '').toLowerCase().trim();
+
+          const isTrainerBatch = allowedTrainerBatches.includes(bCode) || allowedTrainerBatches.includes(bName) || allowedTrainerBatches.includes(bId);
+          if (isTrainerBatch) {
+            if (sBatch === bCode || sBatch === bName || sBatch === bId) return true;
+            if (s.schedule && schedulesMatch(s.schedule, b.schedule)) return true;
+          }
+
+          if (bTrainer && (bTrainer === uName || bTrainer === (req.user.name || '').toLowerCase().trim())) {
+            if (sBatch === bCode || sBatch === bName || sBatch === bId) return true;
+          }
+        }
+        return false;
+      }
+
+      return true;
+    };
+
+    const batchFilteredList = list.filter(matchesBatchFilter);
+
+    const decryptedList = batchFilteredList.map(s => {
+      const dec = decryptStudent(s);
+      let batchLabel = dec.batch || '';
+      const bKey = batchLabel.toLowerCase().trim();
+      if (batchMap[bKey]) {
+        batchLabel = batchMap[bKey];
+      } else if (batchLabel.startsWith('batch_')) {
+        batchLabel = 'Regular Batch';
+      }
+      return {
+        id: dec.id,
+        uniqueStudentId: dec.uniqueStudentId || formatStudentId(dec.id),
+        name: dec.name,
+        photo: dec.photo || null,
+        branch: dec.branch || 'Kuttiady',
+        batch: batchLabel,
+        belt: dec.belt || 'White',
+        bloodGroup: s.bloodGroup || 'O+',
+        phone: dec.phone || dec.parentPhone || '',
+        status: dec.status,
+        qrStatus: s.qrStatus || 'Active',
+        idCardStatus: s.idCardStatus || 'Pending',
+        idCardGeneratedAt: s.idCardGeneratedAt || null,
+        joinDate: dec.joinDate || 'N/A'
+      };
+    });
+
+    let filtered = decryptedList;
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      filtered = decryptedList.filter(s =>
+        (s.name && s.name.toLowerCase().includes(q)) ||
+        (s.uniqueStudentId && s.uniqueStudentId.toLowerCase().includes(q)) ||
+        (s.batch && s.batch.toLowerCase().includes(q)) ||
+        (s.belt && s.belt.toLowerCase().includes(q))
+      );
+    }
+
+    res.json(filtered);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -7836,7 +8519,7 @@ app.get('/api/student/me', authenticateStudentSession, async (req, res) => {
         photo: s.photo || null,
         status: s.status,
         monthlyRate,
-        mustChangeMPIN: auth ? auth.mustChangeMPIN : false
+        mustChangeMPIN: false
       },
       attendance: {
         currentMonth,
@@ -8373,7 +9056,7 @@ app.post('/api/admin/students/:id/reset-mpin', authenticateSession, async (req, 
         studentId: sId,
         mobileNumber: cleanMobile,
         mpinHash,
-        mustChangeMPIN: true,
+        mustChangeMPIN: false,
         failedLoginAttempts: 0,
         lockedUntil: null,
         isActive: true
@@ -8455,5 +9138,6 @@ app.use('/api/developer', developerRouter);
 
 app.listen(PORT, () => {
   originalLog(`Server is running on port ${PORT}`);
+  migrateLegacyStudentIds().catch(e => console.warn('[Startup Migration Warning]:', e.message));
 });
 // Nodemon reload trigger 1

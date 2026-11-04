@@ -4,12 +4,15 @@ import {
   ChevronLeft, ChevronRight, CheckCircle, XCircle, MessageCircle, MessageSquare,
   Search, Phone, Trash2, ArrowRight, Activity, MapPin, TrendingUp, Award, Menu,
   Shield, ShieldCheck, Lock, Unlock, FileDown, FileUp, Database, Terminal, Cpu, HardDrive, Key, History,
-  Eye, EyeOff, Star, Megaphone, Send, Camera, Share2, Printer, Copy, Check
+  Eye, EyeOff, Star, Megaphone, Send, Camera, Share2, Printer, Copy, Check, QrCode
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import './index.css';
 import StudentLogin from './components/StudentPortal/StudentLogin.jsx';
 import StudentPortal from './components/StudentPortal/StudentPortal.jsx';
+import StudentQrAutoLogin from './components/StudentPortal/StudentQrAutoLogin.jsx';
+import StudentIDCard from './components/StudentPortal/StudentIDCard.jsx';
+import StudentIDCardsManager from './components/Admin/StudentIDCardsManager.jsx';
 import gallery1Img from './assets/gallery1.jpg';
 import gallery2Img from './assets/gallery2_meditation.jpg';
 import gallery3Img from './assets/gallery3.jpg';
@@ -443,6 +446,7 @@ function App() {
       const cleanPath = window.location.pathname.replace(/\/$/, '');
       if (cleanPath.startsWith('/student')) {
         window.location.replace('/#' + cleanPath + window.location.search);
+        if (cleanPath.startsWith('/student/qr-login')) return 'student-qr-login';
         const sToken = localStorage.getItem('umai_student_token');
         if (cleanPath.includes('portal') && sToken) return 'student-portal';
         return 'student-login';
@@ -466,6 +470,7 @@ function App() {
 
     // 2. Student route handling (ALWAYS takes precedence over staff/admin session!)
     if (cleanHash.startsWith('/student') || cleanHash === 'student') {
+      if (cleanHash.startsWith('/student/qr-login')) return 'student-qr-login';
       const sToken = localStorage.getItem('umai_student_token');
       if (cleanHash.includes('portal')) {
         if (sToken) return 'student-portal';
@@ -512,11 +517,11 @@ function App() {
   const [approvingSubId, setApprovingSubId] = useState(null);
   const [approvalFeedbackMsg, setApprovalFeedbackMsg] = useState('');
   const [approvalErrorMsg, setApprovalErrorMsg] = useState('');
-  const [adminResetMpinModal, setAdminResetMpinModal] = useState(null);
-  const [createdStudentTempMpin, setCreatedStudentTempMpin] = useState(null);
+  const [createdStudentAdmission, setCreatedStudentAdmission] = useState(null);
   const [feeDetailsStudentId, setFeeDetailsStudentId] = useState(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
+  const [printingIdCardStudent, setPrintingIdCardStudent] = useState(null);
   const [studentToDelete, setStudentToDelete] = useState(null);
   const [scrolled, setScrolled] = useState(false);
   const [branchSearchQuery, setBranchSearchQuery] = useState('');
@@ -4102,6 +4107,12 @@ function App() {
 
       // 1. Student route handling (Always isolate and prioritize student pages)
       if (cleanHash.startsWith('/student') || cleanHash === 'student') {
+        if (cleanHash.startsWith('/student/qr-login')) {
+          setAppMode('student-qr-login');
+          setIsMobileMenuOpen(false);
+          setIsSidebarOpen(false);
+          return;
+        }
         const sToken = getStudentSessionToken();
         if (cleanHash.includes('portal')) {
           if (sToken) {
@@ -4247,15 +4258,23 @@ function App() {
         (s.branch && s.branch.toLowerCase().trim() === activeBranch.toLowerCase().trim());
 
       const matchesBatch = activeBatch === 'All' || (() => {
-        const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === activeBatch.toLowerCase());
+        const selectedBatchObj = batchOptions.find(b => 
+          (b.id && b.id.toLowerCase() === activeBatch.toLowerCase()) ||
+          (b.code && b.code.toLowerCase() === activeBatch.toLowerCase()) ||
+          (b.name && b.name.toLowerCase() === activeBatch.toLowerCase())
+        );
         if (!selectedBatchObj) return false;
         const studentBatchLower = (s.batch || '').toLowerCase().trim();
-        const targetIdLower = selectedBatchObj.id.toLowerCase().trim();
-        const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
-        if (studentBatchLower === targetIdLower) return true;
-        if (studentBatchLower === targetNameLower) return true;
-        if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
-          return false;
+        const targetIdLower = (selectedBatchObj.id || selectedBatchObj.code || '').toLowerCase().trim();
+        const targetNameLower = (selectedBatchObj.name || '').toLowerCase().trim();
+        if (studentBatchLower === targetIdLower || studentBatchLower === targetNameLower) return true;
+        const studentBatchObj = batchOptions.find(b =>
+          (b.id && b.id.toLowerCase() === studentBatchLower) ||
+          (b.code && b.code.toLowerCase() === studentBatchLower) ||
+          (b.name && b.name.toLowerCase() === studentBatchLower)
+        );
+        if (studentBatchObj && studentBatchObj.name && targetNameLower && studentBatchObj.name.toLowerCase().trim() === targetNameLower) {
+          return true;
         }
         return schedulesMatch(s.schedule, selectedBatchObj.schedule);
       })();
@@ -4706,7 +4725,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
 
   // Form State
   const [newStudent, setNewStudent] = useState({
-    name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: '', photo: null, isPriority: false, trainer: '', art: ''
+    name: '', age: '', dob: '', phone: '', parentPhone: '', bloodGroup: 'O+', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: '', photo: null, isPriority: false, trainer: '', art: ''
   });
 
   // Unified dynamic batch loading by branchId for creation & edit modals/forms
@@ -4833,26 +4852,39 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
 
     // Filter by global batch (code check with fallback to schedule for legacy)
     const matchesBatch = batchFilter === 'All' || (() => {
-      const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchFilter.toLowerCase());
+      const selectedBatchObj = batchOptions.find(b => 
+        (b.id && b.id.toLowerCase() === batchFilter.toLowerCase()) ||
+        (b.code && b.code.toLowerCase() === batchFilter.toLowerCase()) ||
+        (b.name && b.name.toLowerCase() === batchFilter.toLowerCase())
+      );
       if (!selectedBatchObj) return false;
       const studentBatchLower = (s.batch || '').toLowerCase().trim();
-      const targetIdLower = selectedBatchObj.id.toLowerCase().trim();
-      const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
-      if (studentBatchLower === targetIdLower) return true;
-      if (studentBatchLower === targetNameLower) return true;
-      if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
-        return false;
+      const targetIdLower = (selectedBatchObj.id || selectedBatchObj.code || '').toLowerCase().trim();
+      const targetNameLower = (selectedBatchObj.name || '').toLowerCase().trim();
+      if (studentBatchLower === targetIdLower || studentBatchLower === targetNameLower) return true;
+      const studentBatchObj = batchOptions.find(b =>
+        (b.id && b.id.toLowerCase() === studentBatchLower) ||
+        (b.code && b.code.toLowerCase() === studentBatchLower) ||
+        (b.name && b.name.toLowerCase() === studentBatchLower)
+      );
+      if (studentBatchObj && studentBatchObj.name && targetNameLower && studentBatchObj.name.toLowerCase().trim() === targetNameLower) {
+        return true;
       }
       return schedulesMatch(s.schedule, selectedBatchObj.schedule);
     })();
 
     if (userRole === 'trainer' || userRole === 'coordinator') {
-      const activeBatch = batchOptions.find(b => b.id.toLowerCase() === userBatch.toLowerCase());
-      if (activeBatch) {
-        const studentMatchesTrainerBatch = (s.batch && s.batch.toLowerCase() === userBatch.toLowerCase()) ||
-          (s.schedule && schedulesMatch(s.schedule, activeBatch.schedule) && !(s.batch && s.batch.toLowerCase().startsWith('batch')));
-        return matchesSearch && matchesBranch && matchesStatus && matchesBatch && studentMatchesTrainerBatch;
-      }
+      const userBatchList = (userBatch || '').split(',').map(b => b.trim().toLowerCase()).filter(Boolean);
+      const studentBatchLower = (s.batch || '').toLowerCase().trim();
+      const studentMatchesTrainerBatch = userBatchList.length === 0 || userBatchList.some(ub => {
+        if (studentBatchLower === ub) return true;
+        const ubObj = batchOptions.find(b => (b.id && b.id.toLowerCase() === ub) || (b.code && b.code.toLowerCase() === ub));
+        return ubObj && (
+          (ubObj.name && s.batch && ubObj.name.toLowerCase() === s.batch.toLowerCase()) ||
+          schedulesMatch(s.schedule, ubObj.schedule)
+        );
+      });
+      return matchesSearch && matchesBranch && matchesStatus && matchesBatch && studentMatchesTrainerBatch;
     }
 
     return matchesSearch && matchesBranch && matchesStatus && matchesBatch;
@@ -4995,13 +5027,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
         setIsAddModalOpen(false);
         setNewStudent({ name: '', age: '', dob: '', phone: '', parentPhone: '', belt: 'White', joinDate: new Date().toISOString().split('T')[0], batch: 'Morning', schedule: 'Mon-Thu', branch: defaultBranch === 'All' ? (branches[0] || 'Kuttiady') : defaultBranch, photo: null, isPriority: false, trainer: '', art: '' });
 
-        if (savedStudent.temporaryMPIN) {
-          setCreatedStudentTempMpin({
-            name: savedStudent.name,
-            phone: savedStudent.phone,
-            mpin: savedStudent.temporaryMPIN
-          });
-        }
+        setCreatedStudentAdmission(savedStudent);
         setGlobalSuccess("Student added successfully.");
         reloadAllAppData();
       })
@@ -5094,33 +5120,6 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
       fetchPaymentSubmissions();
     } catch (err) {
       setApprovalErrorMsg(err.message);
-    }
-  };
-
-  const handleAdminResetStudentMpin = async (studentToReset) => {
-    if (!window.confirm(`Reset portal MPIN for ${studentToReset.name} (#${studentToReset.id})? A new temporary 6-digit MPIN will be generated.`)) {
-      return;
-    }
-    try {
-      const token = getSessionToken();
-      const res = await fetch(`${API_BASE_URL}/admin/students/${studentToReset.id}/reset-mpin`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to reset MPIN');
-      }
-      setAdminResetMpinModal({
-        studentId: studentToReset.id,
-        studentName: studentToReset.name,
-        temporaryMPIN: data.temporaryMPIN
-      });
-    } catch (err) {
-      alert('Error resetting MPIN: ' + err.message);
     }
   };
 
@@ -9194,7 +9193,8 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
         return bObj ? bObj.schedule : '';
       })();
 
-      if (studentSched) {
+      // When viewing 'All' batches, filter by day-of-week. If admin explicitly picked a batch, show that batch's students.
+      if (batchFilter === 'All' && studentSched) {
         const activeDaysMap = parseScheduleToDays(studentSched);
         if (activeDaysMap && Object.values(activeDaysMap).some(Boolean) && !activeDaysMap[markingDayOfWeekShort]) {
           return false; // Does not have class on this day
@@ -12750,68 +12750,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
 
           {/* Streamlined Clean Filters Panel */}
           <div className="filters-wrapper-card" style={{ background: 'rgba(18, 20, 29, 0.7)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1rem 1.25rem' }}>
-            {/* Quick Filter Chips */}
-            {!isTrainer && (
-              <div className="grading-quick-chips" style={{ marginBottom: '0.85rem', paddingBottom: '0.65rem' }}>
-                <button
-                  type="button"
-                  className={`quick-chip ${gradingFilterTrainerApproval === 'Approved' && gradingFilterResult === 'All' ? 'active-eligible' : ''}`}
-                  onClick={() => {
-                    setGradingFilterResult('All');
-                    setGradingFilterEligibility('All');
-                    setGradingFilterTrainerApproval(gradingFilterTrainerApproval === 'Approved' ? 'All' : 'Approved');
-                  }}
-                >
-                  ‚úì Trainer Approved ({trainerApprovedCount})
-                </button>
-                <button
-                  type="button"
-                  className={`quick-chip ${gradingFilterTrainerApproval === 'Pending' && gradingFilterResult === 'All' ? 'active-fail' : ''}`}
-                  onClick={() => {
-                    setGradingFilterResult('All');
-                    setGradingFilterEligibility('All');
-                    setGradingFilterTrainerApproval(gradingFilterTrainerApproval === 'Pending' ? 'All' : 'Pending');
-                  }}
-                >
-                  ‚è≥ Pending Approval ({pendingApprovalCount})
-                </button>
-                <button
-                  type="button"
-                  className={`quick-chip ${gradingFilterResult === 'Pass' ? 'active-pass' : ''}`}
-                  onClick={() => {
-                    setGradingFilterEligibility('All');
-                    setGradingFilterTrainerApproval('All');
-                    setGradingFilterResult(gradingFilterResult === 'Pass' ? 'All' : 'Pass');
-                  }}
-                >
-                  üèÜ Passed Students ({passedCount})
-                </button>
-                <button
-                  type="button"
-                  className={`quick-chip ${gradingFilterResult === 'Fail' ? 'active-fail' : ''}`}
-                  onClick={() => {
-                    setGradingFilterEligibility('All');
-                    setGradingFilterTrainerApproval('All');
-                    setGradingFilterResult(gradingFilterResult === 'Fail' ? 'All' : 'Fail');
-                  }}
-                >
-                  ‚ùå Failed / Retest ({failedCount})
-                </button>
-                <button
-                  type="button"
-                  className={`quick-chip ${gradingFilterMonth === currentMonthStr || gradingFilterMonth === 'current' ? 'active-eligible' : ''}`}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                  onClick={() => {
-                    setGradingFilterMonth(gradingFilterMonth === currentMonthStr || gradingFilterMonth === 'current' ? 'All' : currentMonthStr);
-                  }}
-                  title={`Auto-filter candidates eligible in ${formatGradingMonthLabel(currentMonthStr)}`}
-                >
-                  <span>‚ö° Auto Month: {formatGradingMonthLabel(currentMonthStr)} ({currentMonthCount})</span>
-                </button>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
               {/* Search Input */}
               <div style={{ minWidth: '220px', flex: '1 1 240px' }}>
                 <input
@@ -12975,7 +12914,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                       <th>Batch</th>
                       <th>Present Belt / Level</th>
                       {isTrainer && <th>Approval Status</th>}
-                      {!isTrainer && <th>Trainer Status & Suggested Belt</th>}
+                      {!isTrainer && <th>Trainer Status</th>}
                       {!isTrainer && <th>Exam Result</th>}
                       <th style={{ textAlign: 'center' }}>Actions</th>
                     </tr>
@@ -13031,16 +12970,6 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                                       Pending Approval
                                     </span>
                                   )}
-                                  {student.trainerApprovedForGrading && student.trainerSuggestedBelt && (
-                                    <span className={`badge ${getBeltColorClass(student.trainerSuggestedBelt)}`} style={{ padding: '2px 7px', fontSize: '0.74rem', fontWeight: 700 }}>
-                                      ü•ã {student.trainerSuggestedBelt}
-                                    </span>
-                                  )}
-                                  {student.trainerApprovedForGrading && student.trainerBeltSize && (
-                                    <span className="badge" style={{ background: 'rgba(234, 179, 8, 0.15)', color: '#fbbf24', border: '1px solid rgba(234, 179, 8, 0.35)', padding: '2px 6px', fontSize: '0.72rem', borderRadius: '5px', fontWeight: 600 }}>
-                                      üìè Size: {student.trainerBeltSize}
-                                    </span>
-                                  )}
                                 </div>
                                 {student.trainerApprovedForGrading && student.trainerGradingNotes && (
                                   <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontStyle: 'italic', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={student.trainerGradingNotes}>
@@ -13051,7 +12980,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                             </td>
                           )}
                           {!isTrainer && (
-                            <td data-label="Trainer Status & Suggested Belt">
+                            <td data-label="Trainer Status">
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                   {student.trainerApprovedForGrading ? (
@@ -13061,20 +12990,6 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                                   ) : (
                                     <span className="badge badge-gray" style={{ fontSize: '0.72rem', padding: '2px 7px', borderRadius: '5px' }}>
                                       Pending
-                                    </span>
-                                  )}
-                                  {student.trainerSuggestedBelt ? (
-                                    <span className={`badge ${getBeltColorClass(student.trainerSuggestedBelt)}`} style={{ padding: '2px 7px', fontSize: '0.74rem', fontWeight: 700 }}>
-                                      ü•ã {student.trainerSuggestedBelt}
-                                    </span>
-                                  ) : (
-                                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>
-                                      {student.nextBelt && student.nextBelt !== 'None' ? student.nextBelt : 'Standard Next'}
-                                    </span>
-                                  )}
-                                  {student.trainerBeltSize && (
-                                    <span className="badge" style={{ background: 'rgba(234, 179, 8, 0.15)', color: '#fbbf24', border: '1px solid rgba(234, 179, 8, 0.35)', padding: '2px 6px', fontSize: '0.72rem', borderRadius: '5px', fontWeight: 600 }}>
-                                      üìè Size: {student.trainerBeltSize}
                                     </span>
                                   )}
                                 </div>
@@ -13610,32 +13525,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                     />
                   </div>
 
-                  {gradeResult === 'Pass' && (
-                    <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                      <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>
-                        Target Belt / Level to Assign *
-                      </label>
-                      <select
-                        className="form-control"
-                        style={{ height: '42px', borderRadius: '10px', fontSize: '0.88rem', width: '100%', background: 'rgba(255, 255, 255, 0.05)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.15)' }}
-                        value={targetBelt}
-                        onChange={(e) => setTargetBelt(e.target.value)}
-                        required
-                      >
-                        <option value="">-- Choose Target Belt / Level --</option>
-                        <optgroup label="ü•ã Traditional Belts">
-                          {['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Brown 1', 'Brown 2', 'Brown 3', 'Brown 4', 'Black'].map(b => (
-                            <option key={b} value={b} style={{ background: '#12141d', color: '#fff' }}>{b} Belt</option>
-                          ))}
-                        </optgroup>
-                        <optgroup label="ü•ä Kickboxing / Boxing Levels">
-                          {['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
-                            <option key={b} value={b} style={{ background: '#12141d', color: '#fff' }}>{b}</option>
-                          ))}
-                        </optgroup>
-                      </select>
-                    </div>
-                  )}
+
 
                   <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                     <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>Test Result</label>
@@ -13675,43 +13565,34 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                   </div>
 
                   {gradeResult === 'Pass' && (
-                    <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                      <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#4ade80', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '8px' }}>
-                        üèÜ Promoted Belt / Level If Passed *
-                      </label>
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <input
-                          type="text"
-                          className="form-control"
-                          style={{ height: '40px', borderRadius: '10px', flex: 1, fontSize: '0.9rem' }}
-                          value={targetBelt || ''}
-                          onChange={(e) => setTargetBelt(e.target.value)}
-                          placeholder="Promoted Belt (e.g. Orange Belt)"
-                          list="grading-belt-options-list"
-                          required
-                        />
-                        <select
-                          className="form-control"
-                          style={{ height: '40px', borderRadius: '10px', width: 'auto', maxWidth: '160px', fontSize: '0.85rem' }}
-                          value={targetBelt || ''}
-                          onChange={(e) => setTargetBelt(e.target.value)}
-                        >
-                          <option value="">-- Quick Select --</option>
-                          <optgroup label="ü•ã Traditional Belts">
-                            {[
-                              'White Belt', 'Yellow Belt', 'Orange Belt', 'Green Belt', 'Blue Belt', 'Purple Belt',
-                              'Brown 1 Belt', 'Brown 2 Belt', 'Brown 3 Belt', 'Brown 4 Belt', 'Black Belt'
-                            ].map(b => (
-                              <option key={b} value={b}>{b}</option>
-                            ))}
-                          </optgroup>
-                          <optgroup label="ü•ä Kickboxing / Boxing Levels">
-                            {['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Pro Level'].map(b => (
-                              <option key={b} value={b}>{b}</option>
-                            ))}
-                          </optgroup>
-                        </select>
+                    <div style={{
+                      marginBottom: '1.25rem',
+                      padding: '0.85rem 1.1rem',
+                      background: 'linear-gradient(135deg, rgba(74, 222, 128, 0.08) 0%, rgba(34, 197, 94, 0.03) 100%)',
+                      border: '1px solid rgba(74, 222, 128, 0.25)',
+                      borderRadius: '12px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)'
+                    }}>
+                      <div>
+                        <div style={{ fontSize: '0.72rem', color: '#86efac', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.5px' }}>
+                          Automatic Next Belt Promotion
+                        </div>
+                        <div style={{ fontSize: '1rem', fontWeight: 700, color: '#fff', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ color: '#94a3b8' }}>{selectedGradeStudent.belt}</span>
+                          <span style={{ color: '#4ade80' }}>‚ûî</span>
+                          <span className={`badge ${getBeltColorClass(targetBelt || getNextBelt(selectedGradeStudent.belt))}`} style={{ fontSize: '0.82rem', padding: '3px 10px', fontWeight: 700 }}>
+                            {targetBelt || getNextBelt(selectedGradeStudent.belt)}
+                          </span>
+                        </div>
                       </div>
+                      {selectedGradeStudent.trainerBeltSize && (
+                        <span className="badge" style={{ background: 'rgba(234, 179, 8, 0.15)', color: '#fbbf24', border: '1px solid rgba(234, 179, 8, 0.35)', padding: '4px 10px', fontSize: '0.75rem', borderRadius: '6px', fontWeight: 600 }}>
+                          üìè Belt Size: {selectedGradeStudent.trainerBeltSize}
+                        </span>
+                      )}
                     </div>
                   )}
 
@@ -14144,17 +14025,28 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
         // 2. Batch filter
         let matchesBatch = true;
         if (batchVal !== 'All') {
-          const selectedBatchObj = batchOptions.find(b => b.id.toLowerCase() === batchVal.toLowerCase());
+          const selectedBatchObj = batchOptions.find(b => 
+            (b.id && b.id.toLowerCase() === batchVal.toLowerCase()) ||
+            (b.code && b.code.toLowerCase() === batchVal.toLowerCase()) ||
+            (b.name && b.name.toLowerCase() === batchVal.toLowerCase())
+          );
           if (selectedBatchObj) {
             const studentBatchLower = (s.batch || '').toLowerCase().trim();
-            const targetIdLower = selectedBatchObj.id.toLowerCase().trim();
-            const targetNameLower = selectedBatchObj.name.toLowerCase().trim();
+            const targetIdLower = (selectedBatchObj.id || selectedBatchObj.code || '').toLowerCase().trim();
+            const targetNameLower = (selectedBatchObj.name || '').toLowerCase().trim();
             if (studentBatchLower === targetIdLower || studentBatchLower === targetNameLower) {
               matchesBatch = true;
-            } else if (studentBatchLower && (studentBatchLower.startsWith('batch') || studentBatchLower.startsWith('batch_'))) {
-              matchesBatch = false;
             } else {
-              matchesBatch = schedulesMatch(s.schedule, selectedBatchObj.schedule);
+              const studentBatchObj = batchOptions.find(b =>
+                (b.id && b.id.toLowerCase() === studentBatchLower) ||
+                (b.code && b.code.toLowerCase() === studentBatchLower) ||
+                (b.name && b.name.toLowerCase() === studentBatchLower)
+              );
+              if (studentBatchObj && studentBatchObj.name && targetNameLower && studentBatchObj.name.toLowerCase().trim() === targetNameLower) {
+                matchesBatch = true;
+              } else {
+                matchesBatch = schedulesMatch(s.schedule, selectedBatchObj.schedule);
+              }
             }
           } else {
             matchesBatch = false;
@@ -18814,7 +18706,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                 <ShieldCheck size={16} /> Student Portal
               </div>
               <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)' }}>
-                Sign in with registered Mobile & MPIN
+                Sign in with Student ID or QR Code
               </div>
             </div>
             <button
@@ -19968,6 +19860,31 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
   };
 
 
+  if (appMode === 'student-qr-login') {
+    return (
+      <StudentQrAutoLogin
+        apiBaseUrl={API_BASE_URL}
+        onLoginSuccess={(authRes) => {
+          const sToken = authRes?.token;
+          const sData = authRes?.student;
+          if (sToken) {
+            setStudentSession(sToken, sData || {});
+          }
+          setAppMode('student-portal');
+          window.location.hash = '#/student/portal';
+        }}
+        onGoToLogin={() => {
+          setAppMode('student-login');
+          window.location.hash = '#/student/login';
+        }}
+        onGoToWebsite={() => {
+          setAppMode('website');
+          window.location.hash = '#/';
+        }}
+      />
+    );
+  }
+
   if (appMode === 'student-login') {
     return (
       <StudentLogin
@@ -20076,6 +19993,9 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
           </a>
           <a className={`nav-item ${currentView === 'fees' ? 'active' : ''}`} onClick={() => setCurrentView('fees')}>
             <Wallet className="nav-icon" /> <span>Fees</span>
+          </a>
+          <a className={`nav-item ${currentView === 'id-cards' ? 'active' : ''}`} onClick={() => setCurrentView('id-cards')}>
+            <CreditCard className="nav-icon" /> <span>Student ID Cards</span>
           </a>
           {(userRole === 'superadmin' || userRole === 'developer' || userRole === 'branchadmin') && (
             <a
@@ -20197,6 +20117,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                 {currentView === 'trainer-approvals' && 'Trainer Approvals & Batch Allocation'}
                 {currentView === 'grading' && (userRole === 'trainer' ? 'Student Test Evaluation' : 'Student Belt & Level Test')}
                 {currentView === 'announcements' && 'Announcements & Notifications'}
+                {currentView === 'id-cards' && 'Student ID Cards & QR Management'}
               </h1>
             </div>
 
@@ -20693,17 +20614,15 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                                     >
                                       <Eye size={16} />
                                     </button>
-                                    {(isAdminUser(loggedInUser) || isBranchAdmin(loggedInUser) || userRole === 'developer') && (
-                                      <button
-                                        type="button"
-                                        className="btn-icon"
-                                        onClick={() => handleAdminResetStudentMpin(student)}
-                                        style={{ color: '#f59e0b', padding: '6px' }}
-                                        title="Reset Portal MPIN"
-                                      >
-                                        <Key size={16} />
-                                      </button>
-                                    )}
+                                    <button
+                                      type="button"
+                                      className="btn-icon"
+                                      onClick={() => setPrintingIdCardStudent(student)}
+                                      style={{ color: '#eab308', padding: '6px' }}
+                                      title="Print ID Card & QR Code"
+                                    >
+                                      <CreditCard size={16} />
+                                    </button>
                                     <button
                                       type="button"
                                       className="btn-icon"
@@ -20838,6 +20757,17 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
           {currentView === 'trainer-approvals' && renderTrainerApprovals()}
           {currentView === 'grading' && (lockGradingPage && userRole !== 'developer' ? renderSectionMaintenance('Student Belt Grading') : renderGrading())}
           {currentView === 'announcements' && renderAnnouncements()}
+          {currentView === 'id-cards' && (
+            <StudentIDCardsManager
+              apiBaseUrl={API_BASE_URL}
+              sessionToken={getSessionToken()}
+              userRole={userRole}
+              userBranch={userBranch}
+              userBatch={userBatch}
+              branches={branches || []}
+              batches={userRole === 'trainer' ? getGradingBatchOptions() : (batchOptions && batchOptions.length > 0 ? batchOptions : customBatches || [])}
+            />
+          )}
         </div>
       </main>
 
@@ -21068,6 +20998,15 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
         </div>
       )}
 
+      {/* Admin Student ID Card Modal */}
+      {printingIdCardStudent && (
+        <StudentIDCard
+          student={printingIdCardStudent}
+          onClose={() => setPrintingIdCardStudent(null)}
+          isModal={true}
+        />
+      )}
+
       {/* Profile Modal */}
       {selectedStudent && (
         <div className="modal-overlay">
@@ -21153,6 +21092,24 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                         required
                       />
                     </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Blood Group</label>
+                    <select
+                      className="form-control"
+                      value={editingStudentData.bloodGroup || 'O+'}
+                      onChange={(e) => setEditingStudentData({ ...editingStudentData, bloodGroup: e.target.value })}
+                    >
+                      <option value="A+">A+</option>
+                      <option value="A-">A-</option>
+                      <option value="B+">B+</option>
+                      <option value="B-">B-</option>
+                      <option value="O+">O+</option>
+                      <option value="O-">O-</option>
+                      <option value="AB+">AB+</option>
+                      <option value="AB-">AB-</option>
+                    </select>
                   </div>
 
                   <div className="grid-2-col">
@@ -22123,6 +22080,15 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                 </div>
                 <div className="modal-actions" style={{ display: 'flex', gap: '10px', marginTop: '1.25rem' }}>
                   <button className="btn-secondary" style={{ flex: 1, padding: '0.75rem', borderRadius: '10px', fontWeight: 600 }} onClick={() => setSelectedStudent(null)}>Close</button>
+                  <button 
+                    type="button"
+                    className="btn-primary" 
+                    style={{ flex: 1, padding: '0.75rem', borderRadius: '10px', fontWeight: 600, background: '#e50914', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }} 
+                    onClick={() => setPrintingIdCardStudent(selectedStudent)}
+                  >
+                    <ShieldCheck size={18} />
+                    <span>Print ID Card</span>
+                  </button>
                   {loggedInUser && (
                     <button className="btn-primary" style={{ flex: 1, padding: '0.75rem', borderRadius: '10px', fontWeight: 600 }} onClick={() => {
                       setEditingStudentData(selectedStudent);
@@ -22486,6 +22452,24 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
                   <label>Date of Birth (DOB)</label>
                   <input type="date" className="form-control" required value={newStudent.dob} onChange={(e) => setNewStudent({ ...newStudent, dob: e.target.value })} />
                 </div>
+              </div>
+
+              <div className="form-group">
+                <label>Blood Group</label>
+                <select
+                  className="form-control"
+                  value={newStudent.bloodGroup || 'O+'}
+                  onChange={(e) => setNewStudent({ ...newStudent, bloodGroup: e.target.value })}
+                >
+                  <option value="A+">A+</option>
+                  <option value="A-">A-</option>
+                  <option value="B+">B+</option>
+                  <option value="B-">B-</option>
+                  <option value="O+">O+</option>
+                  <option value="O-">O-</option>
+                  <option value="AB+">AB+</option>
+                  <option value="AB-">AB-</option>
+                </select>
               </div>
 
               <div className="grid-2-col">
@@ -23541,13 +23525,13 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
         );
       })()}
 
-      {/* Student Admission Generated MPIN Modal */}
-      {createdStudentTempMpin && (
-        <div className="modal-overlay" style={{ zIndex: 15000 }} onClick={() => setCreatedStudentTempMpin(null)}>
+      {/* Student Admission Created Modal */}
+      {createdStudentAdmission && (
+        <div className="modal-overlay" style={{ zIndex: 15000 }} onClick={() => setCreatedStudentAdmission(null)}>
           <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px', textAlign: 'center', padding: '2rem', position: 'relative' }}>
             <button
               type="button"
-              onClick={() => setCreatedStudentTempMpin(null)}
+              onClick={() => setCreatedStudentAdmission(null)}
               style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
               title="Close"
             >
@@ -23558,77 +23542,45 @@ _Thank you for your payment! Please keep this receipt for future reference._ üô
             </div>
             <h3 style={{ margin: '0 0 0.5rem', color: '#fff', fontSize: '1.3rem' }}>Student Admission Successful!</h3>
             <p style={{ color: 'var(--color-text-muted)', fontSize: '0.88rem', margin: '0 0 1.25rem' }}>
-              Student account created for <strong>{createdStudentTempMpin.name}</strong>. Provide this temporary MPIN to the student for their initial portal login:
+              Student account created for <strong>{createdStudentAdmission.name}</strong>. Provide this Unique Student ID to the student for direct portal access:
             </p>
-            <div style={{ background: 'rgba(56, 189, 248, 0.1)', border: '1px dashed #38bdf8', borderRadius: '10px', padding: '1rem', margin: '0 0 1.25rem' }}>
-              <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Temporary 6-Digit MPIN</div>
-              <div style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '0.25em', color: '#38bdf8', margin: '0.25rem 0' }}>
-                {createdStudentTempMpin.mpin}
+            <div style={{ background: 'rgba(229, 9, 20, 0.1)', border: '1.5px solid #E50914', borderRadius: '12px', padding: '1.25rem', margin: '0 0 1.25rem' }}>
+              <div style={{ fontSize: '0.75rem', color: '#cbd5e1', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Permanent Student ID</div>
+              <div style={{ fontSize: '2.2rem', fontWeight: 900, letterSpacing: '0.1em', color: '#ffffff', margin: '0.25rem 0' }}>
+                {createdStudentAdmission.uniqueStudentId || `MF-${String(createdStudentAdmission.id || '1').padStart(4, '0')}`}
               </div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Registered Mobile: {createdStudentTempMpin.phone}</div>
+              <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
+                {createdStudentAdmission.branch} &bull; {createdStudentAdmission.batch || 'Regular Batch'}
+              </div>
             </div>
-            <p style={{ fontSize: '0.78rem', color: '#f59e0b', marginBottom: '1.25rem' }}>
-              ‚ö†Ô∏è The student will be prompted to set their own secret 6-digit MPIN upon their first login. This temporary MPIN will not be shown again.
+            <p style={{ fontSize: '0.8rem', color: '#4ade80', marginBottom: '1.25rem' }}>
+              ‚úì Student can log in instantly using this Unique Student ID or by scanning their ID Card QR code.
             </p>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 className="btn-secondary"
                 onClick={() => {
-                  navigator.clipboard.writeText(`Hi ${createdStudentTempMpin.name}, your Master Fit Student Portal temporary MPIN is: ${createdStudentTempMpin.mpin}. Login at: ${window.location.origin}/#/student/login`);
-                  alert('Copied student portal credentials to clipboard!');
+                  const sId = createdStudentAdmission.uniqueStudentId || `MF-${String(createdStudentAdmission.id || '1').padStart(4, '0')}`;
+                  navigator.clipboard.writeText(`Hi ${createdStudentAdmission.name}, your MASTERFIT Student ID is: ${sId}. Log in instantly at: ${window.location.origin}/#/student/login`);
+                  alert('Copied student portal login details to clipboard!');
                 }}
               >
                 Copy Details
               </button>
-              <button type="button" className="btn-primary" onClick={() => setCreatedStudentTempMpin(null)}>
-                Done
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ background: '#E50914', color: '#fff', border: 'none' }}
+                onClick={() => {
+                  setPrintingIdCardStudent(createdStudentAdmission);
+                  setCreatedStudentAdmission(null);
+                }}
+              >
+                Print / View ID Card
               </button>
-            </div>
-          </div>
-        </div>
-      )}
+              <button type="button" className="btn-primary" onClick={() => setCreatedStudentAdmission(null)}>
 
-      {/* Admin Reset Student MPIN Modal */}
-      {adminResetMpinModal && (
-        <div className="modal-overlay" style={{ zIndex: 15000 }} onClick={() => setAdminResetMpinModal(null)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '460px', textAlign: 'center', padding: '2rem', position: 'relative' }}>
-            <button
-              type="button"
-              onClick={() => setAdminResetMpinModal(null)}
-              style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
-              title="Close"
-            >
-              <X size={20} />
-            </button>
-            <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem' }}>
-              <Key size={30} />
-            </div>
-            <h3 style={{ margin: '0 0 0.5rem', color: '#fff', fontSize: '1.25rem' }}>MPIN Reset Successful</h3>
-            <p style={{ color: 'var(--color-text-muted)', fontSize: '0.88rem', margin: '0 0 1.25rem' }}>
-              A new temporary 6-digit MPIN has been generated for <strong>{adminResetMpinModal.studentName}</strong> (#{adminResetMpinModal.studentId}):
-            </p>
-            <div style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px dashed #f59e0b', borderRadius: '10px', padding: '1rem', margin: '0 0 1.25rem' }}>
-              <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>New Temporary MPIN</div>
-              <div style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '0.25em', color: '#f59e0b', margin: '0.25rem 0' }}>
-                {adminResetMpinModal.temporaryMPIN}
-              </div>
-            </div>
-            <p style={{ fontSize: '0.78rem', color: '#94a3b8', marginBottom: '1.25rem' }}>
-              The student must use this temporary MPIN to log in and will be immediately required to create a new secret 6-digit MPIN.
-            </p>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => {
-                  navigator.clipboard.writeText(`Hi ${adminResetMpinModal.studentName}, your Master Fit Student Portal temporary MPIN has been reset to: ${adminResetMpinModal.temporaryMPIN}. Login at: ${window.location.origin}/#/student/login`);
-                  alert('Copied reset MPIN details to clipboard!');
-                }}
-              >
-                Copy Details
-              </button>
-              <button type="button" className="btn-primary" onClick={() => setAdminResetMpinModal(null)}>
                 Done
               </button>
             </div>

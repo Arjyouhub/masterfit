@@ -1,50 +1,24 @@
 import React, { useState } from 'react';
-import { Smartphone, Lock, Eye, EyeOff, ShieldCheck, ArrowRight, HelpCircle, ArrowLeft, AlertCircle, Sparkles, KeyRound, CheckCircle2 } from 'lucide-react';
+import { ShieldCheck, ArrowRight, ArrowLeft, AlertCircle, Sparkles, CheckCircle2, QrCode, CreditCard, Lock, Camera } from 'lucide-react';
+import QRCameraScanner from './QRCameraScanner.jsx';
 
 export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite, onBackToWebsite, onGoToStaffLogin }) {
-  const [activeTab, setActiveTab] = useState('login'); // 'login' | 'create'
   const handleGoBack = onGoToWebsite || onBackToWebsite;
-  
-  // Login form state
-  const [mobileNumber, setMobileNumber] = useState('');
-  const [mpin, setMpin] = useState('');
-  const [showMpin, setShowMpin] = useState(false);
-  
-  // Create MPIN form state
-  const [createMobile, setCreateMobile] = useState('');
-  const [createMpin, setCreateMpin] = useState('');
-  const [confirmMpin, setConfirmMpin] = useState('');
-  const [showCreateMpin, setShowCreateMpin] = useState(false);
-  const [showConfirmMpin, setShowConfirmMpin] = useState(false);
-
+  const [studentIdInput, setStudentIdInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [showCameraScanner, setShowCameraScanner] = useState(false);
 
-  const handleMobileChange = (e, setter) => {
-    const val = e.target.value.replace(/\D/g, '').slice(0, 10);
-    setter(val);
-    setError('');
-  };
-
-  const handleMpinChange = (e, setter) => {
-    const val = e.target.value.replace(/\D/g, '').slice(0, 6);
-    setter(val);
-    setError('');
-  };
-
-  const handleLoginSubmit = async (e) => {
+  // Direct Student ID Login (Zero MPIN required)
+  const handleIdLoginSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setSuccessMsg('');
 
-    if (mobileNumber.length !== 10) {
-      setError('Please enter your 10-digit registered mobile number');
-      return;
-    }
-    if (mpin.length !== 6) {
-      setError('Please enter your 6-digit MPIN');
+    const cleanId = String(studentIdInput).trim().toUpperCase();
+    if (!cleanId) {
+      setError('Please enter your Unique Student ID (e.g. MF-0001 or 1042)');
       return;
     }
 
@@ -53,15 +27,12 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
       const res = await fetch(`${apiBaseUrl}/student/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mobileNumber, mpin })
+        body: JSON.stringify({ studentId: cleanId })
       });
 
       const data = await res.json();
       if (!res.ok) {
-        if (data.needsMpinSetup) {
-          setCreateMobile(mobileNumber);
-        }
-        throw new Error(data.error || 'Login failed. Please verify your credentials.');
+        throw new Error(data.error || 'Login failed. Please check your Student ID.');
       }
 
       if (data.token) {
@@ -72,7 +43,10 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
         document.cookie = `umai_student_token=${encodeURIComponent(data.token)}; path=/; max-age=604800;`;
       }
 
-      onLoginSuccess(data);
+      setSuccessMsg(`Welcome, ${data.student?.name || 'Student'}! Opening portal...`);
+      setTimeout(() => {
+        onLoginSuccess(data);
+      }, 500);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -80,48 +54,33 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
     }
   };
 
-  const handleCreateSubmit = async (e) => {
-    e.preventDefault();
+  // Instant Camera QR Scan Login handler
+  const handleQrScanned = async (decodedData) => {
+    setShowCameraScanner(false);
     setError('');
     setSuccessMsg('');
-
-    if (createMobile.length !== 10) {
-      setError('Please enter your 10-digit registered mobile number');
-      return;
-    }
-    if (createMpin.length !== 6) {
-      setError('MPIN must be exactly 6 numeric digits');
-      return;
-    }
-    if (createMpin !== confirmMpin) {
-      setError('Confirm MPIN does not match new MPIN');
-      return;
-    }
-
-    const weakList = [
-      '000000', '111111', '222222', '333333', '444444', '555555', '666666', '777777', '888888', '999999',
-      '123456', '234567', '345678', '456789', '567890', '654321', '765432', '876543', '987654', '098765'
-    ];
-    if (weakList.includes(createMpin) || /^(\d{2})\1\1$/.test(createMpin)) {
-      setError('This MPIN is too predictable. Avoid sequences like 123456 or repeated digits.');
-      return;
-    }
-
     setLoading(true);
+
     try {
-      const res = await fetch(`${apiBaseUrl}/student/create-mpin`, {
+      // Check if scanned as URL (e.g. /#/student/qr-login/MF-0001)
+      let targetIdOrPayload = decodedData;
+      if (typeof decodedData === 'string' && decodedData.includes('/student/qr-login/')) {
+        const parts = decodedData.split('/student/qr-login/');
+        targetIdOrPayload = parts[1] ? parts[1].split('/')[0].split('?')[0] : decodedData;
+      }
+
+      const res = await fetch(`${apiBaseUrl}/student/qr-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mobileNumber: createMobile,
-          newMpin: createMpin,
-          confirmMpin: confirmMpin
+        body: JSON.stringify({ 
+          qrData: decodedData,
+          studentId: targetIdOrPayload
         })
       });
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to create MPIN. Please try again.');
+        throw new Error(data.error || 'Invalid or unrecognized MASTERFIT QR Code.');
       }
 
       if (data.token) {
@@ -132,7 +91,7 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
         document.cookie = `umai_student_token=${encodeURIComponent(data.token)}; path=/; max-age=604800;`;
       }
 
-      setSuccessMsg('MPIN created successfully! Logging you into the portal...');
+      setSuccessMsg(`Verified! Welcome, ${data.student?.name || 'Student'}! Opening portal...`);
       setTimeout(() => {
         onLoginSuccess(data);
       }, 600);
@@ -140,25 +99,6 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
       setError(err.message);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const switchToCreateTab = () => {
-    setActiveTab('create');
-    setError('');
-    setSuccessMsg('');
-    setShowForgotModal(false);
-    if (mobileNumber && !createMobile) {
-      setCreateMobile(mobileNumber);
-    }
-  };
-
-  const switchToLoginTab = () => {
-    setActiveTab('login');
-    setError('');
-    setSuccessMsg('');
-    if (createMobile && !mobileNumber) {
-      setMobileNumber(createMobile);
     }
   };
 
@@ -177,26 +117,6 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
             <p>Access your training attendance, fee history, receipts, and academy updates</p>
           </div>
 
-          {/* Mode Switcher Tabs */}
-          <div className="student-auth-tabs">
-            <button
-              type="button"
-              className={`student-auth-tab ${activeTab === 'login' ? 'active' : ''}`}
-              onClick={switchToLoginTab}
-            >
-              <Lock size={15} />
-              <span>Sign In</span>
-            </button>
-            <button
-              type="button"
-              className={`student-auth-tab ${activeTab === 'create' ? 'active' : ''}`}
-              onClick={switchToCreateTab}
-            >
-              <KeyRound size={15} />
-              <span>Create MPIN</span>
-            </button>
-          </div>
-
           {error && (
             <div className="student-alert error">
               <AlertCircle size={18} />
@@ -211,209 +131,71 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
             </div>
           )}
 
-          {/* Tab 1: Sign In with MPIN */}
-          {activeTab === 'login' && (
-            <form onSubmit={handleLoginSubmit} className="student-login-form">
-              <div className="student-input-group">
-                <label>Registered Mobile Number</label>
-                <div className="student-input-wrap">
-                  <span className="student-prefix">+91</span>
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={10}
-                    placeholder="10-digit mobile number"
-                    value={mobileNumber}
-                    onChange={(e) => handleMobileChange(e, setMobileNumber)}
-                    required
-                    autoFocus
-                  />
-                  <Smartphone size={18} className="student-input-icon-right" />
+          {/* Camera Scanner Quick Trigger */}
+          <div className="student-qr-helper-banner">
+            <div className="qr-banner-icon">
+              <QrCode size={26} color="#eab308" />
+            </div>
+            <div className="qr-banner-text">
+              <strong>Have a MASTERFIT ID Card?</strong>
+              <span>Scan your card's QR code with your camera to log in instantly without typing anything!</span>
+            </div>
+            <button 
+              type="button" 
+              className="banner-scan-action-btn"
+              onClick={() => setShowCameraScanner(true)}
+              title="Open Camera Scanner"
+            >
+              <Camera size={16} />
+              <span>Scan QR</span>
+            </button>
+          </div>
+
+          {/* Direct Unique Student ID Form */}
+          <form onSubmit={handleIdLoginSubmit} className="student-login-form">
+            <div className="student-input-group">
+              <label>Unique Student ID</label>
+              <div className="student-input-wrap clean-id-input-wrap">
+                <div className="input-prefix-badge">
+                  <CreditCard size={18} color="#eab308" />
                 </div>
+                <input
+                  type="text"
+                  placeholder="Enter Student ID (e.g. MF-0001 or 1042)"
+                  value={studentIdInput}
+                  onChange={(e) => {
+                    setStudentIdInput(e.target.value);
+                    setError('');
+                  }}
+                  className="clean-student-input"
+                  required
+                  autoFocus
+                />
               </div>
+              <span className="student-input-hint">Direct instant access with Unique Student ID (e.g. MF-0001) or Camera QR Scan</span>
+            </div>
 
-              <div className="student-input-group">
-                <div className="student-label-row">
-                  <label>6-Digit MPIN</label>
-                  <button
-                    type="button"
-                    className="student-forgot-link"
-                    onClick={() => setShowForgotModal(true)}
-                  >
-                    Forgot MPIN?
-                  </button>
-                </div>
-                <div className="student-input-wrap">
-                  <Lock size={18} className="student-input-icon" />
-                  <input
-                    type={showMpin ? 'text' : 'password'}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={6}
-                    placeholder="••••••"
-                    value={mpin}
-                    onChange={(e) => handleMpinChange(e, setMpin)}
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="student-toggle-eye"
-                    onClick={() => setShowMpin(!showMpin)}
-                    tabIndex="-1"
-                  >
-                    {showMpin ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={loading || mobileNumber.length !== 10 || mpin.length !== 6}
-                className="student-btn primary full login-btn"
-              >
-                {loading ? (
-                  <span className="spinner-text">Authenticating...</span>
-                ) : (
-                  <>
-                    <span>Sign In to Student Portal</span>
-                    <ArrowRight size={18} />
-                  </>
-                )}
-              </button>
-
-              <div className="student-form-subtext">
-                <span>First time login or no MPIN?</span>{' '}
-                <button
-                  type="button"
-                  onClick={switchToCreateTab}
-                  className="student-inline-link"
-                >
-                  Create MPIN
-                </button>
-              </div>
-            </form>
-          )}
-
-          {/* Tab 2: Create MPIN (Using Registered Mobile Number Only) */}
-          {activeTab === 'create' && (
-            <form onSubmit={handleCreateSubmit} className="student-login-form">
-              <div className="student-info-banner">
-                <Sparkles size={16} />
-                <span>Create or reset your 6-digit MPIN using your enrolled mobile number. No OTP delay.</span>
-              </div>
-
-              <div className="student-input-group">
-                <label>Registered Mobile Number</label>
-                <div className="student-input-wrap">
-                  <span className="student-prefix">+91</span>
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={10}
-                    placeholder="10-digit mobile number"
-                    value={createMobile}
-                    onChange={(e) => handleMobileChange(e, setCreateMobile)}
-                    required
-                    autoFocus
-                  />
-                  <Smartphone size={18} className="student-input-icon-right" />
-                </div>
-                <span className="student-input-hint">Must match mobile number registered with academy</span>
-              </div>
-
-              <div className="student-input-group">
-                <label>New 6-Digit MPIN</label>
-                <div className="student-input-wrap">
-                  <Lock size={18} className="student-input-icon" />
-                  <input
-                    type={showCreateMpin ? 'text' : 'password'}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={6}
-                    placeholder="••••••"
-                    value={createMpin}
-                    onChange={(e) => handleMpinChange(e, setCreateMpin)}
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="student-toggle-eye"
-                    onClick={() => setShowCreateMpin(!showCreateMpin)}
-                    tabIndex="-1"
-                  >
-                    {showCreateMpin ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="student-input-group">
-                <label>Confirm 6-Digit MPIN</label>
-                <div className="student-input-wrap">
-                  <Lock size={18} className="student-input-icon" />
-                  <input
-                    type={showConfirmMpin ? 'text' : 'password'}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={6}
-                    placeholder="••••••"
-                    value={confirmMpin}
-                    onChange={(e) => handleMpinChange(e, setConfirmMpin)}
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="student-toggle-eye"
-                    onClick={() => setShowConfirmMpin(!showConfirmMpin)}
-                    tabIndex="-1"
-                  >
-                    {showConfirmMpin ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="student-security-hints">
-                <div className="hint-title">Security Guidelines:</div>
-                <ul>
-                  <li>Must be exactly 6 numeric digits</li>
-                  <li>Avoid simple sequences like 123456 or repeated digits</li>
-                  <li>Only registered academy student numbers are authorized</li>
-                </ul>
-              </div>
-
-              <button
-                type="submit"
-                disabled={loading || createMobile.length !== 10 || createMpin.length !== 6 || confirmMpin.length !== 6}
-                className="student-btn primary full login-btn"
-              >
-                {loading ? (
-                  <span className="spinner-text">Creating MPIN...</span>
-                ) : (
-                  <>
-                    <span>Create MPIN & Access Portal</span>
-                    <ArrowRight size={18} />
-                  </>
-                )}
-              </button>
-
-              <div className="student-form-subtext">
-                <span>Already have your MPIN?</span>{' '}
-                <button
-                  type="button"
-                  onClick={switchToLoginTab}
-                  className="student-inline-link"
-                >
-                  Sign In
-                </button>
-              </div>
-            </form>
-          )}
+            <button
+              type="submit"
+              disabled={loading || !studentIdInput.trim()}
+              className="student-btn primary full login-btn"
+              style={{ marginTop: '0.75rem' }}
+            >
+              {loading ? (
+                <span className="spinner-text">Authenticating Student ID...</span>
+              ) : (
+                <>
+                  <span>Login to Student Portal</span>
+                  <ArrowRight size={18} />
+                </>
+              )}
+            </button>
+          </form>
 
           <div className="student-login-footer">
             <div className="zero-otp-badge">
               <Sparkles size={14} />
-              <span>Instant, secure access using registered mobile number only</span>
+              <span>Instant QR Scan & Student ID login supported &bull; Master Fit Academy</span>
             </div>
 
             <div className="student-nav-links single-center" style={{ display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
@@ -432,47 +214,99 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
         </div>
       </div>
 
-      {/* Forgot MPIN Modal */}
-      {showForgotModal && (
-        <div className="student-modal-overlay" onClick={() => setShowForgotModal(false)}>
-          <div className="student-modal-card forgot-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="student-modal-header">
-              <div className="student-icon-badge primary">
-                <KeyRound size={28} />
-              </div>
-              <h2>Forgot or Need New MPIN?</h2>
-              <p>You can create or reset your MPIN instantly using your registered mobile number.</p>
-            </div>
-
-            <div className="student-forgot-body">
-              <div className="contact-card">
-                <div className="contact-title">Instant Self-Service MPIN Reset</div>
-                <div className="contact-info">
-                  Enter your enrolled mobile number to set a new 6-digit MPIN. No SMS waiting or admin visit required.
-                </div>
-              </div>
-            </div>
-
-            <div className="student-modal-actions">
-              <button
-                type="button"
-                className="student-btn primary full"
-                onClick={switchToCreateTab}
-              >
-                Reset / Create MPIN Now
-              </button>
-              <button
-                type="button"
-                className="student-btn secondary full"
-                onClick={() => setShowForgotModal(false)}
-                style={{ marginTop: '0.5rem' }}
-              >
-                Close & Return to Login
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* In-page Camera QR Scanner Modal */}
+      {showCameraScanner && (
+        <QRCameraScanner 
+          onScanSuccess={handleQrScanned}
+          onClose={() => setShowCameraScanner(false)}
+          title="Scan MASTERFIT ID Card"
+        />
       )}
+
+      {/* Scoped CSS */}
+      <style>{`
+        .clean-id-input-wrap {
+          position: relative;
+          display: flex;
+          align-items: center;
+          width: 100%;
+        }
+        .input-prefix-badge {
+          position: absolute;
+          left: 14px;
+          top: 50%;
+          transform: translateY(-50%);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          pointer-events: none;
+          z-index: 2;
+        }
+        .clean-student-input {
+          width: 100% !important;
+          padding-left: 44px !important;
+          padding-right: 14px !important;
+          height: 48px !important;
+          box-sizing: border-box !important;
+        }
+        .student-qr-helper-banner {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          background: rgba(234, 179, 8, 0.08);
+          border: 1px dashed rgba(234, 179, 8, 0.35);
+          padding: 12px 14px;
+          border-radius: 12px;
+          margin-bottom: 18px;
+        }
+        .qr-banner-icon {
+          background: rgba(234, 179, 8, 0.15);
+          width: 44px;
+          height: 44px;
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .qr-banner-text {
+          display: flex;
+          flex-direction: column;
+          font-size: 0.78rem;
+          color: #fef08a;
+          line-height: 1.35;
+          text-align: left;
+          flex: 1;
+        }
+        .qr-banner-text strong {
+          color: #facc15;
+          margin-bottom: 2px;
+        }
+        .qr-banner-text span {
+          color: #cbd5e1;
+          font-size: 0.74rem;
+        }
+        .banner-scan-action-btn {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: #eab308;
+          color: #0b0e15;
+          border: none;
+          padding: 8px 12px;
+          border-radius: 8px;
+          font-weight: 700;
+          font-size: 0.78rem;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: all 0.2s;
+          flex-shrink: 0;
+        }
+        .banner-scan-action-btn:hover {
+          background: #facc15;
+          transform: translateY(-1px);
+        }
+      `}</style>
     </div>
   );
 }

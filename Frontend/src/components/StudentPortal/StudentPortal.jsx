@@ -5,13 +5,13 @@ import {
   FileText, ArrowRight, Shield, Award, MapPin, Calendar, Smartphone, RefreshCw,
   ExternalLink, Eye, ChevronLeft, AlertCircle, Sparkles, Check, Copy, Users, ShieldCheck, Share2, Printer
 } from 'lucide-react';
-import FirstLoginMpinModal from './FirstLoginMpinModal.jsx';
+import StudentIDCard from './StudentIDCard.jsx';
 
 export default function StudentPortal({ apiBaseUrl, initialStudent, token, sessionToken, onLogout }) {
   const authToken = token || sessionToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('umai_student_token') : '');
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [student, setStudent] = useState(initialStudent || {});
-  const [mustChangeMpin, setMustChangeMpin] = useState(initialStudent?.mustChangeMPIN || false);
+  const [showIdCardModal, setShowIdCardModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -80,7 +80,6 @@ export default function StudentPortal({ apiBaseUrl, initialStudent, token, sessi
         setProfileData(meJson);
         if (meJson.student) {
           setStudent(prev => ({ ...prev, ...meJson.student }));
-          setMustChangeMpin(meJson.student.mustChangeMPIN);
         }
         setUnreadNotifsCount(meJson.unreadNotifications || 0);
       }
@@ -306,18 +305,6 @@ _Masterfit Academy Student Portal Verification_ 🙏`;
 
   return (
     <div className="student-portal-wrapper">
-      {/* First Login MPIN Enforcer */}
-      {mustChangeMpin && (
-        <FirstLoginMpinModal
-          token={authToken}
-          apiBaseUrl={apiBaseUrl}
-          onSuccess={() => {
-            setMustChangeMpin(false);
-            loadPortalData();
-          }}
-        />
-      )}
-
       {/* Desktop Sidebar */}
       <aside className="student-sidebar">
         <div className="student-sidebar-brand">
@@ -378,6 +365,13 @@ _Masterfit Academy Student Portal Verification_ 🙏`;
           >
             <User size={20} />
             <span>Profile</span>
+          </button>
+          <button
+            className={`nav-item ${currentTab === 'id-card' ? 'active' : ''}`}
+            onClick={() => setCurrentTab('id-card')}
+          >
+            <ShieldCheck size={20} />
+            <span>Digital ID Card</span>
           </button>
         </nav>
 
@@ -450,6 +444,29 @@ _Masterfit Academy Student Portal Verification_ 🙏`;
                   <div className="hero-name-row">
                     <h2>{student.name}</h2>
                     <span className="student-status-badge active">Active Member</span>
+                    <button 
+                      type="button"
+                      onClick={() => setShowIdCardModal(true)}
+                      style={{
+                        marginLeft: 'auto',
+                        background: '#eab308',
+                        color: '#0b0e15',
+                        border: 'none',
+                        padding: '6px 14px',
+                        borderRadius: '20px',
+                        fontSize: '0.78rem',
+                        fontWeight: '700',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 8px rgba(234, 179, 8, 0.3)'
+                      }}
+                      title="View, Print & Download your ID Card"
+                    >
+                      <ShieldCheck size={15} />
+                      <span>My ID Card</span>
+                    </button>
                   </div>
                   <div className="hero-meta-chips">
                     <span className="hero-chip"><strong>ID:</strong> #{student.id}</span>
@@ -1246,6 +1263,13 @@ _Masterfit Academy Student Portal Verification_ 🙏`;
               </div>
             </div>
           )}
+
+          {/* TAB: ID CARD */}
+          {currentTab === 'id-card' && (
+            <div className="student-id-card-viewport" style={{ padding: '20px 0' }}>
+              <StudentIDCard student={student} isModal={false} />
+            </div>
+          )}
         </div>
       </main>
 
@@ -1470,6 +1494,15 @@ _Masterfit Academy Student Portal Verification_ 🙏`;
             </button>
           </div>
         </div>
+      )}
+
+      {/* Student ID Card Modal */}
+      {showIdCardModal && (
+        <StudentIDCard 
+          student={student} 
+          onClose={() => setShowIdCardModal(false)} 
+          isModal={true} 
+        />
       )}
     </div>
   );

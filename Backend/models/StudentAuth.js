@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 
 const studentAuthSchema = new mongoose.Schema({
   studentId: { type: Number, required: true, unique: true, index: true },
+  uniqueStudentId: { type: String, sparse: true, index: true },
   mobileNumber: { type: String, required: true, index: true },
   mpinHash: { type: String, required: true },
   mustChangeMPIN: { type: Boolean, default: true },
@@ -12,5 +13,6 @@ const studentAuthSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 studentAuthSchema.index({ mobileNumber: 1, isActive: 1 });
+studentAuthSchema.index({ uniqueStudentId: 1, isActive: 1 });
 
 export default mongoose.model('StudentAuth', studentAuthSchema);
