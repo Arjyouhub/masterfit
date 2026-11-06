@@ -7655,6 +7655,9 @@ app.post('/api/student/qr-login', async (req, res) => {
     });
 
     const resolvedBatch = await resolveBatchDisplayName(decStudent.batch, decStudent.branch);
+    const realPhoneDisplay = (decStudent.phone && decStudent.phone !== '0000000000' && decStudent.phone !== '—' && decStudent.phone !== 'N/A')
+      ? decStudent.phone
+      : (decStudent.parentPhone && decStudent.parentPhone !== '0000000000' ? decStudent.parentPhone : (auth.mobileNumber !== '0000000000' ? auth.mobileNumber : ''));
 
     res.json({
       success: true,
@@ -7667,11 +7670,13 @@ app.post('/api/student/qr-login', async (req, res) => {
         batch: resolvedBatch,
         batchId: decStudent.batch,
         batchName: resolvedBatch,
-        belt: decStudent.belt,
+        belt: decStudent.belt || 'White',
         joinDate: decStudent.joinDate,
         schedule: decStudent.schedule,
         status: decStudent.status,
-        mobileNumber: auth.mobileNumber || '',
+        phone: realPhoneDisplay,
+        mobileNumber: realPhoneDisplay,
+        parentPhone: decStudent.parentPhone && decStudent.parentPhone !== '0000000000' ? decStudent.parentPhone : '',
         photo: decStudent.photo || null,
         mustChangeMPIN: false
       }
@@ -7682,143 +7687,122 @@ app.post('/api/student/qr-login', async (req, res) => {
   }
 });
 
-// 3. Direct Student Login (Unique Student ID - Zero MPIN required)
+// 3. Direct Student Login (Unique Student ID or Registered Mobile Number - Direct Instant Access)
 app.post('/api/student/login', async (req, res) => {
   try {
     const { studentId, uniqueId, identifier, loginMethod, mobileNumber, mpin } = req.body;
-    const targetSid = studentId || uniqueId || (identifier && !/^\d{10}$/.test(String(identifier).trim()) ? identifier : null);
+    const input = String(studentId || uniqueId || identifier || mobileNumber || '').trim();
 
-    // 3a. Direct Unique Student ID Login (Zero MPIN required)
-    if (targetSid || loginMethod === 'studentId') {
-      const sid = targetSid || identifier;
-      const cleanSid = String(sid).trim().toUpperCase();
-      const cleanNumeric = Number(cleanSid.replace(/[^0-9]/g, ''));
+    if (!input) {
+      return res.status(400).json({ error: 'Please enter your Unique Student ID (e.g. MF-0001) or Registered Mobile Number' });
+    }
 
-      if (!cleanSid) {
-        return res.status(400).json({ error: 'Please enter your Unique Student ID (e.g. MF-0001 or numeric ID)' });
+    const cleanSid = input.toUpperCase();
+    const cleanNumeric = Number(cleanSid.replace(/[^0-9]/g, ''));
+    const cleanDigits = input.replace(/[^0-9]/g, '');
+    const cleanMobile = cleanDigits.length >= 10 ? cleanDigits.slice(-10) : '';
+
+    let studentDoc = null;
+
+    // 1. Check by Unique Student ID or Numeric ID
+    const formattedHyphenSid = cleanSid.replace(/^MF-?([A-Z]{3})-?(\d+)$/i, 'MF-$1-$2');
+    studentDoc = await Student.findOne({
+      $or: [
+        { uniqueStudentId: cleanSid },
+        { uniqueStudentId: formattedHyphenSid },
+        ...(cleanNumeric && cleanNumeric < 10000000 ? [{ id: cleanNumeric }, { admissionNumber: String(cleanNumeric) }] : [])
+      ]
+    });
+
+    // 2. If not found and cleanMobile exists, check by mobile number in StudentAuth or Student
+    if (!studentDoc && cleanMobile) {
+      const authByMobile = await StudentAuth.findOne({ mobileNumber: cleanMobile });
+      if (authByMobile) {
+        studentDoc = await Student.findOne({ id: authByMobile.studentId });
       }
-
-      const formattedHyphenSid = cleanSid.replace(/^MF-?([A-Z]{3})-?(\d+)$/i, 'MF-$1-$2');
-      const studentDoc = await Student.findOne({
-        $or: [
-          { uniqueStudentId: cleanSid },
-          { uniqueStudentId: formattedHyphenSid },
-          { id: cleanNumeric },
-          { admissionNumber: String(cleanNumeric) }
-        ]
-      });
 
       if (!studentDoc) {
-        return res.status(404).json({ error: `Student ID ${cleanSid} not found. Please verify your ID or contact academy.` });
-      }
-
-      if (studentDoc.status && String(studentDoc.status).toLowerCase() !== 'active') {
-        return res.status(403).json({ error: `Student account is currently ${studentDoc.status}. Please contact academy administration.` });
-      }
-
-      let auth = await StudentAuth.findOne({
-        $or: [
-          { uniqueStudentId: cleanSid },
-          { studentId: studentDoc.id }
-        ]
-      });
-
-      if (!auth) {
-        let rawMobile = '0000000000';
-        try {
-          if (studentDoc.phone) {
-            rawMobile = String(decrypt(studentDoc.phone)).replace(/[^0-9]/g, '').slice(-10) || '0000000000';
+        // Search Student collection by decrypting phone and parentPhone
+        const allStudents = await Student.find({}).lean();
+        const match = allStudents.find(s => {
+          try {
+            const decPhone = s.phone ? String(decrypt(s.phone)).replace(/[^0-9]/g, '').slice(-10) : '';
+            const decParent = s.parentPhone ? String(decrypt(s.parentPhone)).replace(/[^0-9]/g, '').slice(-10) : '';
+            return decPhone === cleanMobile || decParent === cleanMobile;
+          } catch (e) {
+            return false;
           }
-        } catch (e) {}
-        const defaultHash = await bcrypt.hash('123456', 10);
-        auth = await StudentAuth.create({
-          studentId: studentDoc.id,
-          uniqueStudentId: studentDoc.uniqueStudentId,
-          mobileNumber: rawMobile,
-          mpinHash: defaultHash,
-          mustChangeMPIN: false,
-          isActive: true
         });
-      }
-
-      if (!auth.isActive) {
-        return res.status(403).json({ error: 'Student portal account has been deactivated. Please contact academy administration.' });
-      }
-
-      // Optional MPIN check: if MPIN provided, verify it; otherwise grant instant login
-      if (mpin && String(mpin).trim() !== '') {
-        const isMatch = await bcrypt.compare(String(mpin).trim(), auth.mpinHash);
-        if (!isMatch) {
-          return res.status(401).json({ error: 'Invalid 6-digit MPIN' });
+        if (match) {
+          studentDoc = await Student.findOne({ id: match.id });
         }
       }
-
-      auth.failedLoginAttempts = 0;
-      auth.lockedUntil = null;
-      auth.lastLoginAt = new Date();
-      await auth.save();
-
-      const decStudent = decryptStudent(studentDoc);
-      const token = crypto.randomBytes(32).toString('hex');
-      await Session.create({
-        username: `student_${studentDoc.id}`,
-        token,
-        role: 'student',
-        studentId: studentDoc.id,
-        branch: decStudent.branch || '',
-        batch: decStudent.batch || '',
-        ipAddress: getClientIp(req),
-        userAgent: req.headers['user-agent']
-      });
-
-      const resolvedBatch = await resolveBatchDisplayName(decStudent.batch, decStudent.branch);
-
-      return res.json({
-        success: true,
-        token,
-        student: {
-          id: decStudent.id,
-          uniqueStudentId: decStudent.uniqueStudentId || formatStudentId(decStudent.id),
-          name: decStudent.name,
-          branch: decStudent.branch,
-          batch: resolvedBatch,
-          batchId: decStudent.batch,
-          batchName: resolvedBatch,
-          belt: decStudent.belt,
-          joinDate: decStudent.joinDate,
-          schedule: decStudent.schedule,
-          status: decStudent.status,
-          mobileNumber: auth.mobileNumber || '',
-          photo: decStudent.photo || null,
-          mustChangeMPIN: false
-        }
-      });
     }
 
-    // 3b. Fallback: Mobile + MPIN (if provided)
-    const targetMobile = mobileNumber || identifier;
-    const cleanMobile = String(targetMobile).replace(/[^0-9]/g, '').slice(-10);
-
-    if (cleanMobile.length !== 10) {
-      return res.status(400).json({ error: 'Please enter your Unique Student ID (e.g. MF-0001)' });
-    }
-
-    let auth = await StudentAuth.findOne({ mobileNumber: cleanMobile });
-    if (!auth) {
-      return res.status(401).json({ error: 'No student account registered with this mobile number. Please log in with your Student ID.' });
-    }
-
-    const studentDoc = await Student.findOne({ id: auth.studentId });
     if (!studentDoc) {
-      return res.status(404).json({ error: 'Student record not found' });
+      return res.status(404).json({
+        error: cleanMobile
+          ? `No student found with mobile number ${cleanMobile}. Please verify or log in with your Student ID.`
+          : `Student ID "${input}" not found. Please verify your ID or contact academy.`
+      });
     }
 
+    if (studentDoc.status && String(studentDoc.status).toLowerCase() !== 'active') {
+      return res.status(403).json({ error: `Student account is currently ${studentDoc.status}. Please contact academy administration.` });
+    }
+
+    // Resolve real mobile number
+    let realMobile = cleanMobile;
+    try {
+      if (studentDoc.phone) {
+        const p = String(decrypt(studentDoc.phone)).replace(/[^0-9]/g, '').slice(-10);
+        if (p && p.length === 10) realMobile = p;
+      }
+      if (!realMobile && studentDoc.parentPhone) {
+        const pp = String(decrypt(studentDoc.parentPhone)).replace(/[^0-9]/g, '').slice(-10);
+        if (pp && pp.length === 10) realMobile = pp;
+      }
+    } catch (e) {}
+    if (!realMobile) realMobile = '0000000000';
+
+    let auth = await StudentAuth.findOne({
+      $or: [
+        { uniqueStudentId: studentDoc.uniqueStudentId },
+        { studentId: studentDoc.id }
+      ]
+    });
+
+    if (!auth) {
+      const defaultHash = await bcrypt.hash('123456', 10);
+      auth = await StudentAuth.create({
+        studentId: studentDoc.id,
+        uniqueStudentId: studentDoc.uniqueStudentId,
+        mobileNumber: realMobile,
+        mpinHash: defaultHash,
+        mustChangeMPIN: false,
+        isActive: true
+      });
+    } else if (realMobile !== '0000000000' && auth.mobileNumber !== realMobile) {
+      auth.mobileNumber = realMobile;
+      await auth.save();
+    }
+
+    if (!auth.isActive) {
+      return res.status(403).json({ error: 'Student portal account has been deactivated. Please contact academy administration.' });
+    }
+
+    // Optional MPIN check: if MPIN provided, verify it; otherwise grant instant login
     if (mpin && String(mpin).trim() !== '') {
       const isMatch = await bcrypt.compare(String(mpin).trim(), auth.mpinHash);
       if (!isMatch) {
-        return res.status(401).json({ error: 'Invalid MPIN' });
+        return res.status(401).json({ error: 'Invalid 6-digit MPIN' });
       }
     }
+
+    auth.failedLoginAttempts = 0;
+    auth.lockedUntil = null;
+    auth.lastLoginAt = new Date();
+    await auth.save();
 
     const decStudent = decryptStudent(studentDoc);
     const token = crypto.randomBytes(32).toString('hex');
@@ -7835,7 +7819,11 @@ app.post('/api/student/login', async (req, res) => {
 
     const resolvedBatch = await resolveBatchDisplayName(decStudent.batch, decStudent.branch);
 
-    res.json({
+    const realPhoneDisplay = (decStudent.phone && decStudent.phone !== '0000000000' && decStudent.phone !== '—' && decStudent.phone !== 'N/A')
+      ? decStudent.phone
+      : (decStudent.parentPhone && decStudent.parentPhone !== '0000000000' ? decStudent.parentPhone : (auth.mobileNumber !== '0000000000' ? auth.mobileNumber : ''));
+
+    return res.json({
       success: true,
       token,
       student: {
@@ -7846,11 +7834,13 @@ app.post('/api/student/login', async (req, res) => {
         batch: resolvedBatch,
         batchId: decStudent.batch,
         batchName: resolvedBatch,
-        belt: decStudent.belt,
+        belt: decStudent.belt || 'White',
         joinDate: decStudent.joinDate,
         schedule: decStudent.schedule,
         status: decStudent.status,
-        mobileNumber: auth.mobileNumber || '',
+        phone: realPhoneDisplay,
+        mobileNumber: realPhoneDisplay,
+        parentPhone: decStudent.parentPhone && decStudent.parentPhone !== '0000000000' ? decStudent.parentPhone : '',
         photo: decStudent.photo || null,
         mustChangeMPIN: false
       }
@@ -7992,6 +7982,27 @@ app.post('/api/admin/students/:id/revoke-qr', authenticateSession, async (req, r
     res.json({
       success: true,
       message: `QR Code for student ${studentDoc.uniqueStudentId || sId} has been REVOKED.`
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 7b. Admin - Unrevoke / Restore Student QR Code
+app.post('/api/admin/students/:id/unrevoke-qr', authenticateSession, async (req, res) => {
+  try {
+    const sId = Number(req.params.id);
+    const studentDoc = await Student.findOne({ id: sId });
+    if (!studentDoc) {
+      return res.status(404).json({ error: 'Student record not found' });
+    }
+
+    studentDoc.qrStatus = 'Active';
+    await studentDoc.save();
+
+    res.json({
+      success: true,
+      message: `QR Code for student ${studentDoc.uniqueStudentId || sId} has been RESTORED (Active).`
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -8470,13 +8481,15 @@ app.get('/api/student/me', authenticateStudentSession, async (req, res) => {
     const s = req.studentDoc;
     const auth = await StudentAuth.findOne({ studentId: req.student.studentId }).lean();
 
-    // Fetch attendance summary
+    // Fetch real attendance summary for current month
     const currentMonth = new Date().toISOString().slice(0, 7);
     const attendances = await Attendance.find({ date: { $regex: `^${currentMonth}` } }).lean();
     let presentCount = 0;
     let absentCount = 0;
     attendances.forEach(att => {
-      const rec = att.records ? (att.records.get ? att.records.get(String(s.id)) : att.records[String(s.id)]) : null;
+      const plainRecords = att.records instanceof Map ? Object.fromEntries(att.records) : (att.records || {});
+      const decryptedRecords = decryptAttendanceRecords(plainRecords);
+      const rec = decryptedRecords[String(s.id)] || decryptedRecords[s.id];
       if (rec) {
         const val = typeof rec === 'object' ? rec.status : rec;
         if (val === 'present') presentCount++;
@@ -8486,9 +8499,18 @@ app.get('/api/student/me', authenticateStudentSession, async (req, res) => {
     const totalClasses = presentCount + absentCount;
     const attendancePercentage = totalClasses > 0 ? Math.round((presentCount / totalClasses) * 100) : 100;
 
-    // Fetch fee summary
+    // Fetch fee summary (check both Student.paidMonths and FeePayment collection for real-time sync)
     const monthlyRate = s.customMonthlyRate !== null && s.customMonthlyRate !== undefined ? s.customMonthlyRate : 1000;
-    const isCurrentPaid = s.paidMonths ? (s.paidMonths.get ? s.paidMonths.get(currentMonth) : s.paidMonths[currentMonth]) : false;
+    const hasStudentPaid = s.paidMonths ? (s.paidMonths.get ? s.paidMonths.get(currentMonth) : s.paidMonths[currentMonth]) : false;
+    const hasPaymentDoc = await FeePayment.findOne({
+      studentId: s.id,
+      status: { $ne: 'cancelled' },
+      $or: [
+        { feeMonth: currentMonth },
+        { 'breakdown.feeMonth': currentMonth }
+      ]
+    }).lean();
+    const isCurrentPaid = !!(hasStudentPaid || hasPaymentDoc);
 
     // Fetch unread notifications count
     const unreadCount = await Notification.countDocuments({
@@ -8503,19 +8525,34 @@ app.get('/api/student/me', authenticateStudentSession, async (req, res) => {
 
     const resolvedBatch = await resolveBatchDisplayName(s.batch, s.branch);
 
+    const realPhoneDisplay = (s.phone && s.phone !== '0000000000' && s.phone !== '—' && s.phone !== 'N/A')
+      ? s.phone
+      : (s.parentPhone && s.parentPhone !== '0000000000' ? s.parentPhone : (auth?.mobileNumber && auth.mobileNumber !== '0000000000' ? auth.mobileNumber : ''));
+
+    // Keep StudentAuth mobile updated if it was dummy 0000000000
+    if (auth && auth.mobileNumber === '0000000000' && realPhoneDisplay) {
+      const clean10 = String(realPhoneDisplay).replace(/[^0-9]/g, '').slice(-10);
+      if (clean10.length === 10) {
+        StudentAuth.updateOne({ studentId: s.id }, { mobileNumber: clean10 }).catch(() => {});
+      }
+    }
+
     res.json({
       student: {
         id: s.id,
+        uniqueStudentId: s.uniqueStudentId || formatStudentId(s.id),
         name: s.name,
         branch: s.branch,
         batch: resolvedBatch,
         batchId: s.batch,
         batchName: resolvedBatch,
-        belt: s.belt,
+        belt: s.belt || 'White',
         joinDate: s.joinDate,
         dob: s.dob,
-        phone: req.student.mobileNumber,
-        parentPhone: s.parentPhone,
+        phone: realPhoneDisplay,
+        mobileNumber: realPhoneDisplay,
+        parentPhone: s.parentPhone && s.parentPhone !== '0000000000' ? s.parentPhone : '',
+        emergencyPhone: s.emergencyPhone || '',
         photo: s.photo || null,
         status: s.status,
         monthlyRate,
@@ -8530,7 +8567,7 @@ app.get('/api/student/me', authenticateStudentSession, async (req, res) => {
       },
       fee: {
         currentMonth,
-        isCurrentPaid: !!isCurrentPaid,
+        isCurrentPaid,
         monthlyRate
       },
       unreadNotifications: unreadCount
@@ -8553,7 +8590,7 @@ app.get('/api/student/fees', authenticateStudentSession, async (req, res) => {
     const currentMonthNum = now.getMonth() + 1;
     const currentMonthStr = `${currentYear}-${String(currentMonthNum).padStart(2, '0')}`;
 
-    // Generate list of months from joinMonth (or up to 6 months back) to current month
+    // Generate list of months from joinMonth to current month
     const monthsList = [];
     const [jYear, jMonth] = joinMonth.split('-').map(Number);
     let iterYear = isNaN(jYear) ? currentYear : jYear;
@@ -8568,6 +8605,22 @@ app.get('/api/student/fees', authenticateStudentSession, async (req, res) => {
       }
     }
 
+    // Fetch official FeePayments to cross-check real-time database payments
+    const officialPayments = await FeePayment.find({
+      studentId: s.id,
+      status: { $ne: 'cancelled' }
+    }).lean();
+
+    const paymentMap = new Map();
+    officialPayments.forEach(p => {
+      if (p.feeMonth) paymentMap.set(p.feeMonth, p);
+      if (Array.isArray(p.breakdown)) {
+        p.breakdown.forEach(b => {
+          if (b.feeMonth) paymentMap.set(b.feeMonth, p);
+        });
+      }
+    });
+
     // Also get active pending and rejected submissions for this student
     const activeSubmissions = await StudentPaymentSubmission.find({
       studentId: s.id,
@@ -8580,7 +8633,9 @@ app.get('/api/student/fees', authenticateStudentSession, async (req, res) => {
     let paidMonthsCount = 0;
 
     const feeRecords = monthsList.map(ym => {
-      const isPaid = s.paidMonths ? (s.paidMonths.get ? s.paidMonths.get(ym) : s.paidMonths[ym]) : false;
+      const isStudentPaid = s.paidMonths ? (s.paidMonths.get ? s.paidMonths.get(ym) : s.paidMonths[ym]) : false;
+      const paymentDoc = paymentMap.get(ym);
+      const isPaid = !!(isStudentPaid || paymentDoc);
 
       if (isPaid) {
         totalPaidAmount += monthlyRate;
@@ -8588,7 +8643,10 @@ app.get('/api/student/fees', authenticateStudentSession, async (req, res) => {
         return {
           feeMonth: ym,
           amount: monthlyRate,
-          status: 'PAID'
+          status: 'PAID',
+          receiptNumber: paymentDoc ? paymentDoc.receiptNumber : null,
+          paymentDate: paymentDoc ? paymentDoc.paymentDate : null,
+          paymentMethod: paymentDoc ? paymentDoc.paymentMethod : 'Cash / Office'
         };
       }
 
@@ -8751,7 +8809,9 @@ app.get('/api/student/attendance', authenticateStudentSession, async (req, res) 
     let absentCount = 0;
 
     const days = attendances.map(att => {
-      const rec = att.records ? (att.records.get ? att.records.get(String(s.id)) : att.records[String(s.id)]) : null;
+      const plainRecords = att.records instanceof Map ? Object.fromEntries(att.records) : (att.records || {});
+      const decryptedRecords = decryptAttendanceRecords(plainRecords);
+      const rec = decryptedRecords[String(s.id)] || decryptedRecords[s.id];
       let status = 'none';
       if (rec) {
         const val = typeof rec === 'object' ? rec.status : rec;

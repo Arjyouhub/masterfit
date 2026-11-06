@@ -20117,7 +20117,7 @@ _Thank you for your payment! Please keep this receipt for future reference._ ðŸ™
                 {currentView === 'trainer-approvals' && 'Trainer Approvals & Batch Allocation'}
                 {currentView === 'grading' && (userRole === 'trainer' ? 'Student Test Evaluation' : 'Student Belt & Level Test')}
                 {currentView === 'announcements' && 'Announcements & Notifications'}
-                {currentView === 'id-cards' && 'Student ID Cards & QR Management'}
+                {currentView === 'id-cards' && 'Student ID Cards'}
               </h1>
             </div>
 

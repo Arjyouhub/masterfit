@@ -80,6 +80,9 @@ export default function StudentPortal({ apiBaseUrl, initialStudent, token, sessi
         setProfileData(meJson);
         if (meJson.student) {
           setStudent(prev => ({ ...prev, ...meJson.student }));
+          try {
+            localStorage.setItem('umai_student_data', JSON.stringify(meJson.student));
+          } catch (e) {}
         }
         setUnreadNotifsCount(meJson.unreadNotifications || 0);
       }
@@ -469,7 +472,7 @@ _Masterfit Academy Student Portal Verification_ 🙏`;
                     </button>
                   </div>
                   <div className="hero-meta-chips">
-                    <span className="hero-chip"><strong>ID:</strong> #{student.id}</span>
+                    <span className="hero-chip"><strong>ID:</strong> {student.uniqueStudentId || `#${student.id}`}</span>
                     <span className="hero-chip belt" style={{ borderColor: getBeltColor(student.belt), color: getBeltColor(student.belt) }}>
                       <Award size={13} /> {student.belt || 'White'} Belt
                     </span>
@@ -1192,48 +1195,65 @@ _Masterfit Academy Student Portal Verification_ 🙏`;
                     </div>
 
                     {/* Registered Mobile / Login ID */}
-                    <div className="modern-detail-tile">
-                      <div className="tile-icon-wrap mobile">
-                        <Smartphone size={18} />
-                      </div>
-                      <div className="tile-info">
-                        <div className="tile-label-row">
-                          <span className="tile-label">Mobile (Login ID)</span>
-                        </div>
-                        <span className="tile-value">+91 {student?.mobileNumber || student?.phone || 'N/A'}</span>
-                      </div>
-                      {(student?.mobileNumber || student?.phone) && (
-                        <button
-                          type="button"
-                          className="tile-copy-btn"
-                          onClick={() => handleCopy(student?.mobileNumber || student?.phone, 'mobile')}
-                          title="Copy Mobile Number"
-                        >
-                          {copiedField === 'mobile' ? <Check size={13} color="#4ade80" /> : <Copy size={13} />}
-                        </button>
-                      )}
-                    </div>
+                    {(() => {
+                      const rawMob = student?.phone || student?.mobileNumber || '';
+                      const cleanMob = rawMob && rawMob !== '0000000000' && rawMob !== '—' && rawMob !== 'N/A' ? String(rawMob).trim() : '';
+                      const rawPar = student?.parentPhone || '';
+                      const cleanPar = rawPar && rawPar !== '0000000000' && rawPar !== '—' && rawPar !== 'N/A' ? String(rawPar).trim() : '';
+                      const activePhone = cleanMob || cleanPar;
+                      const displayPhone = activePhone 
+                        ? (activePhone.startsWith('+') ? activePhone : `+91 ${activePhone.replace(/^91/, '')}`) 
+                        : 'Not Registered';
 
-                    {/* Parent / Guardian Phone */}
-                    <div className="modern-detail-tile">
-                      <div className="tile-icon-wrap parent">
-                        <Users size={18} />
-                      </div>
-                      <div className="tile-info">
-                        <span className="tile-label">Guardian Phone</span>
-                        <span className="tile-value">{student?.parentPhone ? `+91 ${student.parentPhone}` : 'Not Provided'}</span>
-                      </div>
-                      {student?.parentPhone && (
-                        <button
-                          type="button"
-                          className="tile-copy-btn"
-                          onClick={() => handleCopy(student.parentPhone, 'parent')}
-                          title="Copy Parent Number"
-                        >
-                          {copiedField === 'parent' ? <Check size={13} color="#4ade80" /> : <Copy size={13} />}
-                        </button>
-                      )}
-                    </div>
+                      return (
+                        <>
+                          <div className="modern-detail-tile">
+                            <div className="tile-icon-wrap mobile">
+                              <Smartphone size={18} />
+                            </div>
+                            <div className="tile-info">
+                              <div className="tile-label-row">
+                                <span className="tile-label">Registered Phone</span>
+                              </div>
+                              <span className="tile-value">{displayPhone}</span>
+                            </div>
+                            {activePhone && (
+                              <button
+                                type="button"
+                                className="tile-copy-btn"
+                                onClick={() => handleCopy(activePhone, 'mobile')}
+                                title="Copy Phone Number"
+                              >
+                                {copiedField === 'mobile' ? <Check size={13} color="#4ade80" /> : <Copy size={13} />}
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Parent / Guardian Phone */}
+                          <div className="modern-detail-tile">
+                            <div className="tile-icon-wrap parent">
+                              <Users size={18} />
+                            </div>
+                            <div className="tile-info">
+                              <span className="tile-label">Guardian Phone</span>
+                              <span className="tile-value">
+                                {cleanPar ? (cleanPar.startsWith('+') ? cleanPar : `+91 ${cleanPar.replace(/^91/, '')}`) : (cleanMob ? 'Same as student phone' : 'Not Provided')}
+                              </span>
+                            </div>
+                            {cleanPar && (
+                              <button
+                                type="button"
+                                className="tile-copy-btn"
+                                onClick={() => handleCopy(cleanPar, 'parent')}
+                                title="Copy Parent Number"
+                              >
+                                {copiedField === 'parent' ? <Check size={13} color="#4ade80" /> : <Copy size={13} />}
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      );
+                    })()}
 
                     {/* Date of Birth */}
                     <div className="modern-detail-tile">

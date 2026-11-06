@@ -1,24 +1,27 @@
 import React, { useState } from 'react';
-import { ShieldCheck, ArrowRight, ArrowLeft, AlertCircle, Sparkles, CheckCircle2, QrCode, CreditCard, Lock, Camera } from 'lucide-react';
+import { ShieldCheck, ArrowRight, ArrowLeft, AlertCircle, Sparkles, CheckCircle2, QrCode, CreditCard, Lock, Camera, Smartphone, Flame } from 'lucide-react';
 import QRCameraScanner from './QRCameraScanner.jsx';
 
 export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite, onBackToWebsite, onGoToStaffLogin }) {
   const handleGoBack = onGoToWebsite || onBackToWebsite;
-  const [studentIdInput, setStudentIdInput] = useState('');
+  const [identifierInput, setIdentifierInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [showCameraScanner, setShowCameraScanner] = useState(false);
 
-  // Direct Student ID Login (Zero MPIN required)
-  const handleIdLoginSubmit = async (e) => {
+  // Check if input looks like a phone number
+  const isPhoneLike = /^[0-9+() -]{5,}$/.test(identifierInput.trim());
+
+  // Direct Student ID or Mobile Login Submit
+  const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setSuccessMsg('');
 
-    const cleanId = String(studentIdInput).trim().toUpperCase();
-    if (!cleanId) {
-      setError('Please enter your Unique Student ID (e.g. MF-0001 or 1042)');
+    const cleanInput = String(identifierInput).trim();
+    if (!cleanInput) {
+      setError('Please enter your Unique Student ID (e.g. MF-0001) or Registered Mobile Number');
       return;
     }
 
@@ -27,12 +30,16 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
       const res = await fetch(`${apiBaseUrl}/student/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: cleanId })
+        body: JSON.stringify({ 
+          studentId: cleanInput,
+          identifier: cleanInput,
+          mobileNumber: cleanInput
+        })
       });
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Login failed. Please check your Student ID.');
+        throw new Error(data.error || 'Login failed. Please verify your Student ID or Mobile Number.');
       }
 
       if (data.token) {
@@ -43,7 +50,7 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
         document.cookie = `umai_student_token=${encodeURIComponent(data.token)}; path=/; max-age=604800;`;
       }
 
-      setSuccessMsg(`Welcome, ${data.student?.name || 'Student'}! Opening portal...`);
+      setSuccessMsg(`Welcome, ${data.student?.name || 'Student'}! Opening your portal...`);
       setTimeout(() => {
         onLoginSuccess(data);
       }, 500);
@@ -103,118 +110,133 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
   };
 
   return (
-    <div className="student-login-page">
-      <div className="student-login-backdrop"></div>
+    <div className="modern-student-login-wrap">
+      <div className="modern-login-bg-glow"></div>
       
-      <div className="student-login-container">
-        <div className="student-login-card">
-          {/* Top Branding */}
-          <div className="student-login-brand">
-            <div className="student-brand-icon">
-              <ShieldCheck size={32} />
-            </div>
-            <h1>Student Portal</h1>
-            <p>Access your training attendance, fee history, receipts, and academy updates</p>
+      <div className="modern-login-box">
+        {/* Top Academy Crest & Title */}
+        <div className="modern-login-header">
+          <div className="academy-badge-halo">
+            <ShieldCheck size={36} color="#eab308" />
           </div>
-
-          {error && (
-            <div className="student-alert error">
-              <AlertCircle size={18} />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {successMsg && (
-            <div className="student-alert success">
-              <CheckCircle2 size={18} />
-              <span>{successMsg}</span>
-            </div>
-          )}
-
-          {/* Camera Scanner Quick Trigger */}
-          <div className="student-qr-helper-banner">
-            <div className="qr-banner-icon">
-              <QrCode size={26} color="#eab308" />
-            </div>
-            <div className="qr-banner-text">
-              <strong>Have a MASTERFIT ID Card?</strong>
-              <span>Scan your card's QR code with your camera to log in instantly without typing anything!</span>
-            </div>
-            <button 
-              type="button" 
-              className="banner-scan-action-btn"
-              onClick={() => setShowCameraScanner(true)}
-              title="Open Camera Scanner"
-            >
-              <Camera size={16} />
-              <span>Scan QR</span>
-            </button>
+          <div className="academy-brand-pill">
+            <Flame size={12} color="#ef4444" />
+            <span>MASTERFIT MARTIAL ARTS ACADEMY</span>
           </div>
+          <h1 className="modern-portal-heading">Student Portal</h1>
+          <p className="modern-portal-sub">Access your training attendance, fee dues, receipts, belt progression, and official ID card</p>
+        </div>
 
-          {/* Direct Unique Student ID Form */}
-          <form onSubmit={handleIdLoginSubmit} className="student-login-form">
-            <div className="student-input-group">
-              <label>Unique Student ID</label>
-              <div className="student-input-wrap clean-id-input-wrap">
-                <div className="input-prefix-badge">
+        {error && (
+          <div className="modern-login-alert error">
+            <AlertCircle size={18} className="alert-svg-icon" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {successMsg && (
+          <div className="modern-login-alert success">
+            <CheckCircle2 size={18} className="alert-svg-icon" />
+            <span>{successMsg}</span>
+          </div>
+        )}
+
+        {/* Camera Scanner Fast Access Card */}
+        <div className="modern-qr-card">
+          <div className="qr-card-left">
+            <div className="qr-chip-icon">
+              <QrCode size={24} color="#eab308" />
+            </div>
+            <div className="qr-card-copy">
+              <span className="qr-card-title">Have a MASTERFIT ID Card?</span>
+              <span className="qr-card-desc">Scan your card QR code with your camera for instant zero-typing sign in</span>
+            </div>
+          </div>
+          <button 
+            type="button" 
+            className="qr-scan-launch-btn"
+            onClick={() => setShowCameraScanner(true)}
+            title="Scan QR Code with Camera"
+          >
+            <Camera size={16} />
+            <span>Scan QR</span>
+          </button>
+        </div>
+
+        <div className="modern-login-divider">
+          <span>OR SIGN IN WITH ID / MOBILE</span>
+        </div>
+
+        {/* Unified Smart Input Form */}
+        <form onSubmit={handleLoginSubmit} className="modern-login-form">
+          <div className="modern-form-field">
+            <label className="field-label">Student ID or Registered Mobile</label>
+            <div className="field-input-container">
+              <div className="field-icon-badge">
+                {isPhoneLike ? (
+                  <Smartphone size={18} color="#eab308" />
+                ) : (
                   <CreditCard size={18} color="#eab308" />
-                </div>
-                <input
-                  type="text"
-                  placeholder="Enter Student ID (e.g. MF-0001 or 1042)"
-                  value={studentIdInput}
-                  onChange={(e) => {
-                    setStudentIdInput(e.target.value);
-                    setError('');
-                  }}
-                  className="clean-student-input"
-                  required
-                  autoFocus
-                />
+                )}
               </div>
-              <span className="student-input-hint">Direct instant access with Unique Student ID (e.g. MF-0001) or Camera QR Scan</span>
+              <input
+                type="text"
+                placeholder="e.g. MF-0001, 1042 or 9876543210"
+                value={identifierInput}
+                onChange={(e) => {
+                  setIdentifierInput(e.target.value);
+                  setError('');
+                }}
+                className="modern-text-input"
+                required
+                autoFocus
+                autoComplete="username"
+              />
             </div>
+            <span className="field-hint-text">
+              Accepts your unique ID (MF-XXXX), numeric ID, or registered student / guardian mobile number.
+            </span>
+          </div>
 
-            <button
-              type="submit"
-              disabled={loading || !studentIdInput.trim()}
-              className="student-btn primary full login-btn"
-              style={{ marginTop: '0.75rem' }}
-            >
-              {loading ? (
-                <span className="spinner-text">Authenticating Student ID...</span>
-              ) : (
-                <>
-                  <span>Login to Student Portal</span>
-                  <ArrowRight size={18} />
-                </>
-              )}
+          <button
+            type="submit"
+            disabled={loading || !identifierInput.trim()}
+            className="modern-submit-btn"
+          >
+            {loading ? (
+              <span className="btn-loading-text">Authenticating Student...</span>
+            ) : (
+              <>
+                <span>Access Student Portal</span>
+                <ArrowRight size={18} />
+              </>
+            )}
+          </button>
+        </form>
+
+        {/* Bottom Utility Links */}
+        <div className="modern-login-foot">
+          <div className="security-notice-badge">
+            <Sparkles size={13} color="#eab308" />
+            <span>Instant & Secure Student Access &bull; Masterfit Academy</span>
+          </div>
+
+          <div className="modern-link-row">
+            <button type="button" onClick={handleGoBack} className="foot-nav-btn">
+              <ArrowLeft size={15} />
+              <span>Return to Website</span>
             </button>
-          </form>
-
-          <div className="student-login-footer">
-            <div className="zero-otp-badge">
-              <Sparkles size={14} />
-              <span>Instant QR Scan & Student ID login supported &bull; Master Fit Academy</span>
-            </div>
-
-            <div className="student-nav-links single-center" style={{ display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
-              <button onClick={handleGoBack} className="student-link-btn">
-                <ArrowLeft size={16} />
-                <span>Return to Website</span>
+            {onGoToStaffLogin && (
+              <button type="button" onClick={onGoToStaffLogin} className="foot-nav-btn staff-portal-btn">
+                <Lock size={14} />
+                <span>Trainer / Admin Portal</span>
               </button>
-              {onGoToStaffLogin && (
-                <button onClick={onGoToStaffLogin} className="student-link-btn" style={{ color: 'rgba(255,255,255,0.75)' }}>
-                  <Lock size={15} />
-                  <span>Staff / Admin Login</span>
-                </button>
-              )}
-            </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* In-page Camera QR Scanner Modal */}
+      {/* Camera QR Scanner Modal */}
       {showCameraScanner && (
         <QRCameraScanner 
           onScanSuccess={handleQrScanned}
@@ -223,88 +245,423 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
         />
       )}
 
-      {/* Scoped CSS */}
+      {/* Scoped CSS Styles for Modern & Responsive Layout */}
       <style>{`
-        .clean-id-input-wrap {
+        .modern-student-login-wrap {
+          min-height: 100vh;
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #090c12;
+          padding: 20px 16px;
+          position: relative;
+          box-sizing: border-box;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          overflow-x: hidden;
+        }
+
+        .modern-login-bg-glow {
+          position: absolute;
+          top: 15%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          width: 500px;
+          max-width: 90vw;
+          height: 350px;
+          background: radial-gradient(circle, rgba(234, 179, 8, 0.12) 0%, rgba(239, 68, 68, 0.05) 45%, transparent 70%);
+          pointer-events: none;
+          z-index: 0;
+          filter: blur(40px);
+        }
+
+        .modern-login-box {
+          position: relative;
+          z-index: 1;
+          width: 100%;
+          max-width: 440px;
+          background: rgba(17, 24, 39, 0.85);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: 20px;
+          padding: 32px 28px;
+          box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(234, 179, 8, 0.15);
+          box-sizing: border-box;
+          animation: modernFadeIn 0.35s ease-out;
+        }
+
+        @keyframes modernFadeIn {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .modern-login-header {
+          text-align: center;
+          margin-bottom: 22px;
+        }
+
+        .academy-badge-halo {
+          width: 64px;
+          height: 64px;
+          margin: 0 auto 12px;
+          border-radius: 18px;
+          background: linear-gradient(135deg, rgba(234, 179, 8, 0.18), rgba(239, 68, 68, 0.12));
+          border: 1px solid rgba(234, 179, 8, 0.35);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: 0 8px 24px rgba(234, 179, 8, 0.2);
+        }
+
+        .academy-brand-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          background: rgba(239, 68, 68, 0.1);
+          border: 1px solid rgba(239, 68, 68, 0.25);
+          padding: 4px 10px;
+          border-radius: 20px;
+          font-size: 0.68rem;
+          font-weight: 700;
+          letter-spacing: 0.8px;
+          color: #fca5a5;
+          margin-bottom: 8px;
+        }
+
+        .modern-portal-heading {
+          font-size: 1.65rem;
+          font-weight: 800;
+          color: #ffffff;
+          margin: 0 0 6px;
+          letter-spacing: -0.5px;
+        }
+
+        .modern-portal-sub {
+          font-size: 0.82rem;
+          color: #94a3b8;
+          line-height: 1.45;
+          margin: 0;
+        }
+
+        .modern-login-alert {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 11px 14px;
+          border-radius: 12px;
+          font-size: 0.82rem;
+          line-height: 1.4;
+          margin-bottom: 18px;
+        }
+
+        .modern-login-alert.error {
+          background: rgba(239, 68, 68, 0.12);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          color: #fca5a5;
+        }
+
+        .modern-login-alert.success {
+          background: rgba(34, 197, 94, 0.12);
+          border: 1px solid rgba(34, 197, 94, 0.3);
+          color: #86efac;
+        }
+
+        .alert-svg-icon {
+          flex-shrink: 0;
+        }
+
+        /* Modern QR Card */
+        .modern-qr-card {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          background: linear-gradient(135deg, rgba(234, 179, 8, 0.1) 0%, rgba(245, 158, 11, 0.05) 100%);
+          border: 1px dashed rgba(234, 179, 8, 0.38);
+          border-radius: 14px;
+          padding: 12px 14px;
+          margin-bottom: 20px;
+        }
+
+        .qr-card-left {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-width: 0;
+        }
+
+        .qr-chip-icon {
+          width: 42px;
+          height: 42px;
+          border-radius: 10px;
+          background: rgba(234, 179, 8, 0.18);
+          border: 1px solid rgba(234, 179, 8, 0.3);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+
+        .qr-card-copy {
+          display: flex;
+          flex-direction: column;
+          text-align: left;
+          min-width: 0;
+        }
+
+        .qr-card-title {
+          font-size: 0.8rem;
+          font-weight: 700;
+          color: #fef08a;
+          margin-bottom: 2px;
+        }
+
+        .qr-card-desc {
+          font-size: 0.72rem;
+          color: #cbd5e1;
+          line-height: 1.3;
+        }
+
+        .qr-scan-launch-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          background: #eab308;
+          color: #0b0e15;
+          border: none;
+          padding: 9px 13px;
+          border-radius: 10px;
+          font-size: 0.78rem;
+          font-weight: 700;
+          cursor: pointer;
+          white-space: nowrap;
+          flex-shrink: 0;
+          transition: all 0.2s ease;
+          box-shadow: 0 3px 12px rgba(234, 179, 8, 0.3);
+        }
+
+        .qr-scan-launch-btn:hover {
+          background: #facc15;
+          transform: translateY(-1px);
+          box-shadow: 0 5px 16px rgba(234, 179, 8, 0.45);
+        }
+
+        /* Divider */
+        .modern-login-divider {
+          display: flex;
+          align-items: center;
+          text-align: center;
+          margin: 18px 0;
+          color: #64748b;
+          font-size: 0.68rem;
+          font-weight: 700;
+          letter-spacing: 0.7px;
+        }
+
+        .modern-login-divider::before,
+        .modern-login-divider::after {
+          content: '';
+          flex: 1;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .modern-login-divider span {
+          padding: 0 10px;
+        }
+
+        /* Form */
+        .modern-login-form {
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+        }
+
+        .modern-form-field {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          text-align: left;
+        }
+
+        .field-label {
+          font-size: 0.78rem;
+          font-weight: 600;
+          color: #cbd5e1;
+        }
+
+        .field-input-container {
           position: relative;
           display: flex;
           align-items: center;
           width: 100%;
         }
-        .input-prefix-badge {
+
+        .field-icon-badge {
           position: absolute;
           left: 14px;
-          top: 50%;
-          transform: translateY(-50%);
           display: flex;
           align-items: center;
           justify-content: center;
           pointer-events: none;
           z-index: 2;
         }
-        .clean-student-input {
-          width: 100% !important;
-          padding-left: 44px !important;
-          padding-right: 14px !important;
-          height: 48px !important;
-          box-sizing: border-box !important;
-        }
-        .student-qr-helper-banner {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          background: rgba(234, 179, 8, 0.08);
-          border: 1px dashed rgba(234, 179, 8, 0.35);
-          padding: 12px 14px;
+
+        .modern-text-input {
+          width: 100%;
+          box-sizing: border-box;
+          height: 48px;
+          padding-left: 44px;
+          padding-right: 14px;
+          background: rgba(15, 23, 42, 0.75);
+          border: 1px solid rgba(255, 255, 255, 0.12);
           border-radius: 12px;
-          margin-bottom: 18px;
+          color: #ffffff;
+          font-size: 0.92rem;
+          font-weight: 500;
+          outline: none;
+          transition: all 0.2s ease;
         }
-        .qr-banner-icon {
-          background: rgba(234, 179, 8, 0.15);
-          width: 44px;
-          height: 44px;
-          border-radius: 10px;
+
+        .modern-text-input:focus {
+          border-color: #eab308;
+          background: rgba(15, 23, 42, 0.95);
+          box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.2);
+        }
+
+        .field-hint-text {
+          font-size: 0.71rem;
+          color: #64748b;
+          line-height: 1.35;
+        }
+
+        .modern-submit-btn {
           display: flex;
           align-items: center;
           justify-content: center;
-          flex-shrink: 0;
-        }
-        .qr-banner-text {
-          display: flex;
-          flex-direction: column;
-          font-size: 0.78rem;
-          color: #fef08a;
-          line-height: 1.35;
-          text-align: left;
-          flex: 1;
-        }
-        .qr-banner-text strong {
-          color: #facc15;
-          margin-bottom: 2px;
-        }
-        .qr-banner-text span {
-          color: #cbd5e1;
-          font-size: 0.74rem;
-        }
-        .banner-scan-action-btn {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          background: #eab308;
+          gap: 8px;
+          width: 100%;
+          height: 48px;
+          margin-top: 6px;
+          background: linear-gradient(135deg, #eab308 0%, #ca8a04 100%);
           color: #0b0e15;
           border: none;
-          padding: 8px 12px;
-          border-radius: 8px;
+          border-radius: 12px;
+          font-size: 0.92rem;
           font-weight: 700;
-          font-size: 0.78rem;
           cursor: pointer;
-          white-space: nowrap;
-          transition: all 0.2s;
-          flex-shrink: 0;
+          transition: all 0.2s ease;
+          box-shadow: 0 4px 16px rgba(234, 179, 8, 0.35);
         }
-        .banner-scan-action-btn:hover {
-          background: #facc15;
+
+        .modern-submit-btn:hover:not(:disabled) {
+          background: linear-gradient(135deg, #facc15 0%, #eab308 100%);
           transform: translateY(-1px);
+          box-shadow: 0 6px 20px rgba(234, 179, 8, 0.45);
+        }
+
+        .modern-submit-btn:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
+          box-shadow: none;
+        }
+
+        .btn-loading-text {
+          display: inline-block;
+          animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.6; }
+        }
+
+        /* Footer */
+        .modern-login-foot {
+          margin-top: 22px;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+          align-items: center;
+        }
+
+        .security-notice-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 0.72rem;
+          color: #94a3b8;
+        }
+
+        .modern-link-row {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 16px;
+          flex-wrap: wrap;
+          width: 100%;
+        }
+
+        .foot-nav-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          background: none;
+          border: none;
+          color: #94a3b8;
+          font-size: 0.78rem;
+          font-weight: 600;
+          cursor: pointer;
+          padding: 6px 8px;
+          border-radius: 8px;
+          transition: all 0.15s ease;
+        }
+
+        .foot-nav-btn:hover {
+          color: #ffffff;
+          background: rgba(255, 255, 255, 0.05);
+        }
+
+        .foot-nav-btn.staff-portal-btn {
+          color: #cbd5e1;
+        }
+
+        .foot-nav-btn.staff-portal-btn:hover {
+          color: #facc15;
+        }
+
+        /* Mobile Adjustments */
+        @media (max-width: 480px) {
+          .modern-login-box {
+            padding: 24px 18px;
+            border-radius: 16px;
+          }
+
+          .academy-badge-halo {
+            width: 54px;
+            height: 54px;
+            margin-bottom: 10px;
+          }
+
+          .modern-portal-heading {
+            font-size: 1.4rem;
+          }
+
+          .modern-qr-card {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 10px;
+          }
+
+          .qr-scan-launch-btn {
+            justify-content: center;
+            width: 100%;
+          }
+
+          .modern-link-row {
+            flex-direction: column;
+            gap: 8px;
+          }
         }
       `}</style>
     </div>

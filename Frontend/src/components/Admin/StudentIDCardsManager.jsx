@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  CreditCard, Search, Filter, Printer, Download, RefreshCw, ShieldAlert, 
+  CreditCard, Search, Filter, Printer, Download, RefreshCw, ShieldAlert, ShieldCheck,
   CheckCircle, Clock, Eye, AlertCircle, Sparkles, Check, ChevronDown, CheckSquare, Square
 } from 'lucide-react';
 import StudentIDCard from '../StudentPortal/StudentIDCard.jsx';
@@ -118,6 +118,32 @@ export default function StudentIDCardsManager({ apiBaseUrl, sessionToken, userRo
     }
   };
 
+  // Quick Action: Unrevoke / Restore QR Code
+  const handleUnrevokeQR = async (student) => {
+    if (!window.confirm(`Unrevoke and restore ID card / QR code for ${student.name}? The student will be able to log in and mark attendance again.`)) {
+      return;
+    }
+    setActionInProgress(student.id);
+    try {
+      const res = await fetch(`${apiBaseUrl}/admin/students/${student.id}/unrevoke-qr`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionToken}`
+        }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to restore QR code');
+      setSuccessMsg(data.message || `QR code restored for ${student.name}!`);
+      fetchIdCardsList();
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setActionInProgress(null);
+    }
+  };
+
   // Quick Action: Update ID Card Status
   const handleUpdateStatus = async (studentId, newStatus) => {
     try {
@@ -174,7 +200,7 @@ export default function StudentIDCardsManager({ apiBaseUrl, sessionToken, userRo
         <div>
           <h1 className="id-cards-admin-title">
             <CreditCard size={28} color="#eab308" />
-            <span>Student ID Cards & QR Management</span>
+            <span>Student ID Cards</span>
           </h1>
           <p className="id-cards-admin-subtitle">
             Generate, print, preview official MASTERFIT Academy ID cards with unique permanent IDs (MF-XXXX) and instant QR credentials.
@@ -237,7 +263,6 @@ export default function StudentIDCardsManager({ apiBaseUrl, sessionToken, userRo
       {/* Filter Bar */}
       <div className="id-filter-bar">
         <form onSubmit={handleSearchSubmit} className="id-search-form">
-          <Search size={16} color="#94a3b8" />
           <input 
             type="text" 
             placeholder="Search by student name or ID (e.g. Rahul or MF-0001)..." 
@@ -287,7 +312,7 @@ export default function StudentIDCardsManager({ apiBaseUrl, sessionToken, userRo
 
       {/* Main Student ID Table */}
       <div className="id-table-wrapper">
-        <table className="id-cards-table">
+        <table className="id-cards-table responsive-table-cards">
           <thead>
             <tr>
               <th style={{ width: '40px', textAlign: 'center' }}>
@@ -338,11 +363,12 @@ export default function StudentIDCardsManager({ apiBaseUrl, sessionToken, userRo
 
                 return (
                   <tr key={studentKey} className={isSelected ? 'selected-row' : ''}>
-                    <td style={{ textAlign: 'center' }}>
+                    <td data-label="Select" className="id-td-select" style={{ textAlign: 'center' }}>
                       <button 
                         type="button" 
                         onClick={() => toggleSelectStudent(studentKey)} 
                         className="checkbox-toggle-btn"
+                        title="Select for bulk actions"
                       >
                         {isSelected ? (
                           <CheckSquare size={18} color="#eab308" />
@@ -352,7 +378,7 @@ export default function StudentIDCardsManager({ apiBaseUrl, sessionToken, userRo
                       </button>
                     </td>
 
-                    <td>
+                    <td data-label="Student" className="id-td-student">
                       <div className="id-student-cell">
                         {student.photo ? (
                           <img src={student.photo} alt="" className="id-table-avatar" />
@@ -366,24 +392,24 @@ export default function StudentIDCardsManager({ apiBaseUrl, sessionToken, userRo
                       </div>
                     </td>
 
-                    <td>
+                    <td data-label="Student ID" className="id-td-id">
                       <span className="uid-table-badge">
                         {student.uniqueStudentId || `MF-${String(student.id).padStart(4, '0')}`}
                       </span>
                     </td>
 
-                    <td>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <span style={{ color: '#f8fafc', fontWeight: 600, fontSize: '0.82rem' }}>{student.branch}</span>
-                        <span style={{ color: '#94a3b8', fontSize: '0.74rem' }}>{student.batch}</span>
+                    <td data-label="Branch & Batch" className="id-td-batch">
+                      <div className="id-batch-box">
+                        <span className="id-batch-branch">{student.branch}</span>
+                        <span className="id-batch-sub">{student.batch}</span>
                       </div>
                     </td>
 
-                    <td>
+                    <td data-label="Belt Rank" className="id-td-belt">
                       <span className="belt-rank-tag">{student.belt || 'White'}</span>
                     </td>
 
-                    <td>
+                    <td data-label="QR Status" className="id-td-qr">
                       {student.qrStatus === 'Revoked' ? (
                         <span className="qr-status-pill revoked">Revoked</span>
                       ) : (
@@ -391,9 +417,7 @@ export default function StudentIDCardsManager({ apiBaseUrl, sessionToken, userRo
                       )}
                     </td>
 
-
-
-                    <td style={{ textAlign: 'center' }}>
+                    <td data-label="Actions" className="id-td-actions" style={{ textAlign: 'center' }}>
                       <div className="id-action-buttons">
                         <button 
                           className="action-icon-btn preview"
@@ -401,6 +425,7 @@ export default function StudentIDCardsManager({ apiBaseUrl, sessionToken, userRo
                           title="Preview ID Card"
                         >
                           <Eye size={16} />
+                          <span className="mobile-action-label">Preview</span>
                         </button>
                         <button 
                           className="action-icon-btn print"
@@ -408,9 +433,20 @@ export default function StudentIDCardsManager({ apiBaseUrl, sessionToken, userRo
                           title="Print / Download PDF"
                         >
                           <Printer size={16} />
+                          <span className="mobile-action-label">Print Card</span>
                         </button>
 
-                        {student.qrStatus !== 'Revoked' && (
+                        {student.qrStatus === 'Revoked' ? (
+                          <button 
+                            className="action-icon-btn unrevoke"
+                            onClick={() => handleUnrevokeQR(student)}
+                            disabled={actionInProgress === student.id}
+                            title="Unrevoke / Restore Card & QR Code"
+                          >
+                            <ShieldCheck size={15} />
+                            <span className="mobile-action-label">Unrevoke</span>
+                          </button>
+                        ) : (
                           <button 
                             className="action-icon-btn revoke"
                             onClick={() => handleRevokeQR(student)}
@@ -418,6 +454,7 @@ export default function StudentIDCardsManager({ apiBaseUrl, sessionToken, userRo
                             title="Revoke QR Code"
                           >
                             <ShieldAlert size={15} />
+                            <span className="mobile-action-label">Revoke</span>
                           </button>
                         )}
                       </div>
@@ -554,17 +591,12 @@ export default function StudentIDCardsManager({ apiBaseUrl, sessionToken, userRo
           flex: 1;
           min-width: 260px;
         }
-        .id-search-form svg {
-          position: absolute;
-          left: 12px;
-          pointer-events: none;
-        }
         .id-search-form input {
           width: 100%;
           background: #090c12;
           border: 1px solid #232b3e;
           border-radius: 8px;
-          padding: 8px 36px 8px 36px;
+          padding: 9px 36px 9px 14px;
           color: #f8fafc;
           font-size: 0.85rem;
           outline: none;
@@ -756,6 +788,17 @@ export default function StudentIDCardsManager({ apiBaseUrl, sessionToken, userRo
         .action-icon-btn.print:hover { background: #eab308; color: #0b0e15; }
         .action-icon-btn.regen:hover { background: #10b981; color: #fff; }
         .action-icon-btn.revoke:hover { background: #ef4444; color: #fff; }
+        .action-icon-btn.unrevoke {
+          background: rgba(34, 197, 94, 0.15);
+          color: #4ade80;
+          border-color: rgba(34, 197, 94, 0.35);
+        }
+        .action-icon-btn.unrevoke:hover {
+          background: #22c55e;
+          color: #0b0e14;
+          border-color: #22c55e;
+          box-shadow: 0 0 10px rgba(34, 197, 94, 0.35);
+        }
 
         .admin-id-alert {
           display: flex;
@@ -788,6 +831,220 @@ export default function StudentIDCardsManager({ apiBaseUrl, sessionToken, userRo
           display: flex;
           flex-wrap: wrap;
           justify-content: center;
+        }
+        .mobile-action-label {
+          display: none;
+        }
+        .id-batch-box {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .id-batch-branch {
+          color: #f8fafc;
+          font-weight: 600;
+          font-size: 0.82rem;
+        }
+        .id-batch-sub {
+          color: #94a3b8;
+          font-size: 0.74rem;
+        }
+
+        /* -------------------------------------------------------------
+           RESPONSIVE MEDIA QUERIES (Mobile, Tablet, Desktop)
+        ------------------------------------------------------------- */
+        @media (max-width: 900px) {
+          .id-cards-admin-container {
+            padding: 16px 12px;
+          }
+          .id-cards-admin-header {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 12px;
+            margin-bottom: 16px;
+          }
+          .id-cards-admin-title {
+            font-size: 1.35rem;
+          }
+          .id-cards-header-actions {
+            width: 100%;
+            display: flex;
+            gap: 8px;
+          }
+          .id-cards-header-actions .id-btn {
+            flex: 1;
+            justify-content: center;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .id-filter-bar {
+            flex-direction: column;
+            align-items: stretch;
+            padding: 12px;
+            gap: 10px;
+          }
+          .id-search-form {
+            width: 100%;
+            min-width: 0;
+          }
+          .id-search-form input {
+            padding: 9px 34px 9px 12px;
+            font-size: 0.82rem;
+          }
+          .id-filters-right {
+            width: 100%;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+          }
+          .id-select-wrap {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 4px;
+          }
+          .id-select-wrap select {
+            width: 100%;
+            padding: 8px 10px;
+            font-size: 0.82rem;
+          }
+
+          /* Mobile Cards Transformation for Table */
+          .id-table-wrapper {
+            background: transparent;
+            border: none;
+            overflow-x: visible;
+          }
+          .id-cards-table.responsive-table-cards,
+          .id-cards-table.responsive-table-cards tbody {
+            display: block;
+            width: 100%;
+          }
+          .id-cards-table.responsive-table-cards thead {
+            display: none !important;
+          }
+          .id-cards-table.responsive-table-cards tr {
+            display: flex !important;
+            flex-direction: column !important;
+            background: #11141d;
+            border: 1px solid #1f2738;
+            border-radius: 14px;
+            padding: 14px 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+            gap: 8px;
+            box-sizing: border-box;
+            width: 100%;
+          }
+          .id-cards-table.responsive-table-cards tr.selected-row {
+            border-color: rgba(234, 179, 8, 0.5);
+            background: rgba(234, 179, 8, 0.05);
+          }
+          .id-cards-table.responsive-table-cards td {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            padding: 6px 0 !important;
+            border: none !important;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+            font-size: 0.86rem !important;
+            width: 100% !important;
+            box-sizing: border-box !important;
+            text-align: right;
+          }
+          .id-cards-table.responsive-table-cards td:before {
+            content: attr(data-label);
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            text-align: left;
+            flex-shrink: 0;
+          }
+          .id-cards-table.responsive-table-cards td[data-label="Select"] {
+            border-bottom: none !important;
+            padding: 0 0 4px 0 !important;
+            justify-content: flex-start !important;
+            align-self: flex-start;
+          }
+          .id-cards-table.responsive-table-cards td[data-label="Select"]:before {
+            display: none !important;
+          }
+          .id-cards-table.responsive-table-cards td[data-label="Student"] {
+            padding-top: 0 !important;
+            padding-bottom: 10px !important;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+            justify-content: flex-start !important;
+          }
+          .id-cards-table.responsive-table-cards td[data-label="Student"]:before {
+            display: none !important;
+          }
+          .id-cards-table.responsive-table-cards td[data-label="Actions"] {
+            border-bottom: none !important;
+            padding-top: 10px !important;
+            margin-top: 4px !important;
+            justify-content: center !important;
+          }
+          .id-cards-table.responsive-table-cards td[data-label="Actions"]:before {
+            display: none !important;
+          }
+          .id-cards-table.responsive-table-cards .id-action-buttons {
+            width: 100%;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+          }
+          .id-cards-table.responsive-table-cards .action-icon-btn {
+            width: 100%;
+            height: 38px;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            gap: 6px;
+            padding: 0 10px;
+          }
+          .mobile-action-label {
+            display: inline !important;
+            font-weight: 600;
+          }
+          .id-batch-box {
+            align-items: flex-end;
+          }
+          .id-card-print-modal {
+            width: 96% !important;
+            padding: 12px !important;
+            max-height: 94vh !important;
+          }
+          .bulk-card-wrapper {
+            margin: 8px 0 !important;
+          }
+        }
+
+        @media (max-width: 500px) {
+          .id-metrics-grid {
+            grid-template-columns: 1fr 1fr !important;
+            gap: 10px;
+            margin-bottom: 16px;
+          }
+          .id-metric-card {
+            padding: 10px 12px;
+            gap: 10px;
+          }
+          .metric-icon {
+            width: 36px;
+            height: 36px;
+          }
+          .metric-val {
+            font-size: 1.25rem;
+          }
+          .metric-lbl {
+            font-size: 0.65rem;
+          }
+          .id-cards-admin-title {
+            font-size: 1.15rem;
+          }
         }
       `}</style>
     </div>

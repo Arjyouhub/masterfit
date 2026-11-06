@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
   Printer, Download, ShieldCheck, X, User, Phone, MapPin, 
@@ -8,6 +8,31 @@ import {
 export default function StudentIDCard({ student, onClose, isModal = true }) {
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const cardRef = useRef(null);
+  const displayZoneRef = useRef(null);
+  const [scale, setScale] = useState(1);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (!displayZoneRef.current) return;
+      const parent = displayZoneRef.current.parentElement;
+      const containerWidth = parent ? parent.clientWidth : window.innerWidth;
+      const targetWidth = 530;
+      const availableWidth = Math.min(window.innerWidth - 20, (containerWidth > 0 ? containerWidth : window.innerWidth) - 10);
+      if (availableWidth < targetWidth && availableWidth > 50) {
+        setScale(Math.min(1, Math.max(0.48, availableWidth / targetWidth)));
+      } else {
+        setScale(1);
+      }
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    const timer = setTimeout(handleResize, 100);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearTimeout(timer);
+    };
+  }, []);
 
   if (!student) return null;
 
@@ -135,7 +160,7 @@ export default function StudentIDCard({ student, onClose, isModal = true }) {
   );
 
   const CardFront = () => (
-    <div className="mf-official-card">
+    <div id="printable-id-card" ref={cardRef} className="mf-official-card">
       {/* 1. TOP HEADER (Black with red geometric cuts & martial artist) */}
       <div className="mf-card-top-header">
         {/* Left: MF Logo */}
@@ -339,8 +364,29 @@ export default function StudentIDCard({ student, onClose, isModal = true }) {
             </button>
           </div>
         </div>
-        <div id="printable-id-card" className="id-cards-display-zone" ref={cardRef}>
-          <CardFront />
+        <div 
+          ref={displayZoneRef} 
+          className="id-cards-display-zone" 
+          style={{ 
+            height: scale < 1 ? `${Math.ceil(335 * scale)}px` : 'auto',
+            width: '100%',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'flex-start',
+            overflow: 'hidden'
+          }}
+        >
+          <div 
+            className="id-card-scaler" 
+            style={{ 
+              transform: scale < 1 ? `scale(${scale})` : 'none',
+              transformOrigin: 'top center',
+              width: '530px',
+              height: '335px'
+            }}
+          >
+            <CardFront />
+          </div>
         </div>
 
         {/* Inline Scoped Styles */}
@@ -380,8 +426,29 @@ export default function StudentIDCard({ student, onClose, isModal = true }) {
         </div>
 
         {/* Printable Card Area (CR80 Landscape) */}
-        <div id="printable-id-card" className="id-cards-display-zone" ref={cardRef}>
-          <CardFront />
+        <div 
+          ref={displayZoneRef} 
+          className="id-cards-display-zone" 
+          style={{ 
+            height: scale < 1 ? `${Math.ceil(335 * scale)}px` : 'auto',
+            width: '100%',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'flex-start',
+            overflow: 'hidden'
+          }}
+        >
+          <div 
+            className="id-card-scaler" 
+            style={{ 
+              transform: scale < 1 ? `scale(${scale})` : 'none',
+              transformOrigin: 'top center',
+              width: '530px',
+              height: '335px'
+            }}
+          >
+            <CardFront />
+          </div>
         </div>
       </div>
 
@@ -872,6 +939,62 @@ const cardStyles = `
     letter-spacing: 0.5px;
   }
 
+  @media (max-width: 600px) {
+    .id-card-modal-backdrop {
+      padding: 8px;
+    }
+    .id-card-modal-wrapper {
+      padding: 16px 10px;
+      border-radius: 14px;
+      max-height: 96vh;
+      width: 100%;
+    }
+    .id-card-toolbar {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+    }
+    .toolbar-left {
+      width: 100%;
+      justify-content: space-between;
+    }
+    .toolbar-title {
+      font-size: 0.95rem;
+    }
+    .toolbar-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      width: 100%;
+      gap: 8px;
+    }
+    .toolbar-actions .id-btn {
+      width: 100%;
+      justify-content: center;
+      padding: 8px 6px;
+      font-size: 0.78rem;
+    }
+    .id-card-inline-toolbar {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      width: 100%;
+    }
+    .id-card-inline-toolbar .toolbar-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      width: 100%;
+      gap: 8px;
+    }
+    .id-card-inline-toolbar .id-btn {
+      width: 100%;
+      justify-content: center;
+      padding: 8px 10px;
+      font-size: 0.8rem;
+    }
+  }
+
   /* PRINT STYLES */
   @media print {
     body * {
@@ -891,11 +1014,19 @@ const cardStyles = `
       background: #fff !important;
       padding: 10px !important;
     }
+    .id-card-scaler,
+    .id-cards-display-zone {
+      width: 530px !important;
+      height: 335px !important;
+      transform: none !important;
+      overflow: visible !important;
+    }
     .mf-official-card {
       box-shadow: none !important;
       page-break-inside: avoid !important;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
+      transform: none !important;
     }
     .no-print {
       display: none !important;
