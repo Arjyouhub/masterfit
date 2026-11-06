@@ -385,7 +385,7 @@ _Masterfit Academy Student Portal Verification_ 🙏`;
             </div>
             <div className="user-info">
               <span className="user-name">{student.name || 'Student'}</span>
-              <span className="user-id">ID: #{student.id}</span>
+              <span className="user-id">ID: {student.uniqueStudentId || `#${student.id}`}</span>
             </div>
           </div>
           <button onClick={onLogout} className="logout-btn" title="Sign Out">
@@ -1346,6 +1346,13 @@ _Masterfit Academy Student Portal Verification_ 🙏`;
         >
           <User size={20} />
           <span>Profile</span>
+        </button>
+        <button
+          className={`b-nav-item ${currentTab === 'id-card' ? 'active' : ''}`}
+          onClick={() => setCurrentTab('id-card')}
+        >
+          <ShieldCheck size={20} />
+          <span>ID Card</span>
         </button>
       </nav>
 
