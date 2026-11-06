@@ -1,27 +1,24 @@
 import React, { useState } from 'react';
-import { ShieldCheck, ArrowRight, ArrowLeft, AlertCircle, Sparkles, CheckCircle2, QrCode, CreditCard, Lock, Camera, Smartphone, Flame } from 'lucide-react';
+import { ShieldCheck, ArrowRight, ArrowLeft, AlertCircle, Sparkles, CheckCircle2, QrCode, CreditCard, Lock, Camera, Flame } from 'lucide-react';
 import QRCameraScanner from './QRCameraScanner.jsx';
 
 export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite, onBackToWebsite, onGoToStaffLogin }) {
   const handleGoBack = onGoToWebsite || onBackToWebsite;
-  const [identifierInput, setIdentifierInput] = useState('');
+  const [studentIdInput, setStudentIdInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [showCameraScanner, setShowCameraScanner] = useState(false);
 
-  // Check if input looks like a phone number
-  const isPhoneLike = /^[0-9+() -]{5,}$/.test(identifierInput.trim());
-
-  // Direct Student ID or Mobile Login Submit
+  // Direct Student ID Login Submit (Zero mobile number or MPIN required)
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setSuccessMsg('');
 
-    const cleanInput = String(identifierInput).trim();
+    const cleanInput = String(studentIdInput).trim().toUpperCase();
     if (!cleanInput) {
-      setError('Please enter your Unique Student ID (e.g. MF-0001) or Registered Mobile Number');
+      setError('Please enter your Unique Student ID (e.g. MF-0001 or 1042)');
       return;
     }
 
@@ -32,14 +29,13 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           studentId: cleanInput,
-          identifier: cleanInput,
-          mobileNumber: cleanInput
+          identifier: cleanInput
         })
       });
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Login failed. Please verify your Student ID or Mobile Number.');
+        throw new Error(data.error || 'Login failed. Please check your Student ID.');
       }
 
       if (data.token) {
@@ -50,7 +46,7 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
         document.cookie = `umai_student_token=${encodeURIComponent(data.token)}; path=/; max-age=604800;`;
       }
 
-      setSuccessMsg(`Welcome, ${data.student?.name || 'Student'}! Opening your portal...`);
+      setSuccessMsg(`Welcome, ${data.student?.name || 'Student'}! Opening portal...`);
       setTimeout(() => {
         onLoginSuccess(data);
       }, 500);
@@ -73,7 +69,7 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
       let targetIdOrPayload = decodedData;
       if (typeof decodedData === 'string' && decodedData.includes('/student/qr-login/')) {
         const parts = decodedData.split('/student/qr-login/');
-        targetIdOrPayload = parts[1] ? parts[1].split('/')[0].split('?')[0] : decodedData;
+        targetIdOrPayload = parts[1] ? decodeURIComponent(parts[1].split('/')[0].split('?')[0]).trim() : decodedData;
       }
 
       const res = await fetch(`${apiBaseUrl}/student/qr-login`, {
@@ -148,8 +144,8 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
               <QrCode size={24} color="#eab308" />
             </div>
             <div className="qr-card-copy">
-              <span className="qr-card-title">Have a MASTERFIT ID Card?</span>
-              <span className="qr-card-desc">Scan your card QR code with your camera for instant zero-typing sign in</span>
+              <span className="qr-card-title">Have an ID Card?</span>
+              <span className="qr-card-desc">Scan card QR code with your camera for instant sign in</span>
             </div>
           </div>
           <button 
@@ -164,43 +160,39 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
         </div>
 
         <div className="modern-login-divider">
-          <span>OR SIGN IN WITH ID / MOBILE</span>
+          <span>OR SIGN IN WITH STUDENT ID</span>
         </div>
 
-        {/* Unified Smart Input Form */}
+        {/* Pure Student ID Form (Zero Mobile Number Required) */}
         <form onSubmit={handleLoginSubmit} className="modern-login-form">
           <div className="modern-form-field">
-            <label className="field-label">Student ID or Registered Mobile</label>
+            <label className="field-label">Unique Student ID</label>
             <div className="field-input-container">
               <div className="field-icon-badge">
-                {isPhoneLike ? (
-                  <Smartphone size={18} color="#eab308" />
-                ) : (
-                  <CreditCard size={18} color="#eab308" />
-                )}
+                <CreditCard size={18} color="#eab308" />
               </div>
               <input
                 type="text"
-                placeholder="e.g. MF-0001, 1042 or 9876543210"
-                value={identifierInput}
+                placeholder="Enter Student ID (e.g. MF-0001 or 1042)"
+                value={studentIdInput}
                 onChange={(e) => {
-                  setIdentifierInput(e.target.value);
+                  setStudentIdInput(e.target.value);
                   setError('');
                 }}
                 className="modern-text-input"
                 required
                 autoFocus
-                autoComplete="username"
+                autoComplete="off"
               />
             </div>
             <span className="field-hint-text">
-              Accepts your unique ID (MF-XXXX), numeric ID, or registered student / guardian mobile number.
+              Direct instant access using your permanent MASTERFIT Student ID (e.g. MF-XXXX) or numeric ID.
             </span>
           </div>
 
           <button
             type="submit"
-            disabled={loading || !identifierInput.trim()}
+            disabled={loading || !studentIdInput.trim()}
             className="modern-submit-btn"
           >
             {loading ? (
@@ -218,7 +210,7 @@ export default function StudentLogin({ apiBaseUrl, onLoginSuccess, onGoToWebsite
         <div className="modern-login-foot">
           <div className="security-notice-badge">
             <Sparkles size={13} color="#eab308" />
-            <span>Instant & Secure Student Access &bull; Masterfit Academy</span>
+            <span>Zero Password & Zero OTP Required &bull; Masterfit Academy</span>
           </div>
 
           <div className="modern-link-row">

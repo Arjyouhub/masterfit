@@ -7582,12 +7582,14 @@ app.post('/api/student/qr-login', async (req, res) => {
     }
 
     const cleanSid = String(targetStudentId).trim().toUpperCase();
+    const formattedHyphenSid = cleanSid.replace(/^MF-?([A-Z]{3})-?(\d+)$/i, 'MF-$1-$2');
     const cleanNumeric = Number(cleanSid.replace(/[^0-9]/g, ''));
 
     const studentDoc = await Student.findOne({
       $or: [
         { uniqueStudentId: cleanSid },
-        { id: cleanNumeric }
+        { uniqueStudentId: formattedHyphenSid },
+        ...(cleanNumeric && cleanNumeric < 10000000 ? [{ id: cleanNumeric }, { admissionNumber: String(cleanNumeric) }] : [])
       ]
     });
 
@@ -7597,6 +7599,10 @@ app.post('/api/student/qr-login', async (req, res) => {
 
     if (studentDoc.status && String(studentDoc.status).toLowerCase() !== 'active') {
       return res.status(403).json({ error: `Student account is currently ${studentDoc.status}. Please contact academy administration.` });
+    }
+
+    if (studentDoc.qrStatus === 'Revoked') {
+      return res.status(403).json({ error: 'This ID card QR code has been revoked. Please contact academy administration.' });
     }
 
     let auth = await StudentAuth.findOne({

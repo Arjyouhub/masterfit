@@ -1194,16 +1194,34 @@ _Masterfit Academy Student Portal Verification_ 🙏`;
                       </div>
                     </div>
 
-                    {/* Registered Mobile / Login ID */}
+                    {/* Permanent Student ID Tile */}
+                    <div className="modern-detail-tile">
+                      <div className="tile-icon-wrap user">
+                        <CreditCard size={18} />
+                      </div>
+                      <div className="tile-info">
+                        <span className="tile-label">Permanent Student ID</span>
+                        <span className="tile-value">{student?.uniqueStudentId || `#${student?.id}`}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="tile-copy-btn"
+                        onClick={() => handleCopy(student?.uniqueStudentId || student?.id, 'sid')}
+                        title="Copy Student ID"
+                      >
+                        {copiedField === 'sid' ? <Check size={13} color="#4ade80" /> : <Copy size={13} />}
+                      </button>
+                    </div>
+
+                    {/* Contact Details (Only if real phone exists) */}
                     {(() => {
                       const rawMob = student?.phone || student?.mobileNumber || '';
                       const cleanMob = rawMob && rawMob !== '0000000000' && rawMob !== '—' && rawMob !== 'N/A' ? String(rawMob).trim() : '';
                       const rawPar = student?.parentPhone || '';
                       const cleanPar = rawPar && rawPar !== '0000000000' && rawPar !== '—' && rawPar !== 'N/A' ? String(rawPar).trim() : '';
                       const activePhone = cleanMob || cleanPar;
-                      const displayPhone = activePhone 
-                        ? (activePhone.startsWith('+') ? activePhone : `+91 ${activePhone.replace(/^91/, '')}`) 
-                        : 'Not Registered';
+                      if (!activePhone) return null;
+                      const displayPhone = activePhone.startsWith('+') ? activePhone : `+91 ${activePhone.replace(/^91/, '')}`;
 
                       return (
                         <>
@@ -1213,20 +1231,18 @@ _Masterfit Academy Student Portal Verification_ 🙏`;
                             </div>
                             <div className="tile-info">
                               <div className="tile-label-row">
-                                <span className="tile-label">Registered Phone</span>
+                                <span className="tile-label">Contact Number</span>
                               </div>
                               <span className="tile-value">{displayPhone}</span>
                             </div>
-                            {activePhone && (
-                              <button
-                                type="button"
-                                className="tile-copy-btn"
-                                onClick={() => handleCopy(activePhone, 'mobile')}
-                                title="Copy Phone Number"
-                              >
-                                {copiedField === 'mobile' ? <Check size={13} color="#4ade80" /> : <Copy size={13} />}
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              className="tile-copy-btn"
+                              onClick={() => handleCopy(activePhone, 'mobile')}
+                              title="Copy Phone Number"
+                            >
+                              {copiedField === 'mobile' ? <Check size={13} color="#4ade80" /> : <Copy size={13} />}
+                            </button>
                           </div>
 
                           {/* Parent / Guardian Phone */}
